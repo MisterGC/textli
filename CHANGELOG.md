@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Initial extraction from grafli.** The zen Markdown editor that grew inside
   [grafli](https://github.com/MisterGC/grafli) becomes its own package:
-  - Full-window, iA Writer-style writing surface with vim keybindings
+  - Full-window, distraction-free writing surface with vim keybindings
     (NORMAL/INSERT/VISUAL), section focus (`⌘.`), word-jump overlay (`⌘J`),
     adjustable font size and content-column width (both persisted).
   - Rendered reading view (`⌘R`) with vim caret navigation, headings

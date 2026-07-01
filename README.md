@@ -2,9 +2,9 @@
 
 A lightweight text editor with focused writing and reading in mind.
 
-textli is a full-window, [iA Writer](https://ia.net/writer)-inspired Markdown
-editor: one warm paper-toned column of text, vim keybindings, and nothing else
-on screen. `⌘R` flips the source into a rendered **reading view** made for
+textli is a full-window, distraction-free Markdown editor: one warm
+paper-toned column of text, vim keybindings, and nothing else on screen.
+`⌘R` flips the source into a rendered **reading view** made for
 proof-reading and review — navigate with vim motions, leave inline
 **comments**, and propose **suggestions** (track changes) that the author
 accepts or rejects with a keystroke. All annotations are stored inline as

@@ -9,7 +9,7 @@ proof-reading and review.
 
 ## What it does
 
-- **Focused writing** — an iA Writer-inspired, full-window surface with vim
+- **Focused writing** — a distraction-free, full-window surface with vim
   keybindings (NORMAL / INSERT / VISUAL), section focus that dims everything
   but the paragraph you're in, and an Easymotion-style word-jump overlay.
 - **A real reading view** — the rendered document, navigated with the same

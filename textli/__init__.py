@@ -1,6 +1,6 @@
 """textli — a lightweight text editor with focused writing and reading in mind.
 
-A full-window, iA Writer-inspired Markdown editor with vim keybindings, a
+A full-window, distraction-free Markdown editor with vim keybindings, a
 rendered reading view, and inline review (CriticMarkup comments and
 track-changes suggestions). Run it standalone via the ``textli`` command, or
 embed :class:`ZenMarkdownEditor` / :class:`InlineVimEditor` in any PySide6

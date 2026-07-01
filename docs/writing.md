@@ -23,7 +23,7 @@ discards pending changes.
 ## Focus
 
 - `⌘.` toggles **section focus**: everything but the paragraph you're
-  editing dims, iA Writer style.
+  editing dims, so the sentence at hand is all that speaks.
 - `⌘↵` toggles **full-window width** when you want the column to use the
   whole window.
 

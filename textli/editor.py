@@ -1,4 +1,4 @@
-"""Zen markdown editor — full-window iA Writer-inspired editing experience."""
+"""Zen markdown editor — a full-window, distraction-free editing experience."""
 
 from __future__ import annotations
 
@@ -187,7 +187,7 @@ def editor_help_html() -> str:
     return f"""
     <div style='color:{ink}'>
     <p style='color:{accent};font-weight:bold;font-size:15px'>textli — the zen Markdown editor</p>
-    <p>A focused, iA&nbsp;Writer-style editor. It opens ready to type (vim NORMAL
+    <p>A focused, distraction-free editor. It opens ready to type (vim NORMAL
     mode); <b>⌘R</b> flips to a rendered <b>reading view</b> for proof-reading,
     commenting, and suggesting changes. <b>F1</b> shows this help.</p>
 
