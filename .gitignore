@@ -1,0 +1,23 @@
+__pycache__/
+*.egg-info/
+uv.lock
+.venv/
+
+# macOS metadata
+.DS_Store
+
+# build / dist
+/build/
+/dist/
+
+# hatch-vcs auto-generated version file
+textli/_version.py
+
+# mkdocs build output
+/site/
+
+# local agent settings / worktrees
+.claude/
+
+# personal scratch
+mgc/

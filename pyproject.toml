@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling>=1.21", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "textli"
+description = "A lightweight text editor with focused writing and reading in mind"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = ["PySide6>=6.7"]
+keywords = ["markdown", "editor", "vim", "writing", "criticmarkup", "zen"]
+authors = [
+    { name = "Serein Pfeiffer", email = "s.pfeiffer@klebert-engineering.de" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Editors",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-qt>=4"]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocs-glightbox>=0.4",
+    "pymdown-extensions>=10",
+]
+
+[project.scripts]
+textli = "textli.app:main"
+
+[project.urls]
+Documentation = "https://mistergc.github.io/textli/"
+Repository = "https://github.com/MisterGC/textli"
+Issues = "https://github.com/MisterGC/textli/issues"
+Changelog = "https://github.com/MisterGC/textli/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "textli/_version.py"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+
+[tool.hatch.build.targets.wheel]
+packages = ["textli"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/textli",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,76 @@
+site_name: textli
+site_description: A lightweight text editor with focused writing and reading in mind
+site_url: https://mistergc.github.io/textli/
+repo_url: https://github.com/MisterGC/textli
+repo_name: MisterGC/textli
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.keys
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/MisterGC/textli
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/textli/
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Writing: writing.md
+  - Reading & review: reading.md
+  - Keybindings: keybindings.md
+  - Embedding: embedding.md
+  - Contributing: contributing.md
