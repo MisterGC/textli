@@ -18,8 +18,12 @@ standalone or embeddable in any PySide6 application.
 ## Install
 
 ```sh
-uv tool install textli      # or: pipx install textli / pip install textli
+uv tool install textli-editor   # or: pipx / pip install textli-editor
 ```
+
+The package publishes as `textli-editor` (plain `textli` is too close to an
+existing PyPI name), but everywhere else it's just textli: the command is
+`textli`, the import is `import textli`.
 
 ## Use
 

@@ -64,7 +64,7 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/MisterGC/textli
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/textli/
+      link: https://pypi.org/project/textli-editor/
 
 nav:
   - Home: index.md

@@ -6,22 +6,27 @@ which is installed automatically.
 === "uv"
 
     ```sh
-    uv tool install textli
+    uv tool install textli-editor
     ```
 
 === "pipx"
 
     ```sh
-    pipx install textli
+    pipx install textli-editor
     ```
 
 === "pip"
 
     ```sh
-    pip install textli
+    pip install textli-editor
     ```
 
 Python 3.12 or newer is required.
+
+!!! note "textli-editor?"
+    The distribution publishes as `textli-editor` — plain `textli` is too
+    close to an existing PyPI name. Everywhere else it's just **textli**:
+    the command is `textli`, the import is `import textli`.
 
 ## The CLI
 

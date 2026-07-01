@@ -29,7 +29,7 @@ proof-reading and review.
 ## Quick start
 
 ```sh
-uv tool install textli
+uv tool install textli-editor
 textli notes.md
 ```
 

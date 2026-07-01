@@ -3,7 +3,7 @@ requires = ["hatchling>=1.21", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
-name = "textli"
+name = "textli-editor"
 description = "A lightweight text editor with focused writing and reading in mind"
 readme = "README.md"
 license = "MIT"
