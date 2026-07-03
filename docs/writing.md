@@ -39,11 +39,12 @@ Both preferences persist across sessions:
 - `⌘J` opens the **word-jump overlay**: every visible word gets a two-key
   label; type the label to jump the caret there (Easymotion style).
 - `/` (NORMAL mode) opens **search**: a live, ranked list of the lines your
-  query matches — exact matches first, fuzzy ones by strength (weak
-  scattered matches don't clutter the list at all). Move the selection to
-  preview a hit, ++enter++ to jump, ++esc++ to stay where you were.
-  Afterwards `n` / `N` step through the hits *in document order* (wrapping),
-  with all hits highlighted. The same search works in the
+  query matches — exact phrases first, then lines where each query word
+  fuzzy-matches *inside a single word* (`vrfy` finds *verify*; fuzzy never
+  assembles a match from stray characters across the line). Move the
+  selection to preview a hit, ++enter++ to jump, ++esc++ to stay where you
+  were. Afterwards `n` / `N` step through the hits *in document order*
+  (wrapping), with every match highlighted. The same search works in the
   [reading view](reading.md).
 - `⌘R` flips to the [reading view](reading.md) for proof-reading and review.
 - `⌘P` prints.

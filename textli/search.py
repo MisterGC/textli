@@ -1,74 +1,95 @@
-"""In-document search for the zen editor — fuzzy, line-based, document order.
+"""In-document search for the zen editor — fuzzy, line-based, word-bounded.
 
-The same matching feel as the ``go`` open-file dialog (the shared scorer from
-:mod:`textli.openfile`), applied per *line*: a hit is a line whose text the
-query fuzzy-matches. Hits are kept in document order — the list doubles as an
-outline of where matches sit, and ``n`` / ``N`` need a stable spatial
-sequence — not in score order.
+A line is a hit in one of two ways, ranked in that order:
 
-Pure Python — no Qt — so ranking and navigation are cheap to unit-test and
-independent of the overlay that displays them.
+* **Phrase** — the query appears contiguously in the line (case-insensitive),
+  spaces included. The strongest signal, always ranked above word matches.
+* **Words** — every whitespace-separated query token fuzzy-matches *inside a
+  single word* of the line (``vrfy`` finds ``verify``). Fuzzy never crosses a
+  word boundary, so a query can't be assembled from one stray character per
+  word across the line — that's noise, not a match.
+
+The hit list ranks by score (see :func:`rank`); ``n``/``N`` navigation stays
+spatial over the document-ordered hits. Pure Python — no Qt — so matching and
+navigation are cheap to unit-test and independent of the overlay that
+displays them.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from textli.openfile import fuzzy_score
 
+_RE_WORD = re.compile(r"\S+")
 
-# A hit must earn at least this much score per query character. A scattered
-# one-char-here-one-char-there subsequence ("right" "matching" `soRts dynamIc
-# … paGes alpHabeTically`) scores ≈1 per char; genuine matches — substrings,
-# word starts, consecutive runs — score ≥3. Below the bar it's noise, not a
-# hit.
-MIN_SCORE_PER_CHAR = 3.0
+# Word-level scores are damped so that a phrase hit — the exact thing the
+# reader typed — always outranks a line that merely contains each query word.
+_WORD_MATCH_DAMPEN = 0.6
 
 
 @dataclass(frozen=True)
 class Hit:
     """One matching line: absolute character offsets into the searched text
-    (``end`` excludes the newline), the line itself for preview, and its
-    match score (for ranking the list)."""
+    (``end`` excludes the newline), the line itself for preview, the match
+    score (for ranking), and the emphasis ``spans`` (line-relative ranges of
+    the phrase or of each matched word)."""
     line_no: int
     start: int
     end: int
     text: str
     score: float
+    spans: tuple[tuple[int, int], ...]
+
+
+def line_match(query: str,
+               line: str) -> tuple[float, tuple[tuple[int, int], ...]] | None:
+    """Score ``line`` against ``query`` — ``(score, spans)`` or ``None``.
+    Phrase hits first; else every query token must match within one word."""
+    q = query.strip()
+    if not q:
+        return None
+    i = line.lower().find(q.lower())
+    if i >= 0:                              # phrase — contiguous substring
+        return fuzzy_score(q, line), ((i, i + len(q)),)
+    total = 0.0
+    spans: set[tuple[int, int]] = set()
+    for token in q.split():
+        best = None
+        for m in _RE_WORD.finditer(line):
+            s = fuzzy_score(token, m.group())
+            if s is not None and (best is None or s > best[0]):
+                best = (s, m.start(), m.end())
+        if best is None:
+            return None                     # a token no word can carry
+        total += best[0]
+        spans.add((best[1], best[2]))
+    score = (total / len(q.split())) * _WORD_MATCH_DAMPEN
+    return score, tuple(sorted(spans))
 
 
 def find_hits(text: str, query: str) -> list[Hit]:
-    """Every line of ``text`` the query matches *well enough* (see
-    :data:`MIN_SCORE_PER_CHAR`), in document order — ``n``/``N`` walk this
-    list spatially. An empty query matches nothing."""
-    q = query.strip()
-    if not q:
+    """Every matching line, in document order — ``n``/``N`` walk this list
+    spatially. An empty query matches nothing."""
+    if not query.strip():
         return []
-    bar = MIN_SCORE_PER_CHAR * len(q)
     hits = []
     pos = 0
     for i, line in enumerate(text.split("\n")):
         if line.strip():
-            score = fuzzy_score(query, line)
-            if score is not None and score >= bar:
-                hits.append(Hit(i, pos, pos + len(line), line, score))
+            m = line_match(query, line)
+            if m is not None:
+                hits.append(Hit(i, pos, pos + len(line), line, m[0], m[1]))
         pos += len(line) + 1
     return hits
 
 
 def rank(hits: list[Hit]) -> list[Hit]:
-    """The hit-list order the overlay shows: best score first — an exact
-    substring far outranks a scattered fuzzy match — document position as the
-    tie-break. Navigation (``n``/``N``) stays spatial; only the list ranks."""
+    """The hit-list order the overlay shows: best score first — a phrase hit
+    far outranks word-level matches — document position as the tie-break.
+    Navigation (``n``/``N``) stays spatial; only the list ranks."""
     return sorted(hits, key=lambda h: (-h.score, h.line_no))
-
-
-def match_range(query: str, line: str) -> tuple[int, int] | None:
-    """The emphasis region within a hit line: the (case-insensitive)
-    contiguous-substring match when there is one, else ``None`` (a scattered
-    fuzzy hit — the whole line is the preview)."""
-    i = line.lower().find(query.lower())
-    return (i, i + len(query)) if i >= 0 else None
 
 
 def next_hit(hits: list[Hit], pos: int, direction: int) -> Hit | None:

@@ -163,7 +163,7 @@ class SearchOverlay(QWidget):
                 f"<tr><td style='{bg}padding:1px 8px;"
                 f"color:{ZEN_HINT_COLOR.name()}'>{h.line_no + 1}"
                 f"&nbsp;&nbsp;<span style='color:{ZEN_TEXT_COLOR.name()}'>"
-                f"{self._hit_html(q, h.text)}</span></td></tr>")
+                f"{self._hit_html(h)}</span></td></tr>")
         more = ""
         if len(hits) > start + _MAX_VISIBLE:
             more = (f"<div style='padding:1px 8px;"
@@ -179,23 +179,28 @@ class SearchOverlay(QWidget):
         self._place()
 
     @staticmethod
-    def _hit_html(query: str, line: str) -> str:
-        """The hit line for the list: tail-truncated around the match, the
-        contiguous match region emphasized (a scattered fuzzy hit shows the
-        plain line)."""
-        rng = search.match_range(query, line)
-        if rng is None:
-            return html.escape(line[:_LINE_MAX])
-        a, b = rng
-        # keep the match visible even on a long line
-        lead = max(0, min(a - 20, len(line) - _LINE_MAX))
+    def _hit_html(h: search.Hit) -> str:
+        """The hit line for the list: truncated around the first match span,
+        every span (the phrase, or each matched word) emphasized."""
+        line = h.text
+        first = h.spans[0][0] if h.spans else 0
+        # keep the (first) match visible even on a long line
+        lead = max(0, min(first - 20, len(line) - _LINE_MAX))
         vis = line[lead:lead + _LINE_MAX]
-        a, b = a - lead, min(b - lead, len(vis))
-        pre = ("…" if lead else "") + html.escape(vis[:a])
-        mid = html.escape(vis[a:b])
-        post = html.escape(vis[b:]) + ("…" if lead + _LINE_MAX < len(line) else "")
-        return (f"{pre}<b><span style='color:{ZEN_MD_SUGGEST_ADD.name()}'>"
-                f"{mid}</span></b>{post}")
+        out, last = [], 0
+        for a, b in h.spans:
+            a, b = a - lead, min(b - lead, len(vis))
+            if b <= 0 or a >= len(vis) or a < last:
+                continue
+            a = max(a, 0)
+            out.append(html.escape(vis[last:a]))
+            out.append(f"<b><span style='color:{ZEN_MD_SUGGEST_ADD.name()}'>"
+                       f"{html.escape(vis[a:b])}</span></b>")
+            last = b
+        out.append(html.escape(vis[last:]))
+        pre = "…" if lead else ""
+        post = "…" if lead + _LINE_MAX < len(line) else ""
+        return f"{pre}{''.join(out)}{post}"
 
     # ── Keys ──
 

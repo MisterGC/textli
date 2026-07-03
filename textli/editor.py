@@ -892,35 +892,30 @@ class ZenMarkdownEditor(QWidget):
 
     @staticmethod
     def _search_caret_pos(hits, line_start: int, query: str) -> int:
-        """Where the caret lands on a hit: on the contiguous match when there
-        is one (vim lands on the match, not the line), else the line start."""
+        """Where the caret lands on a hit: on its first match span (vim lands
+        on the match, not the line), else the line start."""
         h = next((x for x in hits if x.start == line_start), None)
-        if h is not None:
-            rng = md_search.match_range(query, h.text)
-            if rng:
-                return h.start + rng[0]
+        if h is not None and h.spans:
+            return h.start + h.spans[0][0]
         return line_start
 
     def _apply_search_highlights(self, view, hits, current_start: int,
                                  query: str):
-        """All hits get the soft wash, the current one the stronger one —
-        ExtraSelections only, the document itself is never touched. The wash
-        covers the *match region* (the contiguous match within the line); a
-        scattered fuzzy hit falls back to its whole line."""
+        """Every match span (the phrase, or each matched word) gets the soft
+        wash; the current hit's spans the stronger one — ExtraSelections only,
+        the document itself is never touched."""
         sels = []
         for h in hits:
-            rng = md_search.match_range(query, h.text)
-            a, b = ((h.start + rng[0], h.start + rng[1]) if rng
-                    else (h.start, h.end))
-            sel = QTextBrowser.ExtraSelection()
-            cur = QTextCursor(view.document())
-            cur.setPosition(a)
-            cur.setPosition(b, QTextCursor.MoveMode.KeepAnchor)
-            sel.cursor = cur
-            sel.format.setBackground(QBrush(
-                ZEN_SEARCH_CURRENT if h.start == current_start
-                else ZEN_SEARCH_HIT))
-            sels.append(sel)
+            color = (ZEN_SEARCH_CURRENT if h.start == current_start
+                     else ZEN_SEARCH_HIT)
+            for a, b in (h.spans or ((0, h.end - h.start),)):
+                sel = QTextBrowser.ExtraSelection()
+                cur = QTextCursor(view.document())
+                cur.setPosition(h.start + a)
+                cur.setPosition(h.start + b, QTextCursor.MoveMode.KeepAnchor)
+                sel.cursor = cur
+                sel.format.setBackground(QBrush(color))
+                sels.append(sel)
         view.setExtraSelections(sels)
 
     def _center_view_on(self, view, pos: int):
