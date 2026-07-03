@@ -58,6 +58,13 @@ def test_fuzzy_subsequence_matches_and_nonmatch_is_none():
     assert fuzzy_score("xyz", "/my/cool/doc.md") is None
 
 
+def test_fuzzy_boundary_greed_cannot_reject_a_true_subsequence():
+    # Regression: the boundary-preferring walk jumped 'p' ahead to '_path',
+    # consuming the characters 'i'/'c' needed later — a valid subsequence got
+    # rejected. The plain leftmost fallback must keep it matching.
+    assert fuzzy_score("specialonce", "A special_path appears once.") is not None
+
+
 def test_fuzzy_shorter_candidate_wins_ties():
     short = fuzzy_score("notes", "/a/notes.md")
     long = fuzzy_score("notes", "/a/very/long/way/down/notes.md")

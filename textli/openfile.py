@@ -81,24 +81,37 @@ def fuzzy_score(query: str, candidate: str) -> float | None:
         return score - length_penalty
 
     # Scattered subsequence — walk the query through the candidate, preferring
-    # boundary matches (a lookahead per char, not a full DP — plenty for paths).
-    score, ci, prev = 0.0, 0, -2
-    for qch in q:
-        i = c.find(qch, ci)
-        if i < 0:
-            return None
-        # Prefer the next *boundary* occurrence if there is one ahead.
-        j = i
-        while j >= 0 and not (j == 0 or c[j - 1] in _BOUNDARIES):
-            j = c.find(qch, j + 1)
-        if j >= 0:
-            i = j
-            score += 6.0                       # boundary hit
-        elif i == prev + 1:
-            score += 4.0                       # run continues
-        else:
-            score += 1.0
-        prev, ci = i, i + 1
+    # boundary matches (a lookahead per char, not a full DP — plenty for paths
+    # and prose lines). The boundary jump can overshoot and consume characters
+    # a later query char needs, so a failed walk falls back to the plain
+    # leftmost walk — which succeeds for every true subsequence.
+    def walk(prefer_boundary: bool) -> float | None:
+        score, ci, prev = 0.0, 0, -2
+        for qch in q:
+            i = c.find(qch, ci)
+            if i < 0:
+                return None
+            if prefer_boundary:
+                # Jump to the next *boundary* occurrence if there is one ahead.
+                j = i
+                while j >= 0 and not (j == 0 or c[j - 1] in _BOUNDARIES):
+                    j = c.find(qch, j + 1)
+                if j >= 0:
+                    i = j
+            if i == 0 or c[i - 1] in _BOUNDARIES:
+                score += 6.0                   # boundary hit
+            elif i == prev + 1:
+                score += 4.0                   # run continues
+            else:
+                score += 1.0
+            prev, ci = i, i + 1
+        return score
+
+    score = walk(True)
+    if score is None:
+        score = walk(False)
+    if score is None:
+        return None
     return score - length_penalty
 
 

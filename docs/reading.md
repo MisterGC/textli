@@ -12,6 +12,10 @@ whole review workflow — comments and suggested changes — lives here.
   half-page and full-page scrolling.
 - `gh` — **headings overview**: an outline jump-list of the document
   (`j`/`k` to move, ++enter++ or a digit to jump, ++esc++ to close).
+- `/` — **search** with a live fuzzy hit list (same as the
+  [write view](writing.md)); `n` / `N` step through the hits.
+- `go` — open another file without leaving the reading view (see
+  [Opening files](opening.md)).
 
 ## Comments
 

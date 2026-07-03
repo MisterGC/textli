@@ -49,6 +49,12 @@ class VimKeyHandler:
     def mode(self) -> VimMode:
         return self._mode
 
+    @property
+    def has_pending(self) -> bool:
+        """True while a multi-key sequence (g…, d…) awaits its second key —
+        the host must not intercept keys that would complete it."""
+        return bool(self._pending)
+
     def _set_mode(self, mode: VimMode):
         if mode == self._mode:
             return

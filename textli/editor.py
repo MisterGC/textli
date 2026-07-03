@@ -49,7 +49,9 @@ from PySide6.QtWidgets import (
 
 from textli import comments as md_comments
 from textli import openfile
+from textli import search as md_search
 from textli.open_overlay import OpenFileOverlay
+from textli.search_overlay import SearchOverlay
 from textli.constants import (
     FONT_FAMILY,
     ZEN_MD_BG,
@@ -68,6 +70,8 @@ from textli.constants import (
     ZEN_MD_MAX_WIDTH_MAX,
     ZEN_MD_MAX_WIDTH_MIN,
     ZEN_MD_WIDTH_STEP,
+    ZEN_SEARCH_CURRENT,
+    ZEN_SEARCH_HIT,
     ZEN_TEXT_COLOR,
     _CTRL_MOD,
 )
@@ -215,6 +219,15 @@ def editor_help_html() -> str:
         ("Esc", "Back to NORMAL mode"),
         ("x · dd · dw", "Delete char · line · to next word"),
         ("go", "Open another file — history is fuzzy-matched, paths complete per segment"),
+    ])}</table>
+
+    <p style='{hdr}'>Search (/) — both views</p>
+    <table>{rows([
+        ("/", "Search the document — every line the query fuzzy-matches, in document order"),
+        ("(type)", "Live hit list; the view scrolls to preview the selected hit"),
+        ("⌃n / ⌃p · ↓ / ↑", "Move the selection"),
+        ("Enter · Esc", "Jump to the hit · cancel back to where you were"),
+        ("n / N", "Next / previous hit (wraps; the query survives ⌘R)"),
     ])}</table>
 
     <p style='{hdr}'>Open-file dialog (go)</p>
@@ -454,6 +467,11 @@ class ZenMarkdownEditor(QWidget):
         )
         # `go` open-file overlay (created on demand, one at a time).
         self._open_overlay: OpenFileOverlay | None = None
+        # `/` in-document search: overlay, last query (n/N re-run it against
+        # the active view), and the position to restore on Esc.
+        self._search_overlay: SearchOverlay | None = None
+        self._search_query = ""
+        self._search_saved: tuple[int, int] | None = None
         self._editor.setOverwriteMode(True)  # block cursor in normal mode
         self._editor.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
         self._editor.installEventFilter(self)  # intercept keys before editor
@@ -746,6 +764,111 @@ class ZenMarkdownEditor(QWidget):
         self._record_open_history(path)
         self.file_opened.emit(path)
 
+    # ── `/` in-document search ──
+
+    def _active_view(self):
+        """The view the reader is in — search always works on its text."""
+        return self._rendered if self._rendered_mode else self._editor
+
+    def _open_search(self):
+        """/ — the in-document search card: per-line fuzzy hits in document
+        order, live preview of the selected hit, Esc restores the position."""
+        if self._search_overlay is not None:
+            return
+        view = self._active_view()
+        self._search_saved = (view.verticalScrollBar().value(),
+                              view.textCursor().position())
+        overlay = SearchOverlay(self, view.toPlainText, self._font_size)
+        overlay.selection_changed.connect(self._search_preview)
+        overlay.accepted.connect(self._search_accept)
+        overlay.cancelled.connect(self._search_cancel)
+        self._search_overlay = overlay
+        overlay.open(view.textCursor().position())
+
+    def _close_search_overlay(self):
+        if self._search_overlay is not None:
+            self._search_overlay.hide()
+            self._search_overlay.deleteLater()
+            self._search_overlay = None
+        self._active_view().setFocus()
+
+    def _search_preview(self, start: int, _end: int):
+        """Live preview while the selection moves through the hit list: scroll
+        the view to the hit and refresh the highlights."""
+        ov = self._search_overlay
+        if ov is None:
+            return
+        view = self._active_view()
+        self._apply_search_highlights(view, ov.hits, start)
+        self._center_view_on(view, start)
+
+    def _search_accept(self, start: int, _end: int):
+        """Enter — jump to the hit and keep the query for n/N."""
+        ov = self._search_overlay
+        self._search_query = ov.query if ov else self._search_query
+        hits = list(ov.hits) if ov else []
+        self._close_search_overlay()
+        view = self._active_view()
+        self._apply_search_highlights(view, hits, start)
+        self._center_view_on(view, start)
+
+    def _search_cancel(self):
+        """Esc — back to where the reader was, highlights gone, previous
+        query kept (like vim's aborted search)."""
+        self._close_search_overlay()
+        view = self._active_view()
+        view.setExtraSelections([])
+        if self._search_saved is not None:
+            scroll, caret = self._search_saved
+            self._search_saved = None
+            cur = view.textCursor()
+            cur.setPosition(min(caret, len(view.toPlainText())))
+            view.setTextCursor(cur)
+            view.verticalScrollBar().setValue(scroll)
+
+    def _search_step(self, direction: int):
+        """n / N — the nearest hit after/before the caret, wrapping around the
+        document. Re-runs the last query against the active view's current
+        text, so it survives edits, accept/reject, and the ⌘R view switch."""
+        if not self._search_query:
+            return
+        view = self._active_view()
+        hits = md_search.find_hits(view.toPlainText(), self._search_query)
+        h = md_search.next_hit(hits, view.textCursor().position(), direction)
+        if h is None:
+            return
+        self._apply_search_highlights(view, hits, h.start)
+        self._center_view_on(view, h.start)
+
+    def _apply_search_highlights(self, view, hits, current_start: int):
+        """All hits get the soft wash, the current one the stronger one —
+        ExtraSelections only, the document itself is never touched."""
+        sels = []
+        for h in hits:
+            sel = QTextBrowser.ExtraSelection()
+            cur = QTextCursor(view.document())
+            cur.setPosition(h.start)
+            cur.setPosition(h.end, QTextCursor.MoveMode.KeepAnchor)
+            sel.cursor = cur
+            sel.format.setBackground(QBrush(
+                ZEN_SEARCH_CURRENT if h.start == current_start
+                else ZEN_SEARCH_HIT))
+            sels.append(sel)
+        view.setExtraSelections(sels)
+
+    def _center_view_on(self, view, pos: int):
+        """Park the caret at ``pos`` and scroll it comfortably into view."""
+        cur = view.textCursor()
+        cur.setPosition(pos)
+        view.setTextCursor(cur)
+        if view is self._editor:
+            view.centerCursor()
+        else:
+            doc = view.document()
+            y = doc.documentLayout().blockBoundingRect(doc.findBlock(pos)).y()
+            sb = view.verticalScrollBar()
+            sb.setValue(max(0, int(y - view.viewport().height() * 0.35)))
+
     def _print(self):
         """Open native print dialog."""
         self._highlighter.set_focus_enabled(False)
@@ -792,6 +915,10 @@ class ZenMarkdownEditor(QWidget):
         """⌘R: switch between the source editor and a read-only rendered
         Markdown view — a quick read perspective <-> edit perspective."""
         self._close_overview()
+        # Search highlights address one view's offsets — stale in the other.
+        # The query itself survives: n/N re-runs it against the new view.
+        self._editor.setExtraSelections([])
+        self._rendered.setExtraSelections([])
         self._rendered_mode = not self._rendered_mode
         if self._rendered_mode:
             self._active_comment = -1
@@ -1526,6 +1653,21 @@ class ZenMarkdownEditor(QWidget):
                 self._change_font_size(0)
                 return True
 
+        # `/` — in-document search; n/N — step hits. NORMAL mode only (INSERT
+        # must type these), and never mid-sequence (g…, d…) so vim's pending
+        # keys keep their meaning.
+        if (self._vim.mode == VimMode.NORMAL and not self._vim.has_pending
+                and not (event.modifiers() & _CTRL_MOD)):
+            if event.text() == "/":
+                self._open_search()
+                return True
+            if event.text() == "n":
+                self._search_step(+1)
+                return True
+            if event.text() == "N":
+                self._search_step(-1)
+                return True
+
         # Route through vim handler
         return self._vim.handle_key(event)
 
@@ -1590,6 +1732,14 @@ class ZenMarkdownEditor(QWidget):
                 self._open_file_dialog()
             return True
         self._rendered_pending_g = False
+
+        # `/` — in-document search; n/N — step through hits.
+        if event.text() == "/":
+            self._open_search()
+            return True
+        if key == Qt.Key.Key_N and not ctrl:
+            self._search_step(-1 if shift else +1)
+            return True
 
         # v — toggle visual (selection) mode. c — comment the selection.
         if key == Qt.Key.Key_V and not ctrl:

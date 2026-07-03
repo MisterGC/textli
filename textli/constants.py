@@ -50,6 +50,12 @@ ZEN_MD_COMMENT_HL = QColor(199, 92, 78, 72)
 # an inline edit or a whole block rewrite.
 ZEN_MD_SUGGEST_ADD = QColor("#A83E2E")
 
+# In-document search (`/`): hit highlights via ExtraSelections — never
+# document mutations. Amber, matching the overlay cards' accent, so hits read
+# as navigation aids and don't collide with the comment wash.
+ZEN_SEARCH_HIT = QColor(201, 162, 39, 60)        # every hit — soft wash
+ZEN_SEARCH_CURRENT = QColor(201, 162, 39, 135)   # the current hit — stronger
+
 # ── Modifier helpers ─────────────────────────────────────────────
 # Qt swaps Control/Meta on macOS: MetaModifier is the physical ⌃ key there.
 _CTRL_MOD = (

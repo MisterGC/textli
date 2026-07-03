@@ -38,6 +38,11 @@ Both preferences persist across sessions:
 
 - `⌘J` opens the **word-jump overlay**: every visible word gets a two-key
   label; type the label to jump the caret there (Easymotion style).
+- `/` (NORMAL mode) opens **search**: a live list of every line your query
+  fuzzy-matches, in document order — move the selection to preview a hit,
+  ++enter++ to jump, ++esc++ to stay where you were. Afterwards `n` / `N`
+  step to the next / previous hit (wrapping), with all hits highlighted.
+  The same search works in the [reading view](reading.md).
 - `⌘R` flips to the [reading view](reading.md) for proof-reading and review.
 - `⌘P` prints.
 

@@ -29,6 +29,16 @@ The complete reference — the same content the editor shows on `F1`.
 | `x` · `dd` · `dw` | Delete char · line · to next word |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
 
+## Search (`/`) — both views
+
+| Key | Action |
+| --- | --- |
+| `/` | Search the document — every line the query fuzzy-matches, in document order |
+| (type) | Live hit list; the view scrolls to preview the selected hit |
+| `⌃n / ⌃p` · `↓ / ↑` | Move the selection |
+| `Enter` · `Esc` | Jump to the hit · cancel back to where you were |
+| `n / N` | Next / previous hit (wraps; the query survives `⌘R`) |
+
 ## Open-file dialog (`go`)
 
 | Key | Action |

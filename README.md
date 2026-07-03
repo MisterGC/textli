@@ -48,6 +48,7 @@ the [documentation](https://mistergc.github.io/textli/).
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |
+| `/` | Fuzzy in-document search (`n`/`N` next/previous hit) |
 | `F1` | Full help |
 
 ## Embed
