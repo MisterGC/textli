@@ -75,6 +75,27 @@ def test_go_without_callback_is_a_quiet_noop():
     assert vim.mode == VimMode.NORMAL          # not the plain `o` insert
 
 
+def test_go_works_in_read_mode_and_stays_there(monkeypatch, tmp_path):
+    a = tmp_path / "a.md"
+    a.write_text("# A\n\ncontent A")
+    b = tmp_path / "b.md"
+    b.write_text("# B\n\ncontent B")
+    ed = _editor(monkeypatch, a, history=[str(b)], text="# A\n\ncontent A")
+    ed._toggle_rendered()
+    assert ed._rendered_mode
+    # go via the read view's g-pending
+    assert ed._handle_rendered_key(_ev(Qt.Key.Key_G, "g")) is True
+    assert ed._handle_rendered_key(_ev(Qt.Key.Key_O, "o")) is True
+    assert ed._open_overlay is not None
+    ov = ed._open_overlay
+    ov._input.setText("b.md")
+    ov._handle_key(_ev(Qt.Key.Key_Return))
+    assert ed._file_path == b
+    assert ed._rendered_mode                       # still reading
+    assert "content B" in ed._rendered.toPlainText()
+    assert ed._editor.toPlainText() == "# B\n\ncontent B"
+
+
 # ── overlay: filtering, descend, complete ──
 
 def test_history_fuzzy_suggests_file_and_dir(monkeypatch, tmp_path):

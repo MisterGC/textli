@@ -232,6 +232,7 @@ def editor_help_html() -> str:
         ("gg / G", "Document start / end"),
         ("⌃d / ⌃u · ⌃f / ⌃b / Space", "Half-page · full-page scroll"),
         ("gh", "Headings overview — an outline jump-list (j/k, Enter/digit, Esc)"),
+        ("go", "Open another file (stays in the reading view)"),
     ])}</table>
 
     <p style='{hdr}'>Reading view — comments</p>
@@ -703,7 +704,8 @@ class ZenMarkdownEditor(QWidget):
             self._open_overlay.hide()
             self._open_overlay.deleteLater()
             self._open_overlay = None
-        self._editor.setFocus()
+        # Back to whichever view the dialog was opened from.
+        (self._rendered if self._rendered_mode else self._editor).setFocus()
 
     def _on_open_chosen(self, path: str):
         self._close_open_dialog()
@@ -733,6 +735,14 @@ class ZenMarkdownEditor(QWidget):
         cur.movePosition(QTextCursor.MoveOperation.Start)
         self._editor.setTextCursor(cur)
         self._update_focus()
+        if self._rendered_mode:
+            # Opened from the reading view — stay there, on the new file.
+            self._preview = False
+            self._render_markdown(text)
+            rcur = self._rendered.textCursor()
+            rcur.movePosition(QTextCursor.MoveOperation.Start)
+            self._rendered.setTextCursor(rcur)
+            self._rendered.verticalScrollBar().setValue(0)
         self._record_open_history(path)
         self.file_opened.emit(path)
 
@@ -1560,7 +1570,7 @@ class ZenMarkdownEditor(QWidget):
             self._rendered_pending_bracket = "["
             return True
 
-        # `gg` — jump to top; `gc` — changes overview; `gh` — headings overview.
+        # `gg` — top; `gc` — changes overview; `gh` — headings; `go` — open file.
         if key == Qt.Key.Key_G and not shift:
             if getattr(self, "_rendered_pending_g", False):
                 self._rendered_pending_g = False
@@ -1569,12 +1579,15 @@ class ZenMarkdownEditor(QWidget):
                 self._rendered_pending_g = True
             return True
         if (getattr(self, "_rendered_pending_g", False)
-                and not ctrl and not shift and key in (Qt.Key.Key_C, Qt.Key.Key_H)):
+                and not ctrl and not shift
+                and key in (Qt.Key.Key_C, Qt.Key.Key_H, Qt.Key.Key_O)):
             self._rendered_pending_g = False
             if key == Qt.Key.Key_C:
                 self._open_changes_overview()
-            else:
+            elif key == Qt.Key.Key_H:
                 self._open_headings_overview()
+            else:
+                self._open_file_dialog()
             return True
         self._rendered_pending_g = False
 

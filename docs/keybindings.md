@@ -49,6 +49,7 @@ See [Opening files](opening.md) for how the matching works.
 | `gg / G` | Document start / end |
 | `⌃d / ⌃u` · `⌃f / ⌃b / Space` | Half-page · full-page scroll |
 | `gh` | Headings overview — an outline jump-list (`j`/`k`, `Enter`/digit, `Esc`) |
+| `go` | Open another file (stays in the reading view) |
 
 ## Reading view — comments
 

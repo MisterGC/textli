@@ -1,9 +1,10 @@
 # Opening files
 
-You never have to leave the editor to work on another note: in the write
-view, press `go` (vim NORMAL mode) and the **open-file dialog** appears — an
-input line over a live suggestion list, entirely keyboard-driven. The current
-file is autosaved, so switching is instant and dialog-free.
+You never have to leave the editor to work on another note: press `go` — in
+the write view (vim NORMAL mode) or in the reading view — and the **open-file
+dialog** appears: an input line over a live suggestion list, entirely
+keyboard-driven. The current file is autosaved, so switching is instant and
+dialog-free; opened from the reading view, the new file opens reading too.
 
 ## Two kinds of matching
 
