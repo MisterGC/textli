@@ -104,18 +104,34 @@ class SearchOverlay(QWidget):
         """Show the card; the selection anchors to the first hit at or after
         ``anchor_pos`` (where the reader is) as the query is typed."""
         self._anchor = anchor_pos
+        self._region = "top"
         self._refresh("")
         self._place()
         self.show()
         self.raise_()
         self._input.setFocus()
 
+    @property
+    def region(self) -> str:
+        """Where the card sits: ``"top"`` (default) or ``"bottom"`` — the host
+        flips it when it would cover the current hit (see
+        ``_ensure_hit_visible``)."""
+        return getattr(self, "_region", "top")
+
+    def place_region(self, region: str):
+        """Move the card to the top or bottom edge, keeping it there across
+        re-renders."""
+        self._region = region
+        self._place()
+
     def _place(self):
         p = self.parentWidget()
         self.adjustSize()
         w = max(self.width(), min(640, int(p.width() * 0.7)))
         self.resize(w, self.height())
-        self.move((p.width() - w) // 2, int(p.height() * 0.12))
+        y = (int(p.height() * 0.12) if self.region == "top"
+             else max(24, p.height() - self.height() - 40))
+        self.move((p.width() - w) // 2, y)
 
     # ── Matching ──
 

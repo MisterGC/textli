@@ -804,6 +804,47 @@ class ZenMarkdownEditor(QWidget):
         self._apply_search_highlights(view, ov.hits, start, ov.query)
         self._center_view_on(
             view, self._search_caret_pos(ov.hits, start, ov.query))
+        self._ensure_hit_visible(view, ov)
+
+    def _ensure_hit_visible(self, view, ov):
+        """The preview must never hide behind the search card: nudge the scroll
+        until the caret clears the card — and when it can't (a hit near the
+        document edge, nothing left to scroll), flip the card to the other
+        edge, where the hit is visible by construction."""
+        vp_top = view.viewport().mapTo(self, QPoint(0, 0)).y()
+        margin = 12
+        sb = view.verticalScrollBar()
+
+        def caret_top():
+            return view.cursorRect().top() + vp_top
+
+        def caret_bottom():
+            return view.cursorRect().bottom() + vp_top
+
+        card = ov.geometry()
+        if (caret_bottom() < card.top() - margin
+                or caret_top() > card.bottom() + margin):
+            return                                   # already in the clear
+        if ov.region == "top":
+            # Push the content down until the caret drops below the card.
+            for _ in range(200):
+                if caret_top() > card.bottom() + margin:
+                    return
+                v = sb.value()
+                sb.setValue(v - max(1, sb.singleStep()))
+                if sb.value() == v:
+                    break                            # top of the document
+            ov.place_region("bottom")
+        else:
+            # Pull the content up until the caret rises above the card.
+            for _ in range(200):
+                if caret_bottom() < card.top() - margin:
+                    return
+                v = sb.value()
+                sb.setValue(v + max(1, sb.singleStep()))
+                if sb.value() == v:
+                    break                            # end of the document
+            ov.place_region("top")
 
     def _search_accept(self, start: int, _end: int):
         """Enter — jump to the hit and keep the query for n/N."""

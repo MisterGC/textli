@@ -7,7 +7,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -133,6 +133,35 @@ def test_escape_restores_position_and_clears_highlights():
     assert ed._search_overlay is None
     assert ed._editor.textCursor().position() == 5
     assert ed._editor.extraSelections() == []
+
+
+def test_card_flips_to_bottom_when_it_would_cover_a_top_hit():
+    # A hit near the document top can't be scrolled below the card (the view
+    # is already at scroll 0) — the card must move out of the way instead.
+    md = "unique-needle right here\n\n" + "\n\n".join(
+        f"filler paragraph {i}" for i in range(60))
+    ed = _editor(text=md)
+    ed._open_search()
+    ov = ed._search_overlay
+    assert ov.region == "top"
+    ov._input.setText("unique-needle")
+    assert ov.region == "bottom"
+    # and the caret (on the hit) is now clear of the card
+    vp_top = ed._editor.viewport().mapTo(ed, QPoint(0, 0)).y()
+    assert ed._editor.cursorRect().bottom() + vp_top < ov.geometry().top()
+
+
+def test_card_stays_on_top_for_a_scrollable_hit():
+    md = "\n\n".join(f"filler paragraph {i}" for i in range(30)) + \
+         "\n\nunique-needle mid document\n\n" + \
+         "\n\n".join(f"tail paragraph {i}" for i in range(30))
+    ed = _editor(text=md)
+    ed._open_search()
+    ov = ed._search_overlay
+    ov._input.setText("unique-needle")
+    assert ov.region == "top"                    # scrolling could reveal it
+    vp_top = ed._editor.viewport().mapTo(ed, QPoint(0, 0)).y()
+    assert ed._editor.cursorRect().top() + vp_top > ov.geometry().bottom()
 
 
 # ── n / N ──
