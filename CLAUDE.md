@@ -22,8 +22,10 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest tests/test_vim.py::test_x -q  # one t
 
 - Every test needs a Qt platform. The suite is headless — use `QT_QPA_PLATFORM=offscreen`
   (each test module also `setdefault`s it, but exporting it is the reliable path).
-- There is no linter/formatter config and no `conftest.py`; each test module spins
-  up its own `QApplication` via a local `_app()` helper.
+- There is no linter/formatter config; each test module spins up its own
+  `QApplication` via a local helper. `tests/conftest.py` redirects QSettings into
+  a session tmp dir — editors persist state (prefs, history, positions) even on
+  widget teardown, so tests must never touch the user's real preferences.
 - Docs: `uv pip install -e '.[docs]'` then `.venv/bin/mkdocs serve` (MkDocs
   Material, auto-deployed to GitHub Pages on push to `main`).
 - Version is derived from git tags by `hatch-vcs` and written to the

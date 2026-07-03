@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path  # noqa: E402
 
-from PySide6.QtCore import QEvent, QSettings, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -34,6 +34,12 @@ def _editor(monkeypatch, file_path: Path, history=(), text="") -> ZenMarkdownEdi
     monkeypatch.setattr(
         ZenMarkdownEditor, "_record_open_history",
         lambda self, p: recorded.append(Path(p)))
+    # Position memory is exercised in test_position_memory.py; here it must
+    # just not touch the user's real QSettings.
+    monkeypatch.setattr(
+        ZenMarkdownEditor, "_load_positions", staticmethod(lambda: []))
+    monkeypatch.setattr(
+        ZenMarkdownEditor, "_store_positions", staticmethod(lambda e: None))
     parent = QWidget()
     parent.resize(1000, 700)
     ed = ZenMarkdownEditor(parent, text, title="t", file_path=file_path)
@@ -205,25 +211,18 @@ def test_initial_open_lands_in_history(monkeypatch, tmp_path):
     assert ed._recorded == [f]
 
 
-# ── persistence (real QSettings, saved & restored) ──
+# ── persistence (via the settings seam; conftest isolates the store) ──
 
 def test_history_roundtrips_through_qsettings(tmp_path):
     QApplication.instance() or QApplication([])
-    settings = QSettings("textli", "textli")
-    saved = settings.value("open/history")
-    try:
-        settings.setValue("open/history", ["/x/a.md"])
-        parent = QWidget()
-        parent.resize(800, 600)
-        f = tmp_path / "n.md"
-        f.write_text("x")
-        ed = ZenMarkdownEditor(parent, "x", title="t", file_path=f)
-        ed._parent = parent
-        hist = ed._load_open_history()
-        assert hist[0] == str(f)               # recorded at construction
-        assert "/x/a.md" in hist
-    finally:
-        if saved is None:
-            settings.remove("open/history")
-        else:
-            settings.setValue("open/history", saved)
+    from textli import settings as st
+    st.app_settings().setValue("open/history", ["/x/a.md"])
+    parent = QWidget()
+    parent.resize(800, 600)
+    f = tmp_path / "n.md"
+    f.write_text("x")
+    ed = ZenMarkdownEditor(parent, "x", title="t", file_path=f)
+    ed._parent = parent
+    hist = ed._load_open_history()
+    assert hist[0] == str(f)               # recorded at construction
+    assert "/x/a.md" in hist

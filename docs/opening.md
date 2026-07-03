@@ -5,6 +5,8 @@ the write view (vim NORMAL mode) or in the reading view — and the **open-file
 dialog** appears: an input line over a live suggestion list, entirely
 keyboard-driven. The current file is autosaved, so switching is instant and
 dialog-free; opened from the reading view, the new file opens reading too.
+Every switch remembers where you left the old file and resumes where you
+last were in the new one (caret and scroll — the view you're in stays).
 
 ## Two kinds of matching
 

@@ -12,6 +12,7 @@ from pathlib import Path  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from textli.app import TextliHost, split_location  # noqa: E402
+from textli.editor import ZenMarkdownEditor  # noqa: E402
 
 MD = (
     "# Intro\n\nbody intro.\n\n"
@@ -39,16 +40,25 @@ def test_split_location_only_first_hash_starts_fragment():
 
 # ── host forwards location + mode to the editor ──
 
-def _host():
+def _host(monkeypatch):
     QApplication.instance() or QApplication([])
+    # These editors are file-backed ("notes.md"), so position memory kicks
+    # in — stub it or a torn-down read-mode editor from one test bleeds a
+    # stored "read" record into the next (and the user's real QSettings).
+    monkeypatch.setattr(ZenMarkdownEditor, "_load_positions",
+                        staticmethod(lambda: []))
+    monkeypatch.setattr(ZenMarkdownEditor, "_store_positions",
+                        staticmethod(lambda e: None))
+    monkeypatch.setattr(ZenMarkdownEditor, "_record_open_history",
+                        lambda self, p: None)
     host = TextliHost()
     host.resize(800, 600)
     host.show()
     return host
 
 
-def test_host_open_read_mode_at_anchor():
-    host = _host()
+def test_host_open_read_mode_at_anchor(monkeypatch):
+    host = _host(monkeypatch)
     host.open(Path("notes.md"), MD, anchor="design-decisions", read=True)
     ed = host._editor
     assert ed._rendered_mode is True                 # opened in the read view
@@ -57,15 +67,15 @@ def test_host_open_read_mode_at_anchor():
     assert block.text() == "Design Decisions"
 
 
-def test_host_open_write_mode_at_anchor():
-    host = _host()
+def test_host_open_write_mode_at_anchor(monkeypatch):
+    host = _host(monkeypatch)
     host.open(Path("notes.md"), MD, anchor="final-notes")
     ed = host._editor
     assert ed._rendered_mode is False                # editable write view
     assert ed._editor.textCursor().block().text() == "## Final Notes"
 
 
-def test_host_open_defaults_to_write_no_anchor():
-    host = _host()
+def test_host_open_defaults_to_write_no_anchor(monkeypatch):
+    host = _host(monkeypatch)
     host.open(Path("notes.md"), MD)
     assert host._editor._rendered_mode is False

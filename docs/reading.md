@@ -5,6 +5,10 @@ preview: a caret moves through the rendered text with vim motions, and the
 whole review workflow — comments and suggested changes — lives here.
 `⌘R` again returns to the source, caret kept in place.
 
+Leave a file while reading and it remembers: reopening it resumes the
+reading view at the very spot you left, so a long review survives any
+number of sessions.
+
 ## Navigating
 
 - `h j k l`, `w / b / e`, `0 / $` — move the caret through the prose.

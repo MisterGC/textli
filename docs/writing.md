@@ -24,6 +24,10 @@ discards pending changes.
 
 - `⌘.` toggles **section focus**: everything but the paragraph you're
   editing dims, so the sentence at hand is all that speaks.
+- `⌘T` toggles **typewriter scrolling**: the caret line is held at a fixed
+  height and the page moves under it, like the carriage of the machine it's
+  named after — your eyes never chase the text down the screen. The
+  preference persists.
 - `⌘↵` toggles **full-window width** when you want the column to use the
   whole window.
 
@@ -62,3 +66,8 @@ It hides whenever a card (search, open, overview) is up, and in the
 Opened on a file (the standalone `textli` CLI always is), the editor
 **autosaves** while you type — there is no save command to remember. Lean on
 git for durable checkpoints.
+
+The editor also **holds your place**: closing a file remembers the view you
+were in and where — reopening it (CLI or `go`) resumes exactly there, in the
+[reading view](reading.md) too. Explicit targets win: `-r` forces the
+reading view, a `#heading-slug` location overrides the remembered spot.

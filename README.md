@@ -34,7 +34,9 @@ textli -r review.md                 # start in the reading view
 ```
 
 The editor opens ready to type (vim NORMAL mode) and autosaves while you
-work. A faint **whisper status** in the card's corner keeps you oriented —
+work, and every file **resumes where you left it** — view mode, caret and
+scroll included. A faint **whisper status** in the card's corner keeps you
+oriented —
 mode, word count, and session delta while writing; progress, minutes left,
 and open review items while reading. Press `F1` inside the editor for the
 complete key reference, or see the
@@ -48,6 +50,7 @@ complete key reference, or see the
 | `Esc` | Save & close (`⇧Esc` cancels) |
 | `⌘↵` | Full-window width |
 | `⌘.` | Section focus (dim all but the current paragraph) |
+| `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |

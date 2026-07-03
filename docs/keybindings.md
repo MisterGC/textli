@@ -11,6 +11,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `Esc` | Save & close (`⇧Esc` cancels / discards pending changes) |
 | `⌘↵` | Toggle full-window width |
 | `⌘.` | Section focus — dim all but the current paragraph |
+| `⌘T` | Typewriter scrolling — hold the caret line steady while writing (persists) |
 | `⌘+` / `⌘-` / `⌘0` | Font size bigger / smaller / reset (persists) |
 | `⌘⇧→` / `⌘⇧←` / `⌘⇧↓` | Content column wider / narrower / reset (persists) |
 | `⌘J` | Word-jump overlay (Easymotion-style two-key jump) |

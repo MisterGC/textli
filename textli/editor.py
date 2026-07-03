@@ -16,7 +16,6 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QRect,
     QRectF,
-    QSettings,
     Qt,
     Signal,
     QTimer,
@@ -49,7 +48,9 @@ from PySide6.QtWidgets import (
 
 from textli import comments as md_comments
 from textli import openfile
+from textli import positions as md_positions
 from textli import search as md_search
+from textli import settings as md_settings
 from textli import status as md_status
 from textli.open_overlay import OpenFileOverlay
 from textli.search_overlay import SearchOverlay
@@ -209,6 +210,7 @@ def editor_help_html() -> str:
         ("Esc", "Save &amp; close (⇧Esc cancels / discards pending changes)"),
         ("⌘↵", "Toggle full-window width"),
         ("⌘.", "Section focus — dim all but the current paragraph"),
+        ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
         ("⌘+ / ⌘- / ⌘0", "Font size bigger / smaller / reset (persists)"),
         ("⌘⇧→ / ⌘⇧← / ⌘⇧↓", "Content column wider / narrower / reset (persists)"),
         ("⌘J", "Word-jump overlay (Easymotion-style two-key jump)"),
@@ -322,12 +324,18 @@ class ZenMarkdownEditor(QWidget):
         self._canvas = canvas
 
         # Load persisted font size preference
-        settings = QSettings("textli", "textli")
+        settings = md_settings.app_settings()
         self._font_size = settings.value(
             "zen_md/font_size", ZEN_MD_FONT_SIZE, type=int
         )
         self._font_size = max(
             ZEN_MD_FONT_SIZE_MIN, min(ZEN_MD_FONT_SIZE_MAX, self._font_size)
+        )
+
+        # Typewriter scrolling (⌘T): keep the caret line at a fixed height
+        # while writing, so the eyes never chase the text down the page.
+        self._typewriter = settings.value(
+            "zen_md/typewriter", False, type=bool
         )
 
         # Load persisted content-column width preference (adjustable like font).
@@ -352,13 +360,22 @@ class ZenMarkdownEditor(QWidget):
         # this one, so it's findable from the next session's first `go`.
         if file_path is not None:
             self._record_open_history(file_path)
+            # Closing normally saves the position on hide; quitting the whole
+            # app (⌘Q) tears the window down without one, so catch that too.
+            # PySide drops the connection with the receiver, so a closed
+            # editor never gets a stale call.
+            QApplication.instance().aboutToQuit.connect(self._save_position)
         self.show()
         self._start_fade_in()
         # Open at a location / in a mode (used by textli's open-at-anchor). The
         # read-view toggle and centerCursor both need a laid-out viewport, so do
-        # this after show().
+        # this after show(). Explicit requests win over memory: `-r` forces the
+        # read view, an anchor overrides the remembered offsets.
         if start_in_read:
             self._toggle_rendered()
+        if file_path is not None:
+            self._restore_position(restore_mode=not start_in_read,
+                                   restore_offsets=not anchor)
         if anchor:
             self._jump_to_anchor(anchor)
 
@@ -418,6 +435,9 @@ class ZenMarkdownEditor(QWidget):
         self._editor.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+        # Typewriter mode holds the caret line steady, which needs scrolling
+        # past the document end (see _toggle_typewriter).
+        self._editor.setCenterOnScroll(self._typewriter)
         layout.addWidget(self._editor, stretch=1)
 
         # Read-only rendered Markdown view (⌘R toggles editor <-> this).
@@ -456,6 +476,7 @@ class ZenMarkdownEditor(QWidget):
         self._highlighter = MarkdownHighlighter(self._editor.document())
         self._highlighter.set_base_size(self._font_size)
         self._editor.cursorPositionChanged.connect(self._update_focus)
+        self._editor.cursorPositionChanged.connect(self._typewriter_recenter)
         self._highlighter.set_focus_enabled(self._focus_enabled)
 
         # Heading gutter — `#` markers hang to the left of body text.
@@ -733,6 +754,36 @@ class ZenMarkdownEditor(QWidget):
         self._autosave_timer.timeout.connect(self._autosave)
         self._editor.textChanged.connect(self._schedule_autosave)
 
+    def _toggle_typewriter(self):
+        """⌘T — typewriter scrolling on/off (persists). On, the caret line is
+        held at a fixed height in the write view while the text moves — the
+        page scrolls under a stationary carriage, like the machine it's named
+        after."""
+        self._typewriter = not self._typewriter
+        md_settings.app_settings().setValue(
+            "zen_md/typewriter", self._typewriter)
+        # centerOnScroll lets the view scroll past the last line — without it
+        # the caret can't be held at typewriter height near the document end.
+        self._editor.setCenterOnScroll(self._typewriter)
+        if self._typewriter:
+            self._typewriter_recenter()
+        self._flash_mode(
+            "TYPEWRITER" if self._typewriter else "TYPEWRITER OFF")
+
+    def _typewriter_recenter(self):
+        """Keep the caret line at the typewriter height (~40% down the
+        viewport). QPlainTextEdit's vertical scrollbar works in line steps, so
+        the pixel offset converts via the line height."""
+        if not getattr(self, "_typewriter", False) or self._rendered_mode:
+            return
+        ed = self._editor
+        target = int(ed.viewport().height() * 0.42)
+        line_h = ed.fontMetrics().lineSpacing() or 1
+        delta = round((ed.cursorRect().center().y() - target) / line_h)
+        if delta:
+            sb = ed.verticalScrollBar()
+            sb.setValue(sb.value() + delta)
+
     def _toggle_focus(self):
         """⌘. — toggle the section-focus dim (everything but the current
         paragraph). Off by default."""
@@ -754,13 +805,76 @@ class ZenMarkdownEditor(QWidget):
         )
         self.file_saved.emit(self._file_path)
 
+    # ── Per-file position memory ──
+
+    @staticmethod
+    def _load_positions() -> list[str]:
+        """Persisted per-file positions (see :mod:`textli.positions`).
+        QSettings hands a lone entry back as a plain string."""
+        val = md_settings.app_settings().value("open/positions", [])
+        if isinstance(val, str):
+            return [val]
+        return list(val or [])
+
+    @staticmethod
+    def _store_positions(entries: list[str]):
+        md_settings.app_settings().setValue("open/positions", entries)
+
+    def _save_position(self):
+        """Remember where this file is being left: the view mode, the write
+        caret, and (in the read view) the rendered position at the top of the
+        viewport — so reopening resumes exactly here."""
+        if not self._file_path or getattr(self, "_editor", None) is None:
+            return
+        top = 0
+        if self._rendered_mode:
+            top = self._rendered.cursorForPosition(QPoint(0, 0)).position()
+        self._store_positions(md_positions.remember(
+            self._load_positions(), str(self._file_path),
+            "read" if self._rendered_mode else "write",
+            self._editor.textCursor().position(), top))
+
+    def _restore_position(self, *, restore_mode: bool, restore_offsets: bool):
+        """Resume the stored spot for the current file. ``restore_mode`` also
+        re-enters the read view when the file was left there (skipped when the
+        caller forced a view); ``restore_offsets`` puts caret and scroll back
+        (skipped when an anchor names an explicit target)."""
+        stored = (md_positions.lookup(self._load_positions(),
+                                      str(self._file_path))
+                  if self._file_path else None)
+        if stored is None:
+            return
+        mode, caret, top = stored
+        if restore_mode and mode == "read" and not self._rendered_mode:
+            self._toggle_rendered()
+        if not restore_offsets:
+            return
+        cur = self._editor.textCursor()
+        cur.setPosition(min(caret, len(self._editor.toPlainText())))
+        self._editor.setTextCursor(cur)
+        self._editor.centerCursor()
+        if self._rendered_mode and mode == "read":
+            doc = self._rendered.document()
+            pos = min(top, max(0, doc.characterCount() - 1))
+            block = doc.findBlock(pos)
+            y = doc.documentLayout().blockBoundingRect(block).y()
+            # Line-level, not block-level: a long wrapped paragraph is one
+            # block, and its top can be pages above the remembered spot.
+            line = block.layout().lineForTextPosition(pos - block.position())
+            if line.isValid():
+                y += line.y()
+            self._rendered.verticalScrollBar().setValue(int(y))
+            rcur = self._rendered.textCursor()
+            rcur.setPosition(pos)
+            self._rendered.setTextCursor(rcur)
+
     # ── `go` open-file dialog ──
 
     @staticmethod
     def _load_open_history() -> list[str]:
         """Persisted open-history (most recent first). QSettings hands a lone
         entry back as a plain string — normalize to a list of str."""
-        val = QSettings("textli", "textli").value("open/history", [])
+        val = md_settings.app_settings().value("open/history", [])
         if isinstance(val, str):
             val = [val]
         return [str(v) for v in (val or [])]
@@ -768,7 +882,7 @@ class ZenMarkdownEditor(QWidget):
     def _record_open_history(self, path: Path):
         """LRU-promote ``path`` in the persisted history (see openfile)."""
         hist = openfile.push_history(self._load_open_history(), str(path))
-        QSettings("textli", "textli").setValue("open/history", hist)
+        md_settings.app_settings().setValue("open/history", hist)
 
     def _open_file_dialog(self):
         """go — the keyboard-only open-file overlay: history matched fuzzily,
@@ -804,6 +918,7 @@ class ZenMarkdownEditor(QWidget):
         CLI. The undo stack starts fresh (undo never crosses files)."""
         if path == self._file_path:
             return
+        self._save_position()   # remember the file being left
         if self._autosave_timer is not None and self._autosave_timer.isActive():
             self._autosave_timer.stop()
             self._autosave()
@@ -829,6 +944,9 @@ class ZenMarkdownEditor(QWidget):
             rcur.movePosition(QTextCursor.MoveOperation.Start)
             self._rendered.setTextCursor(rcur)
             self._rendered.verticalScrollBar().setValue(0)
+        # Resume where this file was left (offsets only — `go` stays in the
+        # view it was invoked from, as read-mode `go` promised).
+        self._restore_position(restore_mode=False, restore_offsets=True)
         # A fresh file starts a fresh session baseline for the status delta.
         self._session_start_words = md_status.word_count(text)
         self._refresh_status()
@@ -1707,6 +1825,9 @@ class ZenMarkdownEditor(QWidget):
         parent = self.parentWidget()
         if parent:
             parent.removeEventFilter(self)
+        # The editor only hides on its way out — the moment to remember where
+        # the reader left the file.
+        self._save_position()
         super().hideEvent(event)
 
     def eventFilter(self, obj, event):
@@ -1797,6 +1918,13 @@ class ZenMarkdownEditor(QWidget):
         if (event.key() == Qt.Key.Key_Period
                 and event.modifiers() & _CTRL_MOD):
             self._toggle_focus()
+            return True
+
+        # Ctrl+T — toggle typewriter scrolling (a write-view behaviour, but
+        # togglable from either view; the preference persists)
+        if (event.key() == Qt.Key.Key_T
+                and event.modifiers() & _CTRL_MOD):
+            self._toggle_typewriter()
             return True
 
         # Rendered view: vim-style navigation; Esc saves & closes.
@@ -2452,7 +2580,7 @@ class ZenMarkdownEditor(QWidget):
         # Gutter width is char-based; re-apply after font change.
         self._apply_heading_layout()
         self._refresh_status()
-        QSettings("textli", "textli").setValue(
+        md_settings.app_settings().setValue(
             "zen_md/font_size", self._font_size
         )
 
@@ -2478,7 +2606,7 @@ class ZenMarkdownEditor(QWidget):
         self._apply_heading_layout()
         self.update()
         self._refresh_status()
-        QSettings("textli", "textli").setValue(
+        md_settings.app_settings().setValue(
             "zen_md/content_width", self._content_width
         )
 
