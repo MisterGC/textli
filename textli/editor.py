@@ -706,11 +706,13 @@ class ZenMarkdownEditor(QWidget):
             src = self._editor.toPlainText()
             src_caret = self._editor.textCursor().position()
             self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
-            self._render_markdown(src)
+            # Show the view *before* rendering: a hidden widget has no layout
+            # geometry yet (first ⌘R), and the render settles the document
+            # layout against the viewport width — which must be the real one.
             self._editor.setVisible(False)
             self._rendered.setVisible(True)
             self._rendered.setFocus()
-            self._settle_rendered_layout()
+            self._render_markdown(src)
             # Keep the reader's place: map the source caret to the rendered text.
             rendered = self._rendered.document().toPlainText()
             r_pos = md_comments.map_position(src, rendered, src_caret)
@@ -744,10 +746,14 @@ class ZenMarkdownEditor(QWidget):
 
         ``QTextDocument`` lays out lazily and only corrects the view's scroll
         range when the deferred relayout runs in the event loop. If the reader
-        jumps (``G``) before that settles, the scroll range is still estimated
-        and scrolling back up stops short — until ``gg`` forces a top-down
-        relayout. Draining the layout work here (excluding user input so it
-        can't re-enter this handler) makes the range correct immediately."""
+        jumps (``G``) — or we restore the scrollbar / park the caret — before
+        that settles, the scroll range is still estimated and scrolling stops
+        short of the real document end, until something forces a top-down
+        relayout. Asking the layout for its document size forces the full
+        layout synchronously; draining the remaining events (excluding user
+        input so it can't re-enter this handler) then lets the view adjust its
+        scroll range to it."""
+        self._rendered.document().documentLayout().documentSize()
         QApplication.processEvents(
             QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
         )
@@ -796,11 +802,18 @@ class ZenMarkdownEditor(QWidget):
         """Render ``source`` into the read view: comment spans are highlighted
         (bodies hidden, revealed on demand), and suggestion marks are styled as
         track-changes — removed text struck, added text in zen red. The raw
-        CriticMarkup never shows."""
+        CriticMarkup never shows.
+
+        Settles the layout before returning, so every caller — mode toggle,
+        comment/suggestion commit, preview flip — can restore the scrollbar or
+        park the caret against a *correct* scroll range, never the lazy-layout
+        estimate (which would clamp the restore and leave the view unable to
+        scroll to the real document end)."""
         md, spans = md_comments.to_rendered(source)
         doc = self._rendered.document()
         doc.setMarkdown(md)
         self._apply_mark_formats(doc, spans)
+        self._settle_rendered_layout()
 
     # ── `p` clean preview: the fully-accepted prose, no markup ──
 
@@ -822,13 +835,16 @@ class ZenMarkdownEditor(QWidget):
         self._flash_mode("PREVIEW" if self._preview else "READ")
 
     def _render_preview(self, source: str):
-        """Render the accepted 'final' text — no marks, no strikes, no styling."""
+        """Render the accepted 'final' text — no marks, no strikes, no styling.
+        Settled like :meth:`_render_markdown`, for the same scroll-restore
+        correctness."""
         doc = self._rendered.document()
         doc.setMarkdown(md_comments.accepted(source))
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
         self._active_comment = -1
+        self._settle_rendered_layout()
 
     # ── `gc` / `gh` jump-list overviews (changes / headings) ──
 

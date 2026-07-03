@@ -96,6 +96,44 @@ def test_entering_read_mode_settles_scroll_range():
     assert sb.maximum() >= doc_h - ed._rendered.viewport().height() - 50
 
 
+def test_comment_commit_keeps_scroll_range_settled():
+    # Regression: committing a comment in the reading view re-renders via
+    # setMarkdown and immediately restored the scrollbar against Qt's lazy
+    # pre-layout *estimate* — the range could stick wrong and scrolling ended
+    # short of the real document end (until ⌘R ⌘R forced a fresh settle).
+    # _render_markdown itself settles the layout now, so every commit path
+    # restores scroll/caret against the real range.
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(900, 600)
+    parent.show()
+    big = "# Top\n\n" + "\n\n".join(
+        f"Paragraph {i} keeps some prose around target{i} inside." + " word" * 30
+        for i in range(400))
+    ed = ZenMarkdownEditor(parent, big, title="t")
+    ed._parent = parent
+    ed._toggle_rendered()
+    sb = ed._rendered.verticalScrollBar()
+    sb.setValue(sb.maximum() // 2)          # reading somewhere mid-document
+    pos = sb.value()
+    # Author a comment near the reading position, through the real path.
+    rendered = ed._rendered.document().toPlainText()
+    r0 = rendered.index("target200")
+    ed._begin_comment_for_span(r0, r0 + len("target200"))
+    assert ed._comment_field is not None
+    ed._comment_field.setPlainText("check this")
+    ed._commit_comment_field()
+    assert "{>>check this<<}" in ed._editor.toPlainText()
+    # Capture the range BEFORE querying documentSize() — that query itself
+    # forces a full layout and would repair a stale scrollbar, masking the bug.
+    max_after_commit = sb.maximum()
+    doc_h = ed._rendered.document().documentLayout().documentSize().height()
+    assert max_after_commit <= doc_h
+    assert max_after_commit >= doc_h - ed._rendered.viewport().height() - 50
+    # And the reader's place survived the re-render (no clamp to a stale max).
+    assert abs(sb.value() - pos) <= ed._rendered.viewport().height() // 2
+
+
 def test_mode_flash_on_toggle():
     ed = _editor()
     ed._toggle_rendered()
