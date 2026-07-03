@@ -42,7 +42,12 @@ _RE_COMMENT = re.compile(
 )
 
 # Opening fence of a code block; closing is matched line-by-line in _code_ranges.
-_RE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+# A fence line may be *prefixed* by a CriticMarkup opening marker glued to it —
+# commenting a whole code block snaps the boundary to the region edge
+# (``snap_out_of_code``), producing ``{==```` + fence on one line. The prefix is
+# excluded from the code range (group 1 starts the region) so those markers
+# stay parseable instead of hiding the fence and corrupting the region map.
+_RE_FENCE = re.compile(r"^[ \t]*(?:\{(?:==|\+\+|--|~~)[ \t]*)?(`{3,}|~{3,})")
 # Inline code span: a backtick run, content not crossing a newline, same run.
 _RE_INLINE_CODE = re.compile(r"(`+)(?:(?!\1)[^\n])+\1")
 
@@ -73,7 +78,9 @@ def _code_ranges(source: str) -> list[tuple[int, int]]:
         marker = (m.group(1)[0], len(m.group(1))) if m else None
         if fence is None:
             if marker:
-                fence = (marker[0], marker[1], pos)
+                # The region starts at the backticks — a glued CriticMarkup
+                # prefix ({==```) must stay *outside* the literal-code range.
+                fence = (marker[0], marker[1], pos + m.start(1))
         elif marker and marker[0] == fence[0] and marker[1] >= fence[1]:
             ranges.append((fence[2], pos + len(line)))
             fence = None
@@ -579,6 +586,38 @@ class RenderSpan:
     mark: Mark
 
 
+# A code-fence delimiter line (``` or ~~~, up to 3 spaces of indent) — a
+# sentinel glued to one of these stops Markdown from recognizing the fence.
+_RE_FENCE_LINE = re.compile(r"[ \t]{0,3}(```|~~~)")
+
+
+def _block_safe_bounds(text: str) -> tuple[int, int]:
+    """Sentinel insertion points for a mark's visible ``text``: past any
+    leading/trailing fence-delimiter or blank lines, so the markers land on
+    *content* lines. A span may legitimately cover a whole fenced code block
+    (comment the diagram!), but a sentinel character glued to the ``` line
+    breaks the fence — Markdown then parses the block's raw content, and
+    pseudo-HTML inside it (``<link>``, ``<app-…>``) garbles everything after.
+    Inside the fence the sentinels are just invisible verbatim characters, and
+    the highlight covers exactly the code content."""
+    a, b = 0, len(text)
+    while a < b:                     # skip leading blank / fence lines
+        nl = text.find("\n", a, b)
+        line = text[a:b if nl < 0 else nl]
+        if nl < 0 or not (line.strip() == "" or _RE_FENCE_LINE.match(line)):
+            break
+        a = nl + 1
+    while b > a:                     # skip trailing blank / fence lines
+        ls = text.rfind("\n", a, b)
+        line = text[a if ls < 0 else ls + 1:b]
+        if ls < 0 or not (line.strip() == "" or _RE_FENCE_LINE.match(line)):
+            break
+        b = ls                       # land before that line's newline
+    if a >= b:                       # nothing but fence/blank lines — give up
+        return 0, len(text)
+    return a, b
+
+
 def to_rendered(
     source: str,
     start: str = SENTINEL_START,
@@ -603,7 +642,8 @@ def to_rendered(
     i = 0
 
     def wrap(text: str) -> str:
-        return f"{start}{text}{end}"
+        a, b = _block_safe_bounds(text)
+        return f"{text[:a]}{start}{text[a:b]}{end}{text[b:]}"
 
     for mk in marks:
         out.append(source[i:mk.full_start])

@@ -71,6 +71,32 @@ def test_plain_markdown_renders_unchanged():
     assert "plain text only" in ed._rendered.toPlainText()
 
 
+def test_commented_code_block_renders_as_code():
+    # Regression: a comment wrapping a whole fenced block ({==``` … ```⏎==})
+    # broke the read view from that section on — the fence went unrecognized,
+    # the block's pseudo-HTML content got parsed as markup and swallowed, and
+    # the raw CriticMarkup leaked into the render.
+    md = ("Intro.\n\n"
+          "{==```\n"
+          "pipeline <app-overview [jsonLink]> stage\n"
+          "second diagram line\n"
+          "```\n"
+          "==}{>>which versions does this cover?<<}\n\n"
+          "**After** the block.\n")
+    ed = _editor(md)
+    ed._toggle_rendered()
+    shown = ed._rendered.toPlainText()
+    # block content is literal code — the pseudo-HTML tag survives as text
+    assert "pipeline <app-overview [jsonLink]> stage" in shown
+    assert "After the block." in shown
+    assert "{==" not in shown and "{>>" not in shown
+    assert "which versions" not in shown          # body hidden as usual
+    assert len(ed._rendered_comments) == 1
+    # the highlight covers the code content
+    start, end, _c = ed._rendered_comments[0]
+    assert "second diagram line" in shown[start:end]
+
+
 def test_document_with_comment_lays_out_completely():
     # Regression: any mutation after setMarkdown (the comment formats and
     # sentinel deletions) can corrupt Qt's incremental layout — it then
