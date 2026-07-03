@@ -19,6 +19,14 @@ whole review workflow — comments and suggested changes — lives here.
 - `go` — open another file without leaving the reading view (see
   [Opening files](opening.md)).
 
+## The whisper status
+
+The faint line in the card's corner tracks the read: how far through the
+document you are, roughly how many reading minutes remain, and what still
+awaits review (`42% · ~7 min left · 3 changes · 2 comments`). The review
+counts disappear as you resolve them — an empty whisper is a finished
+review.
+
 ## Comments
 
 Select a span with `v` + motions, then:

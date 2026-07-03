@@ -34,8 +34,11 @@ textli -r review.md                 # start in the reading view
 ```
 
 The editor opens ready to type (vim NORMAL mode) and autosaves while you
-work. Press `F1` inside the editor for the complete key reference, or see
-the [documentation](https://mistergc.github.io/textli/).
+work. A faint **whisper status** in the card's corner keeps you oriented —
+mode, word count, and session delta while writing; progress, minutes left,
+and open review items while reading. Press `F1` inside the editor for the
+complete key reference, or see the
+[documentation](https://mistergc.github.io/textli/).
 
 ### The short version
 

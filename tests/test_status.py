@@ -1,0 +1,35 @@
+"""Whisper status line content (textli.status) — pure formatting, no Qt."""
+
+from __future__ import annotations
+
+from textli.status import read_status, word_count, write_status
+
+
+def test_word_count_counts_the_accepted_prose():
+    # suggestions resolve as accepted, comment bodies drop, spans stay
+    src = "one {--gone --}{~~old~>two~~} {++three ++}{==four==}{>>note<<}\n"
+    assert word_count(src) == 4
+    assert word_count("") == 0
+    assert word_count("plain words here\n") == 3
+
+
+def test_write_status_mode_words_and_delta():
+    assert write_status("NORMAL", 1234, 0) == "NORMAL · 1,234 words"
+    assert write_status("INSERT", 1290, 56) == "INSERT · 1,290 words · +56"
+    assert write_status("NORMAL", 1200, -34) == "NORMAL · 1,200 words · -34"
+
+
+def test_read_status_progress_and_time_left():
+    # 220 words/min: 440 words at the top ≈ 2 min of reading ahead
+    assert read_status(0.0, 440) == "0% · ~2 min left"
+    # at the end there is nothing left to read
+    assert read_status(1.0, 440) == "100%"
+    assert read_status(2.5, 440) == "100%"          # clamped
+    # partial progress rounds the percent, ceils the minutes
+    assert read_status(0.42, 1000).startswith("42% · ~3 min left")
+
+
+def test_read_status_review_counts_and_plurals():
+    s = read_status(0.5, 220, changes=3, comment_count=1)
+    assert s.endswith("3 changes · 1 comment")
+    assert "change" not in read_status(0.5, 220)     # nothing pending, no noise

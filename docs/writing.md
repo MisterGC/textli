@@ -49,6 +49,14 @@ Both preferences persist across sessions:
 - `⌘R` flips to the [reading view](reading.md) for proof-reading and review.
 - `⌘P` prints.
 
+## The whisper status
+
+A single faint line in the card's bottom corner keeps you oriented without
+asking for attention: the vim mode, the word count, and — once you've
+changed something — the session delta (`NORMAL · 1,234 words · +56`).
+It hides whenever a card (search, open, overview) is up, and in the
+[reading view](reading.md) it turns into reading progress instead.
+
 ## Files & saving
 
 Opened on a file (the standalone `textli` CLI always is), the editor

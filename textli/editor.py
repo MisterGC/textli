@@ -50,10 +50,12 @@ from PySide6.QtWidgets import (
 from textli import comments as md_comments
 from textli import openfile
 from textli import search as md_search
+from textli import status as md_status
 from textli.open_overlay import OpenFileOverlay
 from textli.search_overlay import SearchOverlay
 from textli.constants import (
     FONT_FAMILY,
+    ZEN_HINT_COLOR,
     ZEN_MD_BG,
     ZEN_MD_CANVAS_DIM_COLOR,
     ZEN_MD_COMMENT_HL,
@@ -196,6 +198,10 @@ def editor_help_html() -> str:
     <p>A focused, distraction-free editor. It opens ready to type (vim NORMAL
     mode); <b>⌘R</b> flips to a rendered <b>reading view</b> for proof-reading,
     commenting, and suggesting changes. <b>F1</b> shows this help.</p>
+    <p>The faint line in the card's corner is the <b>whisper status</b>: while
+    writing it shows the vim mode, word count, and this session's delta; while
+    reading, how far you are, roughly how many minutes remain, and what still
+    awaits review. It hides whenever a card (search, open, overview) is up.</p>
 
     <p style='{hdr}'>Views &amp; session</p>
     <table>{rows([
@@ -479,12 +485,32 @@ class ZenMarkdownEditor(QWidget):
         # Word jump overlay
         self._jump: WordJumpOverlay | None = None
 
+        # Whisper status — one faint line in the card's corner (content built
+        # in textli.status). Word counts are debounced off textChanged; the
+        # read view updates as it scrolls. Never interactive, never boxed.
+        self._status_label = QLabel(self)
+        self._status_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._status_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._status_label.setStyleSheet(
+            f"color: rgba({ZEN_HINT_COLOR.red()}, {ZEN_HINT_COLOR.green()},"
+            f" {ZEN_HINT_COLOR.blue()}, 175); background: transparent;")
+        self._session_start_words = md_status.word_count(text)
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.setInterval(300)
+        self._status_timer.timeout.connect(self._refresh_status)
+        self._editor.textChanged.connect(self._status_timer.start)
+        self._rendered.verticalScrollBar().valueChanged.connect(
+            lambda _v: self._refresh_status())
+
         # Focus and cursor
         self._editor.setFocus()
         cursor = self._editor.textCursor()
         cursor.movePosition(cursor.MoveOperation.Start)
         self._editor.setTextCursor(cursor)
         self._update_focus()
+        self._refresh_status()
 
     def _on_mode_changed(self, mode: VimMode):
         # Disable macOS input method in normal mode to prevent IMK
@@ -493,6 +519,46 @@ class ZenMarkdownEditor(QWidget):
             Qt.WidgetAttribute.WA_InputMethodEnabled,
             mode == VimMode.INSERT,
         )
+        self._refresh_status()
+
+    # ── Whisper status line ──
+
+    def _refresh_status(self):
+        """Recompute and re-place the whisper status line. Hidden while any
+        overlay card is up — the whisper never competes for attention."""
+        lbl = getattr(self, "_status_label", None)
+        if lbl is None:
+            return
+        if (self._search_overlay is not None
+                or self._open_overlay is not None
+                or self._overview_overlay is not None):
+            lbl.hide()
+            return
+        src = self._editor.toPlainText()
+        words = md_status.word_count(src)
+        if self._rendered_mode:
+            sb = self._rendered.verticalScrollBar()
+            span = sb.maximum() + sb.pageStep()
+            progress = (sb.value() + sb.pageStep()) / span if span else 1.0
+            text = md_status.read_status(
+                progress, words,
+                changes=len(self._rendered_suggestions),
+                comment_count=len(self._rendered_comments))
+            if self._visual:
+                text = f"VISUAL{md_status.SEP}{text}"
+        else:
+            text = md_status.write_status(
+                self._vim.mode.value, words,
+                words - self._session_start_words)
+        lbl.setFont(QFont(
+            FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 4)))
+        lbl.setText(text)
+        lbl.adjustSize()
+        card = self._card_rect()
+        lbl.move(int(card.right()) - lbl.width() - ZEN_MD_CARD_INNER_PAD_H,
+                 int(card.bottom()) - lbl.height() - 10)
+        lbl.show()
+        lbl.raise_()
 
     def _start_fade_in(self):
         anim = QPropertyAnimation(self._opacity, b"opacity", self)
@@ -716,6 +782,7 @@ class ZenMarkdownEditor(QWidget):
         overlay.cancelled.connect(self._close_open_dialog)
         self._open_overlay = overlay
         overlay.open()
+        self._refresh_status()
 
     def _close_open_dialog(self):
         if self._open_overlay is not None:
@@ -724,6 +791,7 @@ class ZenMarkdownEditor(QWidget):
             self._open_overlay = None
         # Back to whichever view the dialog was opened from.
         (self._rendered if self._rendered_mode else self._editor).setFocus()
+        self._refresh_status()
 
     def _on_open_chosen(self, path: str):
         self._close_open_dialog()
@@ -761,6 +829,9 @@ class ZenMarkdownEditor(QWidget):
             rcur.movePosition(QTextCursor.MoveOperation.Start)
             self._rendered.setTextCursor(rcur)
             self._rendered.verticalScrollBar().setValue(0)
+        # A fresh file starts a fresh session baseline for the status delta.
+        self._session_start_words = md_status.word_count(text)
+        self._refresh_status()
         self._record_open_history(path)
         self.file_opened.emit(path)
 
@@ -786,6 +857,7 @@ class ZenMarkdownEditor(QWidget):
             lambda: self._active_view().setExtraSelections([]))
         self._search_overlay = overlay
         overlay.open()
+        self._refresh_status()
 
     def _close_search_overlay(self):
         if self._search_overlay is not None:
@@ -793,6 +865,7 @@ class ZenMarkdownEditor(QWidget):
             self._search_overlay.deleteLater()
             self._search_overlay = None
         self._active_view().setFocus()
+        self._refresh_status()
 
     def _search_preview(self, start: int, _end: int):
         """Live preview while the selection moves through the hit list: scroll
@@ -972,6 +1045,7 @@ class ZenMarkdownEditor(QWidget):
             self._apply_card_margins(layout)
         self._apply_heading_layout()
         self.update()
+        self._refresh_status()
 
     def _toggle_rendered(self):
         """⌘R: switch between the source editor and a read-only rendered
@@ -1024,6 +1098,7 @@ class ZenMarkdownEditor(QWidget):
             self._editor.setTextCursor(cur)
             self._editor.ensureCursorVisible()
         self.update()
+        self._refresh_status()
         # Flash last, after the view swap + repaint, so it sits clearly on top.
         self._flash_mode("READ" if self._rendered_mode else "WRITE")
 
@@ -1110,6 +1185,7 @@ class ZenMarkdownEditor(QWidget):
         doc.setMarkdown(md)
         self._apply_mark_formats(doc, spans)
         self._settle_rendered_layout()
+        self._refresh_status()   # review counts / progress just changed
 
     # ── `p` clean preview: the fully-accepted prose, no markup ──
 
@@ -1141,6 +1217,7 @@ class ZenMarkdownEditor(QWidget):
         self._rendered_suggestions = []
         self._active_comment = -1
         self._settle_rendered_layout()
+        self._refresh_status()
 
     # ── `gc` / `gh` jump-list overviews (changes / headings) ──
 
@@ -1237,6 +1314,7 @@ class ZenMarkdownEditor(QWidget):
             lbl.setTextFormat(Qt.TextFormat.RichText)
             self._overview_overlay = lbl
         self._render_overview()
+        self._refresh_status()
 
     def _render_overview(self):
         """(Re)paint the overview overlay with the current selection highlighted."""
@@ -1340,6 +1418,7 @@ class ZenMarkdownEditor(QWidget):
             self._overview_overlay = None
         if getattr(self, "_rendered", None) is not None:
             self._rendered.setFocus()
+        self._refresh_status()
 
     def _format_for_span(self, span, comment_idx: int,
                          suggest_idx: int) -> QTextCharFormat:
@@ -1610,6 +1689,7 @@ class ZenMarkdownEditor(QWidget):
         layout = self.layout()
         if layout:
             self._apply_card_margins(layout)
+        self._refresh_status()   # the card corner moved with the window
 
     def _parent_resized(self):
         parent = self.parentWidget()
@@ -1946,6 +2026,7 @@ class ZenMarkdownEditor(QWidget):
         else:
             cur.clearSelection()
         self._rendered.setTextCursor(cur)
+        self._refresh_status()
 
     def _comment_selection(self):
         """c — comment the visual selection; or, with no selection, reveal/edit
@@ -2370,6 +2451,7 @@ class ZenMarkdownEditor(QWidget):
         self._highlighter.set_base_size(self._font_size)
         # Gutter width is char-based; re-apply after font change.
         self._apply_heading_layout()
+        self._refresh_status()
         QSettings("textli", "textli").setValue(
             "zen_md/font_size", self._font_size
         )
@@ -2395,6 +2477,7 @@ class ZenMarkdownEditor(QWidget):
             self._apply_card_margins(layout)
         self._apply_heading_layout()
         self.update()
+        self._refresh_status()
         QSettings("textli", "textli").setValue(
             "zen_md/content_width", self._content_width
         )
