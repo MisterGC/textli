@@ -29,11 +29,15 @@ class VimKeyHandler:
         close_save: Callable[[], None],
         close_cancel: Callable[[], None],
         initial_mode: VimMode = VimMode.NORMAL,
+        open_file: Callable[[], None] | None = None,
     ):
         self._editor = editor
         self._mode_changed = mode_changed
         self._close_save = close_save
         self._close_cancel = close_cancel
+        # `go` — hosts with a file concept (the zen editor) open the file
+        # dialog; single-field hosts (InlineVimEditor) leave it unset.
+        self._open_file = open_file
         self._mode = initial_mode
         self._pending = ""
         # Block cursor in normal mode, caret in insert. Callers that want a
@@ -191,6 +195,9 @@ class VimKeyHandler:
         if pending == "g":
             if key == Qt.Key.Key_G:
                 self._move(_MoveOp.Start)
+                return True
+            if key == Qt.Key.Key_O and self._open_file is not None:
+                self._open_file()
                 return True
             return True  # unknown g-sequence, consume
 

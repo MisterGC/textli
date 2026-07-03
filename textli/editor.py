@@ -48,6 +48,8 @@ from PySide6.QtWidgets import (
 )
 
 from textli import comments as md_comments
+from textli import openfile
+from textli.open_overlay import OpenFileOverlay
 from textli.constants import (
     FONT_FAMILY,
     ZEN_MD_BG,
@@ -212,6 +214,16 @@ def editor_help_html() -> str:
         ("i a · I A · o O", "Enter INSERT: before/after · line start/end · new line below/above"),
         ("Esc", "Back to NORMAL mode"),
         ("x · dd · dw", "Delete char · line · to next word"),
+        ("go", "Open another file — history is fuzzy-matched, paths complete per segment"),
+    ])}</table>
+
+    <p style='{hdr}'>Open-file dialog (go)</p>
+    <table>{rows([
+        ("(type)", "Fuzzy-match your history (files &amp; their folders); a path (with <span style='font-family:monospace'>/</span> or <span style='font-family:monospace'>~</span>) also completes the filesystem, segment by segment"),
+        ("⌃n / ⌃p · ↓ / ↑", "Move the selection"),
+        ("Tab", "Complete — extend to the common prefix, else adopt the selected row"),
+        ("Enter", "Open the selected file (a directory descends into it); with no match, open the typed path as a new file"),
+        ("Esc", "Cancel, back to the editor"),
     ])}</table>
 
     <p style='{hdr}'>Reading view — navigate</p>
@@ -257,6 +269,7 @@ class ZenMarkdownEditor(QWidget):
     finished = Signal(str)
     cancelled = Signal()
     file_saved = Signal(Path)
+    file_opened = Signal(Path)   # `go` switched to (or created) this file
 
     def __init__(
         self,
@@ -315,6 +328,10 @@ class ZenMarkdownEditor(QWidget):
         self._build_ui(title, text)
         self._setup_file_watcher()
         self._enable_autosave()
+        # Every file-backed open feeds the `go` dialog's history — including
+        # this one, so it's findable from the next session's first `go`.
+        if file_path is not None:
+            self._record_open_history(file_path)
         self.show()
         self._start_fade_in()
         # Open at a location / in a mode (used by textli's open-at-anchor). The
@@ -432,7 +449,10 @@ class ZenMarkdownEditor(QWidget):
             mode_changed=self._on_mode_changed,
             close_save=self._close_save,
             close_cancel=self._close_cancel,
+            open_file=self._open_file_dialog,
         )
+        # `go` open-file overlay (created on demand, one at a time).
+        self._open_overlay: OpenFileOverlay | None = None
         self._editor.setOverwriteMode(True)  # block cursor in normal mode
         self._editor.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
         self._editor.installEventFilter(self)  # intercept keys before editor
@@ -648,6 +668,73 @@ class ZenMarkdownEditor(QWidget):
             self._editor.toPlainText(), encoding="utf-8",
         )
         self.file_saved.emit(self._file_path)
+
+    # ── `go` open-file dialog ──
+
+    @staticmethod
+    def _load_open_history() -> list[str]:
+        """Persisted open-history (most recent first). QSettings hands a lone
+        entry back as a plain string — normalize to a list of str."""
+        val = QSettings("textli", "textli").value("open/history", [])
+        if isinstance(val, str):
+            val = [val]
+        return [str(v) for v in (val or [])]
+
+    def _record_open_history(self, path: Path):
+        """LRU-promote ``path`` in the persisted history (see openfile)."""
+        hist = openfile.push_history(self._load_open_history(), str(path))
+        QSettings("textli", "textli").setValue("open/history", hist)
+
+    def _open_file_dialog(self):
+        """go — the keyboard-only open-file overlay: history matched fuzzily,
+        the filesystem completed per segment. Only for file-backed editing —
+        an embedded, text-only editor has nowhere to switch to."""
+        if self._open_overlay is not None or not self._file_path:
+            return
+        overlay = OpenFileOverlay(
+            self, self._load_open_history(), self._font_size)
+        overlay.chosen.connect(self._on_open_chosen)
+        overlay.cancelled.connect(self._close_open_dialog)
+        self._open_overlay = overlay
+        overlay.open()
+
+    def _close_open_dialog(self):
+        if self._open_overlay is not None:
+            self._open_overlay.hide()
+            self._open_overlay.deleteLater()
+            self._open_overlay = None
+        self._editor.setFocus()
+
+    def _on_open_chosen(self, path: str):
+        self._close_open_dialog()
+        self._switch_file(Path(path))
+
+    def _switch_file(self, path: Path):
+        """Jump the editor to ``path``: flush the current file (autosave owns
+        it, so there is nothing to ask), swap the buffer, and re-anchor. A path
+        that doesn't exist yet opens empty — created on first save, like the
+        CLI. The undo stack starts fresh (undo never crosses files)."""
+        if path == self._file_path:
+            return
+        if self._autosave_timer is not None and self._autosave_timer.isActive():
+            self._autosave_timer.stop()
+            self._autosave()
+        if self._watcher is not None and self._file_path:
+            self._watcher.removePath(str(self._file_path))
+        self._file_path = path
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        self._editor.setPlainText(text)
+        # setPlainText scheduled an autosave; a mere open must not touch the
+        # disk (a new file would materialize empty before any typing).
+        if self._autosave_timer is not None:
+            self._autosave_timer.stop()
+        self._apply_heading_layout()
+        cur = self._editor.textCursor()
+        cur.movePosition(QTextCursor.MoveOperation.Start)
+        self._editor.setTextCursor(cur)
+        self._update_focus()
+        self._record_open_history(path)
+        self.file_opened.emit(path)
 
     def _print(self):
         """Open native print dialog."""

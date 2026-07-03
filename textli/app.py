@@ -64,6 +64,9 @@ class TextliHost(QWidget):
         # File-backed editing autosaves, so closing simply ends the session.
         self._editor.cancelled.connect(self.close)
         self._editor.finished.connect(lambda *_: self.close())
+        # `go` switches files in place — keep the window title honest.
+        self._editor.file_opened.connect(
+            lambda p: self.setWindowTitle(f"textli — {p.name}"))
 
     def closeEvent(self, event):
         super().closeEvent(event)

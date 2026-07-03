@@ -27,6 +27,19 @@ The complete reference — the same content the editor shows on `F1`.
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
 | `Esc` | Back to NORMAL mode |
 | `x` · `dd` · `dw` | Delete char · line · to next word |
+| `go` | Open another file — history is fuzzy-matched, paths complete per segment |
+
+## Open-file dialog (`go`)
+
+| Key | Action |
+| --- | --- |
+| (type) | Fuzzy-match your history (files & their folders); a path (with `/` or `~`) also completes the filesystem, segment by segment |
+| `⌃n / ⌃p` · `↓ / ↑` | Move the selection |
+| `Tab` | Complete — extend to the common prefix, else adopt the selected row |
+| `Enter` | Open the selected file (a directory descends into it); with no match, open the typed path as a new file |
+| `Esc` | Cancel, back to the editor |
+
+See [Opening files](opening.md) for how the matching works.
 
 ## Reading view — navigate
 

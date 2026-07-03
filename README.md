@@ -47,6 +47,7 @@ the [documentation](https://mistergc.github.io/textli/).
 | `⌘.` | Section focus (dim all but the current paragraph) |
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
+| `go` | Open another file — fuzzy history + per-segment path completion |
 | `F1` | Full help |
 
 ## Embed
