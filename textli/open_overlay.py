@@ -50,17 +50,22 @@ class OpenFileOverlay(QWidget):
         self._sel = 0
         self._font_size = max(ZEN_MD_FONT_SIZE_MIN, font_size - 3)
 
+        # One card: the container itself paints the background/border (a plain
+        # QWidget needs WA_StyledBackground for that), and the rule is scoped
+        # to the container by object name so it can't cascade onto the
+        # children as their own bordered boxes.
+        self.setObjectName("zenCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "QWidget { background: #FBF7EC; border: 1px solid #C9A227;"
-            " border-radius: 8px; }")
+            "QWidget#zenCard { background: #FBF7EC;"
+            " border: 1px solid #C9A227; border-radius: 8px; }")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
 
         title = QLabel("Open file", self)
         title.setStyleSheet(
-            f"QLabel {{ color: {ZEN_TEXT_COLOR.name()}; font-weight: bold;"
-            f" border: none; }}")
+            f"QLabel {{ color: {ZEN_TEXT_COLOR.name()}; font-weight: bold; }}")
         title.setFont(QFont(FONT_FAMILY, self._font_size))
         lay.addWidget(title)
 
@@ -77,7 +82,6 @@ class OpenFileOverlay(QWidget):
         self._list = QLabel(self)
         self._list.setTextFormat(Qt.TextFormat.RichText)
         self._list.setFont(QFont(FONT_FAMILY, self._font_size))
-        self._list.setStyleSheet("QLabel { border: none; }")
         lay.addWidget(self._list)
 
         self._refresh("")

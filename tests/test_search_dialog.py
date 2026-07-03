@@ -72,21 +72,29 @@ def test_typing_lists_hits_in_document_order():
     assert ov._sel == 0
 
 
-def test_enter_jumps_and_highlights_and_keeps_query():
+def test_enter_jumps_to_the_match_and_highlights_it():
     ed = _editor()
     ed._open_search()
     ov = ed._search_overlay
     ov._input.setText("pipeline")
     first_hit = ov.hits[0]
+    match_at = first_hit.start + first_hit.text.find("pipeline")
     ov._handle_key(_ev(Qt.Key.Key_Return))
     assert ed._search_overlay is None
     assert ed._search_query == "pipeline"
-    assert ed._editor.textCursor().position() == first_hit.start
+    # the caret lands on the match itself, vim-style
+    assert ed._editor.textCursor().position() == match_at
     sels = ed._editor.extraSelections()
     assert len(sels) == 2
     colors = {s.format.background().color().rgba() for s in sels}
     assert ZEN_SEARCH_CURRENT.rgba() in colors
     assert ZEN_SEARCH_HIT.rgba() in colors
+    # the wash covers the match region, not the whole line
+    cur_sel = next(s for s in sels
+                   if s.format.background().color().rgba()
+                   == ZEN_SEARCH_CURRENT.rgba())
+    assert cur_sel.cursor.selectionStart() == match_at
+    assert cur_sel.cursor.selectionEnd() == match_at + len("pipeline")
 
 
 def test_selection_moves_and_previews():
@@ -96,8 +104,21 @@ def test_selection_moves_and_previews():
     ov._input.setText("pipeline")
     ov._handle_key(_ev(Qt.Key.Key_Down))
     assert ov._sel == 1
-    # live preview parked the caret on the selected hit
-    assert ed._editor.textCursor().position() == ov.hits[1].start
+    # live preview parked the caret on the selected hit's match
+    h = ov.hits[1]
+    assert ed._editor.textCursor().position() == \
+        h.start + h.text.find("pipeline")
+
+
+def test_emptying_the_query_clears_highlights():
+    ed = _editor()
+    ed._open_search()
+    ov = ed._search_overlay
+    ov._input.setText("pipeline")
+    assert ed._editor.extraSelections() != []
+    ov._input.setText("")                    # empty query = no search
+    assert ov.hits == []
+    assert ed._editor.extraSelections() == []
 
 
 def test_escape_restores_position_and_clears_highlights():
@@ -122,13 +143,15 @@ def test_n_and_shift_n_step_with_wrap():
     ov = ed._search_overlay
     ov._input.setText("pipeline")
     h0, h1 = ov.hits
+    m0 = h0.start + h0.text.find("pipeline")        # caret lands on the match
+    m1 = h1.start + h1.text.find("pipeline")
     ov._handle_key(_ev(Qt.Key.Key_Return))          # at hit 0
     ed._handle_key(_ev(Qt.Key.Key_N, "n"))
-    assert ed._editor.textCursor().position() == h1.start
+    assert ed._editor.textCursor().position() == m1
     ed._handle_key(_ev(Qt.Key.Key_N, "n"))          # wraps forward
-    assert ed._editor.textCursor().position() == h0.start
+    assert ed._editor.textCursor().position() == m0
     ed._handle_key(_ev(Qt.Key.Key_N, "N", shift=True))   # wraps backward
-    assert ed._editor.textCursor().position() == h1.start
+    assert ed._editor.textCursor().position() == m1
 
 
 def test_query_survives_view_toggle():
@@ -142,7 +165,7 @@ def test_query_survives_view_toggle():
     ed._handle_rendered_key(_ev(Qt.Key.Key_N, "n"))
     pos = ed._rendered.textCursor().position()
     shown = ed._rendered.toPlainText()
-    assert shown[pos:pos + 5] in ("alpha", "gamma")  # on a hit line
+    assert shown[pos:pos + 8] == "pipeline"          # caret on the match
     assert ed._rendered.extraSelections() != []
 
 

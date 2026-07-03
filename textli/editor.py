@@ -782,6 +782,8 @@ class ZenMarkdownEditor(QWidget):
         overlay.selection_changed.connect(self._search_preview)
         overlay.accepted.connect(self._search_accept)
         overlay.cancelled.connect(self._search_cancel)
+        overlay.cleared.connect(
+            lambda: self._active_view().setExtraSelections([]))
         self._search_overlay = overlay
         overlay.open(view.textCursor().position())
 
@@ -799,8 +801,9 @@ class ZenMarkdownEditor(QWidget):
         if ov is None:
             return
         view = self._active_view()
-        self._apply_search_highlights(view, ov.hits, start)
-        self._center_view_on(view, start)
+        self._apply_search_highlights(view, ov.hits, start, ov.query)
+        self._center_view_on(
+            view, self._search_caret_pos(ov.hits, start, ov.query))
 
     def _search_accept(self, start: int, _end: int):
         """Enter — jump to the hit and keep the query for n/N."""
@@ -809,8 +812,9 @@ class ZenMarkdownEditor(QWidget):
         hits = list(ov.hits) if ov else []
         self._close_search_overlay()
         view = self._active_view()
-        self._apply_search_highlights(view, hits, start)
-        self._center_view_on(view, start)
+        self._apply_search_highlights(view, hits, start, self._search_query)
+        self._center_view_on(
+            view, self._search_caret_pos(hits, start, self._search_query))
 
     def _search_cancel(self):
         """Esc — back to where the reader was, highlights gone, previous
@@ -834,21 +838,43 @@ class ZenMarkdownEditor(QWidget):
             return
         view = self._active_view()
         hits = md_search.find_hits(view.toPlainText(), self._search_query)
-        h = md_search.next_hit(hits, view.textCursor().position(), direction)
+        # Compare against the caret's *line start*: the caret sits on the match
+        # (mid-line), and stepping back must not re-land on the same hit.
+        pos = view.document().findBlock(
+            view.textCursor().position()).position()
+        h = md_search.next_hit(hits, pos, direction)
         if h is None:
             return
-        self._apply_search_highlights(view, hits, h.start)
-        self._center_view_on(view, h.start)
+        self._apply_search_highlights(view, hits, h.start, self._search_query)
+        self._center_view_on(
+            view, self._search_caret_pos(hits, h.start, self._search_query))
 
-    def _apply_search_highlights(self, view, hits, current_start: int):
+    @staticmethod
+    def _search_caret_pos(hits, line_start: int, query: str) -> int:
+        """Where the caret lands on a hit: on the contiguous match when there
+        is one (vim lands on the match, not the line), else the line start."""
+        h = next((x for x in hits if x.start == line_start), None)
+        if h is not None:
+            rng = md_search.match_range(query, h.text)
+            if rng:
+                return h.start + rng[0]
+        return line_start
+
+    def _apply_search_highlights(self, view, hits, current_start: int,
+                                 query: str):
         """All hits get the soft wash, the current one the stronger one —
-        ExtraSelections only, the document itself is never touched."""
+        ExtraSelections only, the document itself is never touched. The wash
+        covers the *match region* (the contiguous match within the line); a
+        scattered fuzzy hit falls back to its whole line."""
         sels = []
         for h in hits:
+            rng = md_search.match_range(query, h.text)
+            a, b = ((h.start + rng[0], h.start + rng[1]) if rng
+                    else (h.start, h.end))
             sel = QTextBrowser.ExtraSelection()
             cur = QTextCursor(view.document())
-            cur.setPosition(h.start)
-            cur.setPosition(h.end, QTextCursor.MoveMode.KeepAnchor)
+            cur.setPosition(a)
+            cur.setPosition(b, QTextCursor.MoveMode.KeepAnchor)
             sel.cursor = cur
             sel.format.setBackground(QBrush(
                 ZEN_SEARCH_CURRENT if h.start == current_start
