@@ -58,7 +58,7 @@ See [Opening files](opening.md) for how the matching works.
 | `h j k l` · `w b e` · `0 $` | Move a caret through the rendered text |
 | `gg / G` | Document start / end |
 | `⌃d / ⌃u` · `⌃f / ⌃b / Space` | Half-page · full-page scroll |
-| `gh` | Headings overview — an outline jump-list (`j`/`k`, `Enter`/digit, `Esc`) |
+| `gh` | Headings overview — `j`/`k` preview live, `Enter` keeps, `Esc` restores your spot |
 | `go` | Open another file (stays in the reading view) |
 
 ## Reading view — comments
@@ -78,5 +78,5 @@ See [Opening files](opening.md) for how the matching works.
 | `]s / [s` | Step to the next / previous suggestion |
 | `a / x` | Accept / reject the suggestion under the caret and advance to the next |
 | `⇧A / ⇧X` | Accept / reject all suggestions at once |
-| `gc` | Changes overview — a jump-list of every change & comment |
+| `gc` | Changes overview — every change & comment, same live preview as `gh` |
 | `p` | Clean preview — the prose with every suggestion accepted (source untouched) |

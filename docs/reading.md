@@ -10,8 +10,10 @@ whole review workflow — comments and suggested changes — lives here.
 - `h j k l`, `w / b / e`, `0 / $` — move the caret through the prose.
 - `gg / G` — document start / end; `⌃d / ⌃u`, `⌃f / ⌃b`, ++space++ —
   half-page and full-page scrolling.
-- `gh` — **headings overview**: an outline jump-list of the document
-  (`j`/`k` to move, ++enter++ or a digit to jump, ++esc++ to close).
+- `gh` — **headings overview**: an outline jump-list of the document,
+  opened on the section you're in. `j`/`k` move the selection *and preview
+  it live* — the view follows; ++enter++ stays at the previewed spot, a
+  digit jumps directly, ++esc++ returns you exactly where you were.
 - `/` — **search** with a live fuzzy hit list (same as the
   [write view](writing.md)); `n` / `N` step through the hits.
 - `go` — open another file without leaving the reading view (see
@@ -38,7 +40,9 @@ feedback is visible without shouting.
 - `a` / `x` — accept / reject the suggestion under the caret and advance
   to the next open one.
 - `⇧A` / `⇧X` — accept / reject **all** suggestions at once.
-- `gc` — **changes overview**: a jump-list of every suggestion and comment.
+- `gc` — **changes overview**: a jump-list of every suggestion and comment,
+  with the same live preview as `gh` (`j`/`k` follow, ++enter++ keeps,
+  ++esc++ restores).
 - `p` — **clean preview**: read the prose as if every suggestion were
   accepted; the source stays untouched until you actually accept.
 

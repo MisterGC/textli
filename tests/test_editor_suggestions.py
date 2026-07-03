@@ -426,3 +426,68 @@ def test_color_helpers():
     assert faded.alpha() == 0
     mid = _lerp(QColor(0, 0, 0), QColor(10, 20, 40), 0.5)
     assert (mid.red(), mid.green(), mid.blue()) == (5, 10, 20)
+
+
+# ── overview live preview (j/k follows, Enter keeps, Esc restores) ──
+
+def _long_doc():
+    return ("# First\n\n" + "line of body text\n" * 60
+            + "\n## Second\n\n" + "more body text\n" * 60 + "\n## Third\n\nend\n")
+
+
+def _shown_reading_editor(text):
+    """Preview scrolling needs real line layouts, which Qt only builds for
+    shown widgets — so show the host and re-render before asserting geometry."""
+    ed = _reading_editor(text)
+    ed._parent.show()
+    ed._render_markdown(ed._editor.toPlainText())
+    cur = ed._rendered.textCursor()
+    cur.setPosition(0)
+    ed._rendered.setTextCursor(cur)
+    ed._rendered.verticalScrollBar().setValue(0)
+    return ed
+
+
+def test_overview_jk_previews_selection_live():
+    ed = _shown_reading_editor(_long_doc())
+    _key(ed, Qt.Key.Key_G)
+    _key(ed, Qt.Key.Key_H)                 # gh from the top → row 0 selected
+    assert ed._overview_sel == 0
+    _key(ed, Qt.Key.Key_J)                 # move to "Second" — previews it
+    assert ed._overview_overlay is not None    # still open
+    assert ed._overview_sel == 1
+    start, end, _html = ed._overview_rows[1]
+    cur = ed._rendered.textCursor()
+    assert (cur.selectionStart(), cur.selectionEnd()) == (start, end)
+    # headings preview scrolls the heading to the top of the view
+    assert ed._rendered.verticalScrollBar().value() > 0
+
+
+def test_overview_escape_restores_caret_and_scroll():
+    ed = _shown_reading_editor(_long_doc())
+    _caret_on(ed, "more body")             # park mid-document…
+    ed._rendered.verticalScrollBar().setValue(37)   # …at a distinctive scroll
+    origin_pos = ed._rendered.textCursor().position()
+    _key(ed, Qt.Key.Key_G)
+    _key(ed, Qt.Key.Key_H)
+    _key(ed, Qt.Key.Key_J)                 # preview moves the view away
+    _key(ed, Qt.Key.Key_K)
+    _key(ed, Qt.Key.Key_K)
+    _key(ed, Qt.Key.Key_Escape)            # cancel — put everything back
+    assert ed._overview_overlay is None
+    assert ed._rendered.textCursor().position() == origin_pos
+    assert ed._rendered.textCursor().hasSelection() is False
+    assert ed._rendered.verticalScrollBar().value() == 37
+
+
+def test_overview_enter_keeps_previewed_spot():
+    ed = _shown_reading_editor(_long_doc())
+    _key(ed, Qt.Key.Key_G)
+    _key(ed, Qt.Key.Key_H)
+    _key(ed, Qt.Key.Key_J)                 # preview "Second"
+    previewed = ed._rendered.verticalScrollBar().value()
+    _key(ed, Qt.Key.Key_Return)            # commit
+    assert ed._overview_overlay is None
+    assert ed._rendered.verticalScrollBar().value() == previewed
+    start, _end, _html = ed._overview_rows[1]
+    assert ed._rendered.textCursor().selectionStart() == start

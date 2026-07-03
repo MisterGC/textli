@@ -244,7 +244,7 @@ def editor_help_html() -> str:
         ("h j k l · w b e · 0 $", "Move a caret through the rendered text"),
         ("gg / G", "Document start / end"),
         ("⌃d / ⌃u · ⌃f / ⌃b / Space", "Half-page · full-page scroll"),
-        ("gh", "Headings overview — an outline jump-list (j/k, Enter/digit, Esc)"),
+        ("gh", "Headings overview — j/k preview live, Enter keeps, Esc restores your spot"),
         ("go", "Open another file (stays in the reading view)"),
     ])}</table>
 
@@ -262,7 +262,7 @@ def editor_help_html() -> str:
         ("]s / [s", "Step to the next / previous suggestion"),
         ("a / x", "Accept / reject the suggestion under the caret and advance to the next"),
         ("⇧A / ⇧X", "Accept / reject all suggestions at once"),
-        ("gc", "Changes overview — a jump-list of every change &amp; comment"),
+        ("gc", "Changes overview — every change &amp; comment, same live preview as gh"),
         ("p", "Clean preview — the prose with every suggestion accepted (source untouched)"),
     ])}</table>
 
@@ -1209,13 +1209,17 @@ class ZenMarkdownEditor(QWidget):
 
     def _open_overview(self, rows, title: str, *, scroll_top: bool):
         """Show the jump-list overlay for ``rows`` (each ``(start, end, html)``),
-        selecting the row nearest the caret. j/k moves, Enter or a digit jumps, Esc
-        closes. A no-op for an empty list."""
+        selecting the row nearest the caret. j/k moves *and previews* (the view
+        follows the selection live), Enter keeps the spot, Esc returns to where
+        the reader was, a digit jumps directly. A no-op for an empty list."""
         if not rows:
             return
         self._overview_rows = rows
         self._overview_title = title
         self._overview_scroll_top = scroll_top
+        # Where the reader came from — Esc promises to put this back exactly.
+        self._overview_origin = (self._rendered.verticalScrollBar().value(),
+                                 self._rendered.textCursor().position())
         pos = self._rendered.textCursor().position()
         # Select where the reader *is*: the row whose own span holds the caret,
         # else the row whose section the caret is in (the last row starting at
@@ -1263,17 +1267,20 @@ class ZenMarkdownEditor(QWidget):
         lbl.raise_()
 
     def _handle_overview_key(self, event: QKeyEvent) -> bool:
-        """Keys while an overview is open: j/k (or arrows) move, Enter / digit
-        jumps, Esc / q / g closes."""
+        """Keys while an overview is open: j/k (or arrows) move the selection
+        and preview it live in the view, Enter keeps the previewed spot, a
+        digit jumps directly, Esc / q / g returns to the origin."""
         key = event.key()
         n = len(self._overview_rows)
         if key in (Qt.Key.Key_J, Qt.Key.Key_Down):
             self._overview_sel = min(n - 1, self._overview_sel + 1)
             self._render_overview()
+            self._preview_overview_row(self._overview_sel)
             return True
         if key in (Qt.Key.Key_K, Qt.Key.Key_Up):
             self._overview_sel = max(0, self._overview_sel - 1)
             self._render_overview()
+            self._preview_overview_row(self._overview_sel)
             return True
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._jump_to_overview_row(self._overview_sel)
@@ -1284,16 +1291,16 @@ class ZenMarkdownEditor(QWidget):
                 self._jump_to_overview_row(idx)
             return True
         if key in (Qt.Key.Key_Escape, Qt.Key.Key_Q, Qt.Key.Key_G):
-            self._close_overview()
+            self._cancel_overview()
             return True
         return True   # swallow everything else while the overview is up
 
-    def _jump_to_overview_row(self, idx: int):
-        """Select row ``idx``'s span in the read view and close the overview.
-        Headings scroll to the top of the view (outline jump); changes just scroll
-        into view, leaving the caret on the mark so a/x/Enter act on it."""
+    def _preview_overview_row(self, idx: int):
+        """Bring row ``idx``'s span into the read view without closing the
+        overview — the live preview behind j/k. Headings scroll to the top of
+        the view (outline jump); changes just scroll into view, leaving the
+        caret on the mark so a/x/Enter act on it."""
         if not (0 <= idx < len(self._overview_rows)):
-            self._close_overview()
             return
         start, end, _inner = self._overview_rows[idx]
         cur = self._rendered.textCursor()
@@ -1306,6 +1313,24 @@ class ZenMarkdownEditor(QWidget):
             self._rendered.verticalScrollBar().setValue(int(y))
         else:
             self._rendered.ensureCursorVisible()
+
+    def _jump_to_overview_row(self, idx: int):
+        """Commit row ``idx``: preview it (caret on the span, scrolled per the
+        list's style) and close the overview there."""
+        if 0 <= idx < len(self._overview_rows):
+            self._preview_overview_row(idx)
+        self._close_overview()
+
+    def _cancel_overview(self):
+        """Esc — put the reader back exactly where the overview found them
+        (caret and scroll), then close."""
+        scroll, pos = getattr(self, "_overview_origin",
+                              (None, None))
+        if pos is not None:
+            cur = self._rendered.textCursor()
+            cur.setPosition(pos)
+            self._rendered.setTextCursor(cur)
+            self._rendered.verticalScrollBar().setValue(scroll)
         self._close_overview()
 
     def _close_overview(self):
