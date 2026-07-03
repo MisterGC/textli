@@ -379,6 +379,27 @@ def test_gh_opens_headings_overview():
     assert [t for (_s, _e, _l, t) in rows] == ["First", "Second"]
 
 
+def test_gh_selects_the_section_the_caret_is_in():
+    # The overview must open on the heading of the *current section* — the
+    # caret is almost never on a heading's own span; it used to fall back to
+    # row 0, making the list dumb to navigate from mid-document.
+    ed = _reading_editor("# First\n\nbody one\n\n## Second\n\nbody two\n\n"
+                         "## Third\n\nbody three\n")
+    _caret_on(ed, "body two")              # mid-section 2, not on a heading
+    _key(ed, Qt.Key.Key_G)
+    _key(ed, Qt.Key.Key_H)
+    assert ed._overview_overlay is not None
+    assert ed._overview_sel == 1           # "Second", not "First"
+    ed._close_overview()
+    # before the first heading's section → falls back to the top row
+    cur = ed._rendered.textCursor()
+    cur.setPosition(0)
+    ed._rendered.setTextCursor(cur)
+    _key(ed, Qt.Key.Key_G)
+    _key(ed, Qt.Key.Key_H)
+    assert ed._overview_sel == 0
+
+
 def test_gh_no_op_without_headings():
     ed = _reading_editor("just a paragraph, no headings here\n")
     _key(ed, Qt.Key.Key_G)

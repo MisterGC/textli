@@ -1155,8 +1155,15 @@ class ZenMarkdownEditor(QWidget):
         self._overview_title = title
         self._overview_scroll_top = scroll_top
         pos = self._rendered.textCursor().position()
-        self._overview_sel = next(
-            (i for i, (s, e, _h) in enumerate(rows) if s <= pos <= e), 0)
+        # Select where the reader *is*: the row whose own span holds the caret,
+        # else the row whose section the caret is in (the last row starting at
+        # or before it) — so `gh` opens on the current heading, not the first.
+        sel = next((i for i, (s, e, _h) in enumerate(rows) if s <= pos <= e),
+                   None)
+        if sel is None:
+            sel = max((i for i, (s, _e, _h) in enumerate(rows) if s <= pos),
+                      default=0)
+        self._overview_sel = sel
         if self._overview_overlay is None:
             lbl = QLabel(self)
             lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
