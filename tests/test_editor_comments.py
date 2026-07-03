@@ -69,3 +69,31 @@ def test_plain_markdown_renders_unchanged():
     ed._toggle_rendered()
     assert "<h1" in ed._rendered.toHtml().lower()
     assert "plain text only" in ed._rendered.toPlainText()
+
+
+def test_document_with_comment_lays_out_completely():
+    # Regression: any mutation after setMarkdown (the comment formats and
+    # sentinel deletions) can corrupt Qt's incremental layout — it then
+    # permanently believes layout is finished while most blocks have no line
+    # layouts, and the read view paints *blank* past the stuck point no matter
+    # how far it is scrolled (hit the wild on a long doc with one comment and
+    # a code block: everything after ~one viewport was invisible). The settle
+    # now force-relays the whole document, so every block must end up with a
+    # real line layout.
+    md = ("# Top\n\nIntro {==with a comment==}{>>check<<} here.\n\n" +
+          "\n\n".join(f"Paragraph {i} " + "word " * 30 for i in range(120)))
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 700)
+    parent.show()          # line layouts only exist for shown widgets
+    ed = ZenMarkdownEditor(parent, md, title="T")
+    ed._parent = parent
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    block = doc.firstBlock()
+    unlaid = []
+    while block.isValid():
+        if block.text().strip() and block.layout().lineCount() == 0:
+            unlaid.append(block.blockNumber())
+        block = block.next()
+    assert unlaid == []

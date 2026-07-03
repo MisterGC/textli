@@ -831,16 +831,26 @@ class ZenMarkdownEditor(QWidget):
     def _settle_rendered_layout(self):
         """Force the rendered document's layout to finish before we navigate it.
 
-        ``QTextDocument`` lays out lazily and only corrects the view's scroll
-        range when the deferred relayout runs in the event loop. If the reader
-        jumps (``G``) — or we restore the scrollbar / park the caret — before
-        that settles, the scroll range is still estimated and scrolling stops
-        short of the real document end, until something forces a top-down
-        relayout. Asking the layout for its document size forces the full
-        layout synchronously; draining the remaining events (excluding user
-        input so it can't re-enter this handler) then lets the view adjust its
-        scroll range to it."""
-        self._rendered.document().documentLayout().documentSize()
+        Two Qt lazy-layout traps meet here. First, the scroll range is only an
+        estimate until the deferred relayout runs, so jumping (``G``) or
+        restoring the scrollbar too early stops short of the real document
+        end. Second — worse — *any* mutation after ``setMarkdown`` (our
+        comment formats and sentinel deletions) can corrupt the incremental
+        layout's checkpoints: it then permanently believes layout is finished
+        while most blocks have no line layouts at all, and the view paints
+        blank past the stuck point no matter how it is scrolled. Marking the
+        whole document dirty forces a synchronous top-to-bottom relayout that
+        resets that state; the event drain (excluding user input so it can't
+        re-enter this handler) then lets the view adopt the corrected scroll
+        range."""
+        doc = self._rendered.document()
+        if doc.characterCount() > 1:
+            # Reset the (possibly corrupt) incremental state, then force the
+            # relayout to complete: documentSize() ensures a *pending* layout
+            # finishes synchronously, but without the dirty-marking it is a
+            # no-op on the stuck state (which claims to be finished already).
+            doc.markContentsDirty(0, doc.characterCount() - 1)
+            doc.documentLayout().documentSize()
         QApplication.processEvents(
             QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
         )
