@@ -17,28 +17,50 @@ from dataclasses import dataclass
 from textli.openfile import fuzzy_score
 
 
+# A hit must earn at least this much score per query character. A scattered
+# one-char-here-one-char-there subsequence ("right" "matching" `soRts dynamIc
+# … paGes alpHabeTically`) scores ≈1 per char; genuine matches — substrings,
+# word starts, consecutive runs — score ≥3. Below the bar it's noise, not a
+# hit.
+MIN_SCORE_PER_CHAR = 3.0
+
+
 @dataclass(frozen=True)
 class Hit:
     """One matching line: absolute character offsets into the searched text
-    (``end`` excludes the newline) plus the line itself for preview."""
+    (``end`` excludes the newline), the line itself for preview, and its
+    match score (for ranking the list)."""
     line_no: int
     start: int
     end: int
     text: str
+    score: float
 
 
 def find_hits(text: str, query: str) -> list[Hit]:
-    """Every line of ``text`` the query fuzzy-matches, in document order.
-    An empty query matches nothing (the overlay shows hits as you type)."""
-    if not query.strip():
+    """Every line of ``text`` the query matches *well enough* (see
+    :data:`MIN_SCORE_PER_CHAR`), in document order — ``n``/``N`` walk this
+    list spatially. An empty query matches nothing."""
+    q = query.strip()
+    if not q:
         return []
+    bar = MIN_SCORE_PER_CHAR * len(q)
     hits = []
     pos = 0
     for i, line in enumerate(text.split("\n")):
-        if line.strip() and fuzzy_score(query, line) is not None:
-            hits.append(Hit(i, pos, pos + len(line), line))
+        if line.strip():
+            score = fuzzy_score(query, line)
+            if score is not None and score >= bar:
+                hits.append(Hit(i, pos, pos + len(line), line, score))
         pos += len(line) + 1
     return hits
+
+
+def rank(hits: list[Hit]) -> list[Hit]:
+    """The hit-list order the overlay shows: best score first — an exact
+    substring far outranks a scattered fuzzy match — document position as the
+    tie-break. Navigation (``n``/``N``) stays spatial; only the list ranks."""
+    return sorted(hits, key=lambda h: (-h.score, h.line_no))
 
 
 def match_range(query: str, line: str) -> tuple[int, int] | None:
@@ -47,15 +69,6 @@ def match_range(query: str, line: str) -> tuple[int, int] | None:
     fuzzy hit — the whole line is the preview)."""
     i = line.lower().find(query.lower())
     return (i, i + len(query)) if i >= 0 else None
-
-
-def initial_index(hits: list[Hit], pos: int) -> int:
-    """Where the selection starts: the first hit at or after ``pos`` — search
-    feels anchored to where the reader is — wrapping to the first hit."""
-    for i, h in enumerate(hits):
-        if h.end >= pos:
-            return i
-    return 0
 
 
 def next_hit(hits: list[Hit], pos: int, direction: int) -> Hit | None:

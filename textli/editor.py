@@ -223,7 +223,7 @@ def editor_help_html() -> str:
 
     <p style='{hdr}'>Search (/) — both views</p>
     <table>{rows([
-        ("/", "Search the document — every line the query fuzzy-matches, in document order"),
+        ("/", "Search the document — matching lines ranked best-first (exact above fuzzy)"),
         ("(type)", "Live hit list; the view scrolls to preview the selected hit"),
         ("⌃n / ⌃p · ↓ / ↑", "Move the selection"),
         ("Enter · Esc", "Jump to the hit · cancel back to where you were"),
@@ -785,7 +785,7 @@ class ZenMarkdownEditor(QWidget):
         overlay.cleared.connect(
             lambda: self._active_view().setExtraSelections([]))
         self._search_overlay = overlay
-        overlay.open(view.textCursor().position())
+        overlay.open()
 
     def _close_search_overlay(self):
         if self._search_overlay is not None:

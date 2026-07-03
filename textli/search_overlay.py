@@ -51,7 +51,6 @@ class SearchOverlay(QWidget):
                  font_size: int):
         super().__init__(parent)
         self._text_provider = text_provider
-        self._anchor = 0
         self._hits: list[search.Hit] = []
         self._sel = 0
         self._font_size = max(ZEN_MD_FONT_SIZE_MIN, font_size - 3)
@@ -100,10 +99,9 @@ class SearchOverlay(QWidget):
     def hits(self) -> list[search.Hit]:
         return self._hits
 
-    def open(self, anchor_pos: int):
-        """Show the card; the selection anchors to the first hit at or after
-        ``anchor_pos`` (where the reader is) as the query is typed."""
-        self._anchor = anchor_pos
+    def open(self):
+        """Show the card; the best-ranked hit is selected as the query is
+        typed."""
         self._region = "top"
         self._refresh("")
         self._place()
@@ -136,8 +134,10 @@ class SearchOverlay(QWidget):
     # ── Matching ──
 
     def _refresh(self, text: str):
-        self._hits = search.find_hits(self._text_provider(), text)
-        self._sel = search.initial_index(self._hits, self._anchor)
+        # Ranked for the list (best first, exact above fuzzy) — n/N later
+        # walk the document spatially, independent of this order.
+        self._hits = search.rank(search.find_hits(self._text_provider(), text))
+        self._sel = 0
         self._render()
         self._emit_selection()
 

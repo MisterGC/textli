@@ -63,11 +63,13 @@ def test_slash_opens_search_in_read_view():
 
 # ── the overlay ──
 
-def test_typing_lists_hits_in_document_order():
+def test_typing_lists_hits_ranked_best_first():
     ed = _editor()
     ed._open_search()
     ov = ed._search_overlay
     ov._input.setText("pipeline")
+    # both are substring hits; the shorter line noses ahead — and the best
+    # match is pre-selected
     assert [h.line_no for h in ov.hits] == [2, 6]
     assert ov._sel == 0
 

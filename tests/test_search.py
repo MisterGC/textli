@@ -3,7 +3,7 @@ and the n/N wrap-around navigation."""
 
 from __future__ import annotations
 
-from textli.search import Hit, find_hits, initial_index, match_range, next_hit
+from textli.search import Hit, find_hits, match_range, next_hit, rank
 
 TEXT = (
     "# Verification plan\n"          # line 0
@@ -43,12 +43,24 @@ def test_match_range_substring_vs_scattered():
     assert match_range("tpe", "The pipeline emits") is None
 
 
-def test_initial_index_anchors_at_caret():
-    hits = find_hits(TEXT, "pipeline")
-    assert initial_index(hits, 0) == 0
-    after_first = hits[0].end + 1
-    assert initial_index(hits, after_first) == 1
-    assert initial_index(hits, len(TEXT)) == 0        # past everything — wrap
+def test_scattered_noise_is_below_the_threshold():
+    # Regression from the wild: "right" is a subsequence of soRts dynamIc …
+    # paGes alpHabeTically — one stray char per word, ≈1 point each. That is
+    # noise, not a hit; the per-char score bar must drop it.
+    noise = "   sorts dynamic module pages alphabetically below\n"
+    assert find_hits(noise, "right") == []
+    # while a genuine scattered match (word starts + runs) survives
+    assert [h.line_no for h in find_hits(TEXT, "specialonce")] == [4]
+
+
+def test_rank_puts_exact_above_fuzzy():
+    text = ("a scattered special once line here\n"       # fuzzy subsequence
+            "the specialonce exact token\n")             # substring
+    hits = find_hits(text, "specialonce")
+    assert [h.line_no for h in hits] == [0, 1]           # document order
+    ranked = rank(hits)
+    assert [h.line_no for h in ranked] == [1, 0]         # exact first
+    assert ranked[0].score > ranked[1].score
 
 
 def test_next_hit_steps_and_wraps_both_ways():

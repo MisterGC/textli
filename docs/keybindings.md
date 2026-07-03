@@ -33,7 +33,7 @@ The complete reference — the same content the editor shows on `F1`.
 
 | Key | Action |
 | --- | --- |
-| `/` | Search the document — every line the query fuzzy-matches, in document order |
+| `/` | Search the document — matching lines ranked best-first (exact above fuzzy) |
 | (type) | Live hit list; the view scrolls to preview the selected hit |
 | `⌃n / ⌃p` · `↓ / ↑` | Move the selection |
 | `Enter` · `Esc` | Jump to the hit · cancel back to where you were |
