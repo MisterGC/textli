@@ -273,7 +273,8 @@ def test_editor_help_covers_the_latest_features():
     html = editor_help_html()
     # reading-view review surface must be documented
     for token in ("Suggest a change", "Accept / reject", "Changes overview",
-                  "Headings overview", "Clean preview", "CriticMarkup"):
+                  "Headings overview", "Clean preview", "CriticMarkup",
+                  "Follow the link under the caret"):
         assert token in html
     # and the keys themselves
     for key in (">gc<", ">gh<", ">p<", ">s<", ">]s / [s<"):

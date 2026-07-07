@@ -54,6 +54,7 @@ complete key reference, or see the
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |
+| `↵` | Follow the link under the caret (both views; `#heading` jumps in-document) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit) |
 | `F1` | Full help |
 

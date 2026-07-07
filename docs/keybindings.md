@@ -28,6 +28,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
 | `Esc` | Back to NORMAL mode |
 | `x` · `dd` · `dw` | Delete char · line · to next word |
+| `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
 
 ## Search (`/`) — both views
@@ -60,6 +61,7 @@ See [Opening files](opening.md) for how the matching works.
 | `gg / G` | Document start / end |
 | `⌃d / ⌃u` · `⌃f / ⌃b / Space` | Half-page · full-page scroll |
 | `gh` | Headings overview — `j`/`k` preview live, `Enter` keeps, `Esc` restores your spot |
+| `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there |
 | `go` | Open another file (stays in the reading view) |
 
 ## Reading view — comments

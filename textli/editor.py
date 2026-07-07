@@ -17,12 +17,14 @@ from PySide6.QtCore import (
     QRect,
     QRectF,
     Qt,
+    QUrl,
     Signal,
     QTimer,
 )
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QDesktopServices,
     QFont,
     QFontMetricsF,
     QKeyEvent,
@@ -48,6 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from textli import comments as md_comments
+from textli import links as md_links
 from textli import openfile
 from textli import positions as md_positions
 from textli import search as md_search
@@ -70,6 +73,7 @@ from textli.constants import (
     ZEN_MD_FONT_SIZE,
     ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN,
+    ZEN_MD_LINK_COLOR,
     ZEN_MD_MAX_WIDTH,
     ZEN_MD_MAX_WIDTH_MAX,
     ZEN_MD_MAX_WIDTH_MIN,
@@ -237,6 +241,7 @@ def editor_help_html() -> str:
         ("i a · I A · o O", "Enter INSERT: before/after · line start/end · new line below/above"),
         ("Esc", "Back to NORMAL mode"),
         ("x · dd · dw", "Delete char · line · to next word"),
+        ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there (NORMAL mode)"),
         ("go", "Open another file — history is fuzzy-matched, paths complete per segment"),
     ])}</table>
 
@@ -264,6 +269,7 @@ def editor_help_html() -> str:
         ("gg / G", "Document start / end"),
         ("⌃d / ⌃u · ⌃f / ⌃b / Space", "Half-page · full-page scroll"),
         ("gh", "Headings overview — j/k preview live, Enter keeps, Esc restores your spot"),
+        ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
         ("go", "Open another file (stays in the reading view)"),
     ])}</table>
 
@@ -1312,6 +1318,7 @@ class ZenMarkdownEditor(QWidget):
         md, spans = md_comments.to_rendered(source)
         doc = self._rendered.document()
         doc.setMarkdown(md, _MD_FEATURES)
+        self._style_links(doc)
         self._apply_mark_formats(doc, spans)
         self._settle_rendered_layout()
         self._refresh_status()   # review counts / progress just changed
@@ -1341,12 +1348,67 @@ class ZenMarkdownEditor(QWidget):
         correctness."""
         doc = self._rendered.document()
         doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
+        self._style_links(doc)
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
         self._active_comment = -1
         self._settle_rendered_layout()
         self._refresh_status()
+
+    # ── Links: zen-styled in the read view, Enter follows in either view ──
+
+    @staticmethod
+    def _style_links(doc):
+        """Restyle rendered anchors from Qt's palette blue to the zen link
+        color. Ranges are collected before formatting — mergeCharFormat
+        invalidates the fragment iterator being walked."""
+        ranges = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                if frag.charFormat().anchorHref():
+                    ranges.append((frag.position(), frag.length()))
+                it += 1
+            block = block.next()
+        fmt = QTextCharFormat()
+        fmt.setForeground(ZEN_MD_LINK_COLOR)
+        fmt.setFontUnderline(True)
+        for pos, length in ranges:
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.mergeCharFormat(fmt)
+
+    def _rendered_anchor_at_caret(self) -> str:
+        """The anchor target under the read-view caret ('' if none). The
+        caret's charFormat is the *preceding* char's, so the char to the
+        right is probed too — a block caret sits on that one."""
+        cur = self._rendered.textCursor()
+        href = cur.charFormat().anchorHref()
+        if not href:
+            probe = QTextCursor(cur)
+            if probe.movePosition(QTextCursor.MoveOperation.Right):
+                href = probe.charFormat().anchorHref()
+        return href
+
+    def _follow_link(self, target: str) -> bool:
+        """Follow ``target``: a ``#heading-slug`` jumps within the document
+        (same slugs the CLI accepts), web/mail targets open externally.
+        Returns False for anything else so Enter keeps its other meanings."""
+        if target.startswith("#"):
+            self._jump_to_anchor(target[1:])
+            return True
+        if target.split(":", 1)[0].lower() in ("http", "https", "mailto"):
+            self._open_external(QUrl(target))
+            return True
+        return False
+
+    def _open_external(self, url: QUrl):
+        """Seam for tests; the real thing hands the URL to the OS."""
+        QDesktopServices.openUrl(url)
 
     # ── `gc` / `gh` jump-list overviews (changes / headings) ──
 
@@ -1981,6 +2043,17 @@ class ZenMarkdownEditor(QWidget):
                 self._search_step(-1)
                 return True
 
+        # Enter (NORMAL) — follow the link under the caret: [text](url),
+        # <autolink> or a bare URL. INSERT keeps Enter as a newline, and with
+        # no link under the caret vim consumes it as before (a no-op).
+        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and self._vim.mode == VimMode.NORMAL
+                and not self._vim.has_pending):
+            cur = self._editor.textCursor()
+            target = md_links.link_at(cur.block().text(), cur.positionInBlock())
+            if target and self._follow_link(target):
+                return True
+
         # Route through vim handler
         return self._vim.handle_key(event)
 
@@ -2078,8 +2151,12 @@ class ZenMarkdownEditor(QWidget):
             self._review_suggestion(accept=False, every=shift)
             return True
 
-        # Enter — reveal/edit the active comment inline. ⇧D — delete it.
+        # Enter — follow the link under the caret; with none there, reveal/
+        # edit the active comment inline. ⇧D — delete it.
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not ctrl:
+            href = self._rendered_anchor_at_caret()
+            if href and self._follow_link(href):
+                return True
             self._reveal_active_comment()
             return True
         if key == Qt.Key.Key_D and shift:
