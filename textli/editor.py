@@ -31,6 +31,7 @@ from PySide6.QtGui import (
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
+    QTextDocument,
     QTextFormat,
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter
@@ -99,6 +100,16 @@ _ROLE_REMOVED, _ROLE_ADDED = 0, 1
 # the rendered sub-ranges of its removed (struck) and added text — either may be
 # None (an insertion has no removed; a deletion no added).
 RSuggestion = namedtuple("RSuggestion", "start end mark removed added")
+
+# Markdown feature set for the read view: GitHub dialect (tables, task lists)
+# but with raw HTML off — a bare tag-looking token (`<variant>`) would
+# otherwise open an HTML element that never closes and silently swallow every
+# following paragraph. With NoHTML it renders as the literal text that was
+# typed; CriticMarkup, not HTML, is textli's markup story.
+_MD_FEATURES = (
+    QTextDocument.MarkdownFeature.MarkdownDialectGitHub
+    | QTextDocument.MarkdownFeature.MarkdownNoHTML
+)
 
 
 class _ReadingView(QTextBrowser):
@@ -1300,7 +1311,7 @@ class ZenMarkdownEditor(QWidget):
         scroll to the real document end)."""
         md, spans = md_comments.to_rendered(source)
         doc = self._rendered.document()
-        doc.setMarkdown(md)
+        doc.setMarkdown(md, _MD_FEATURES)
         self._apply_mark_formats(doc, spans)
         self._settle_rendered_layout()
         self._refresh_status()   # review counts / progress just changed
@@ -1329,7 +1340,7 @@ class ZenMarkdownEditor(QWidget):
         Settled like :meth:`_render_markdown`, for the same scroll-restore
         correctness."""
         doc = self._rendered.document()
-        doc.setMarkdown(md_comments.accepted(source))
+        doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []

@@ -278,3 +278,36 @@ def test_editor_help_covers_the_latest_features():
     # and the keys themselves
     for key in (">gc<", ">gh<", ">p<", ">s<", ">]s / [s<"):
         assert key in html
+
+
+# ── Raw HTML never swallows the document (#5) ──
+
+def test_bare_html_tag_does_not_swallow_following_text():
+    # A tag-looking token outside code spans used to open an HTML element that
+    # never closes; every following paragraph vanished from the read view and
+    # only code-span contents survived. NoHTML renders it literally instead.
+    md = ("start '--target <variant>' tail with `code1` and prose.\n\n"
+          "second paragraph still visible.\n")
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 700)
+    ed = ZenMarkdownEditor(parent, md, title="T")
+    ed._parent = parent
+    ed._toggle_rendered()
+    text = ed._rendered.toPlainText()
+    assert "<variant>" in text
+    assert "tail with" in text
+    assert "second paragraph still visible." in text
+
+
+def test_bare_html_tag_renders_literally_in_clean_preview_too():
+    md = "alpha <variant> beta\n\ngamma stays.\n"
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 700)
+    ed = ZenMarkdownEditor(parent, md, title="T")
+    ed._parent = parent
+    ed._toggle_rendered()
+    ed._toggle_preview()
+    text = ed._rendered.toPlainText()
+    assert "<variant>" in text and "beta" in text and "gamma stays." in text
