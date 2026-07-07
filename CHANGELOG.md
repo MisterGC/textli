@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caret and read-view scroll (`-r` and `#heading-slug` still win).
 - **Typewriter scrolling** (`⌘T`) — the caret line holds steady while the
   page moves; persists across sessions.
+- **Follow links with `Enter`** — in either view, the caret on
+  `[text](url)`, an `<autolink>` or a bare URL follows it: web and mail
+  targets open in the default browser, `#heading-slug` targets jump within
+  the document. Rendered links wear the zen link blue instead of Qt's
+  palette default.
 
 ### Fixed
 
@@ -35,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-`setMarkdown` edits; now settled with a forced full relayout).
 - Commenting a whole fenced code block no longer breaks rendering from that
   point on.
+- A bare HTML-looking token in the source (e.g. `<variant>` outside code
+  spans) no longer silently swallows every following paragraph in the read
+  view — raw HTML now renders as the literal text that was typed.
 
 ## [0.1.0] - 2026-07-01
 

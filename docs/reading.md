@@ -20,6 +20,10 @@ number of sessions.
   digit jumps directly, ++esc++ returns you exactly where you were.
 - `/` — **search** with a live fuzzy hit list (same as the
   [write view](writing.md)); `n` / `N` step through the hits.
+- ++enter++ with the caret on a link **follows it**: web and mail targets
+  open in your default browser, `#heading` targets jump within the
+  document. Links are set in the zen link blue so they read as links
+  without shouting; clicking works too.
 - `go` — open another file without leaving the reading view (see
   [Opening files](opening.md)).
 

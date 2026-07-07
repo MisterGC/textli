@@ -50,6 +50,10 @@ Both preferences persist across sessions:
   were. Afterwards `n` / `N` step through the hits *in document order*
   (wrapping), with every match highlighted. The same search works in the
   [reading view](reading.md).
+- ++enter++ (NORMAL mode) **follows the link under the caret** — anywhere
+  inside `[text](url)`, an `<autolink>` or a bare URL. Web and mail targets
+  open in your default browser; a `#heading-slug` target jumps to that
+  heading, the same slugs the CLI's `file.md#heading` accepts.
 - `⌘R` flips to the [reading view](reading.md) for proof-reading and review.
 - `⌘P` prints.
 
