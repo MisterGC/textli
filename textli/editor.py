@@ -2000,23 +2000,14 @@ class ZenMarkdownEditor(QWidget):
             self._toggle_typewriter()
             return True
 
-        # Rendered view: vim-style navigation; Esc saves & closes.
-        if self._rendered_mode:
-            return self._handle_rendered_key(event)
-
-        # Ctrl+J — activate word jump
-        if (event.key() == Qt.Key.Key_J
-                and event.modifiers() & _CTRL_MOD):
-            self._activate_jump()
-            return True
-
-        # Ctrl+P — print
+        # Ctrl+P — print (works in either view)
         if (event.key() == Qt.Key.Key_P
                 and event.modifiers() & _CTRL_MOD):
             self._print()
             return True
 
-        # Ctrl +/-/0 — font size zoom
+        # Ctrl +/-/0 — font size zoom (works in either view; the read view
+        # re-renders inside _change_font_size)
         if event.modifiers() & _CTRL_MOD:
             if event.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
                 self._change_font_size(+1)
@@ -2027,6 +2018,16 @@ class ZenMarkdownEditor(QWidget):
             if event.key() == Qt.Key.Key_0:
                 self._change_font_size(0)
                 return True
+
+        # Rendered view: vim-style navigation; Esc saves & closes.
+        if self._rendered_mode:
+            return self._handle_rendered_key(event)
+
+        # Ctrl+J — activate word jump
+        if (event.key() == Qt.Key.Key_J
+                and event.modifiers() & _CTRL_MOD):
+            self._activate_jump()
+            return True
 
         # `/` — in-document search; n/N — step hits. NORMAL mode only (INSERT
         # must type these), and never mid-sequence (g…, d…) so vim's pending
@@ -2652,7 +2653,9 @@ class ZenMarkdownEditor(QWidget):
             apply()
 
     def _change_font_size(self, delta: int):
-        """Change font size. delta=0 resets to default."""
+        """Change font size. delta=0 resets to default. Applies to whichever
+        view is active: the read view must re-render, not just change font —
+        heading sizes are baked into char formats at setMarkdown time."""
         if delta == 0:
             new_size = ZEN_MD_FONT_SIZE
         else:
@@ -2667,6 +2670,21 @@ class ZenMarkdownEditor(QWidget):
         self._highlighter.set_base_size(self._font_size)
         # Gutter width is char-based; re-apply after font change.
         self._apply_heading_layout()
+        if self._rendered_mode:
+            self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+            pos = self._rendered.textCursor().position()
+            src = self._editor.toPlainText()
+            if self._preview:
+                self._render_preview(src)
+            else:
+                self._render_markdown(src)
+            # Same text, new metrics — the position is still valid; keep the
+            # reader anchored on it rather than snapping to the top.
+            cur = self._rendered.textCursor()
+            cur.setPosition(
+                min(pos, self._rendered.document().characterCount() - 1))
+            self._rendered.setTextCursor(cur)
+            self._rendered.ensureCursorVisible()
         self._refresh_status()
         md_settings.app_settings().setValue(
             "zen_md/font_size", self._font_size

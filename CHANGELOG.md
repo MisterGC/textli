@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bare HTML-looking token in the source (e.g. `<variant>` outside code
   spans) no longer silently swallows every following paragraph in the read
   view — raw HTML now renders as the literal text that was typed.
+- Font zoom (`⌘+`/`⌘-`/`⌘0`) and print (`⌘P`) now work in the reading view
+  too; a size change re-renders the document and keeps the caret in place.
 
 ## [0.1.0] - 2026-07-01
 

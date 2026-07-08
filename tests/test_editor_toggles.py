@@ -312,3 +312,39 @@ def test_bare_html_tag_renders_literally_in_clean_preview_too():
     ed._toggle_preview()
     text = ed._rendered.toPlainText()
     assert "<variant>" in text and "beta" in text and "gamma stays." in text
+
+
+# ── Font zoom works in the reading view too (#10) ──
+
+def test_font_zoom_works_in_the_reading_view():
+    ed = _editor()
+    ed._toggle_rendered()
+    base = ed._font_size
+    assert _press(ed, Qt.Key.Key_Plus, _CTRL_MOD)
+    assert ed._font_size == base + 1
+    assert ed._rendered.font().pointSize() == base + 1
+    # the rendered document really re-rendered at the new size
+    assert "<h1" in ed._rendered.toHtml().lower()
+    assert _press(ed, Qt.Key.Key_0, _CTRL_MOD)
+    assert ed._font_size == base
+
+
+def test_font_zoom_in_read_view_keeps_the_caret_position():
+    ed = _editor()
+    ed._toggle_rendered()
+    cur = ed._rendered.textCursor()
+    target = ed._rendered.toPlainText().index("two")
+    cur.setPosition(target)
+    ed._rendered.setTextCursor(cur)
+    _press(ed, Qt.Key.Key_Minus, _CTRL_MOD)
+    assert ed._rendered.textCursor().position() == target
+
+
+def test_font_zoom_in_read_view_survives_clean_preview():
+    ed = _editor()
+    ed._toggle_rendered()
+    ed._toggle_preview()
+    base = ed._font_size
+    assert _press(ed, Qt.Key.Key_Plus, _CTRL_MOD)
+    assert ed._font_size == base + 1
+    assert ed._preview   # still in the clean preview after the re-render
