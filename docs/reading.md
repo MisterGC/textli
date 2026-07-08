@@ -35,6 +35,12 @@ awaits review (`42% · ~7 min left · 3 changes · 2 comments`). The review
 counts disappear as you resolve them — an empty whisper is a finished
 review.
 
+## Typography
+
+Headings breathe asymmetrically — more space above (closing the previous
+section) than below (starting their own) — and `h1`/`h2` carry a thin
+rule, GitHub-style, so section breaks are visible from across the room.
+
 ## Code blocks
 
 Fenced code sits on a full-width band in a deeper paper shade, so the code

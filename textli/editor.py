@@ -80,6 +80,8 @@ from textli.constants import (
     ZEN_MD_FONT_SIZE,
     ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN,
+    ZEN_MD_HEADING_SIZES,
+    ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_LINK_COLOR,
     ZEN_MD_MAX_WIDTH,
     ZEN_MD_MAX_WIDTH_MAX,
@@ -134,6 +136,16 @@ class _ReadingView(QTextBrowser):
         super().__init__(*args, **kwargs)
         self._strikes: list[list] = []          # [start, end, alpha]
         self._strike_color = QColor(ZEN_TEXT_COLOR)
+        # Block positions of h1/h2 headings — each gets a thin muted rule
+        # painted under it (GitHub-style; block formats have no borders).
+        self._heading_rules: list[int] = []
+        self._rule_color = QColor(ZEN_MD_SYNTAX_COLOR)
+        self._rule_color.setAlpha(150)
+
+    def set_heading_rules(self, positions: list[int]):
+        """Replace the set of block positions to underline; repaint."""
+        self._heading_rules = list(positions)
+        self.viewport().update()
 
     def set_strikes(self, ranges):
         """Replace the strike set with ``ranges`` (each a rendered ``(start, end)``
@@ -155,7 +167,7 @@ class _ReadingView(QTextBrowser):
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if not self._strikes:
+        if not (self._strikes or self._heading_rules):
             return
         doc = self.document()
         layout = doc.documentLayout()
@@ -163,6 +175,20 @@ class _ReadingView(QTextBrowser):
                       -self.verticalScrollBar().value())
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._heading_rules:
+            pen = QPen(self._rule_color)
+            pen.setWidthF(1.2)
+            painter.setPen(pen)
+            for pos in self._heading_rules:
+                block = doc.findBlock(pos)
+                if not block.isValid():
+                    continue
+                r = layout.blockBoundingRect(block)
+                # The bounding rect includes the block margins; sit the rule
+                # just under the heading text, inside its bottom margin.
+                y = r.bottom() - block.blockFormat().bottomMargin() + 4 + off.y()
+                painter.drawLine(QPointF(r.left() + off.x(), y),
+                                 QPointF(r.right() + off.x(), y))
         width = self._strike_width()
         for start, end, alpha in self._strikes:
             if alpha <= 0 or end <= start:
@@ -1332,6 +1358,7 @@ class ZenMarkdownEditor(QWidget):
         self._pad_code_blocks(doc)
         self._apply_mark_formats(doc, spans)
         self._style_code_blocks(doc)
+        self._style_headings(doc)
         self._settle_rendered_layout()
         self._refresh_status()   # review counts / progress just changed
 
@@ -1363,6 +1390,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_links(doc)
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
+        self._style_headings(doc)
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
@@ -1430,8 +1458,7 @@ class ZenMarkdownEditor(QWidget):
             cur.movePosition(QTextCursor.MoveOperation.PreviousBlock)
             cur.setBlockCharFormat(pad)
 
-    @staticmethod
-    def _style_code_blocks(doc):
+    def _style_code_blocks(self, doc):
         """Make code blocks land as code: every fenced block sits on a
         full-width band in the deeper paper shade (Qt paints no background
         for them at all), and blocks with a language tag get the calm zen
@@ -1471,8 +1498,11 @@ class ZenMarkdownEditor(QWidget):
         band.setBackground(ZEN_MD_CODE_BLOCK_BG)
         # The band itself spans the full text width regardless of margins,
         # so left/right margins read as in-band padding around the code.
-        band.setLeftMargin(ZEN_MD_CODE_PAD_H)
-        band.setRightMargin(ZEN_MD_CODE_PAD_H)
+        # Em-scaled with a floor: a fixed pixel inset visually shrinks away
+        # as the font grows.
+        pad_h = max(ZEN_MD_CODE_PAD_H, round(self._font_size * 1.75))
+        band.setLeftMargin(pad_h)
+        band.setRightMargin(pad_h)
 
         for lang, lines in runs:
             for pos, _text in lines:
@@ -1497,6 +1527,30 @@ class ZenMarkdownEditor(QWidget):
                     cur.setPosition(dpos + (hi - js),
                                     QTextCursor.MoveMode.KeepAnchor)
                     cur.mergeCharFormat(token_fmts[cls])
+
+    def _style_headings(self, doc):
+        """GitHub-flavored heading rhythm. A heading closes the previous
+        section more than it opens its own, so the margin above is clearly
+        larger than the one below — per level, scaled with the font zoom.
+        h1/h2 additionally get a thin rule, painted by the view."""
+        scale = self._font_size / ZEN_MD_FONT_SIZE
+        rules = []
+        block = doc.begin()
+        while block.isValid():
+            level = block.blockFormat().headingLevel()
+            if level > 0:
+                hsize = ZEN_MD_HEADING_SIZES.get(
+                    level, ZEN_MD_FONT_SIZE) * scale
+                fmt = QTextBlockFormat()
+                fmt.setTopMargin(round(hsize * 1.5))
+                fmt.setBottomMargin(round(hsize * 0.4))
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                cur.mergeBlockFormat(fmt)
+                if level <= 2:
+                    rules.append(block.position())
+            block = block.next()
+        self._rendered.set_heading_rules(rules)
 
     def _rendered_anchor_at_caret(self) -> str:
         """The anchor target under the read-view caret ('' if none). The
