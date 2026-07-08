@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Heading rhythm in the read view** — clearly more air above a heading
   (closing the previous section) than below it, per level and scaled with
   the font zoom; `h1`/`h2` carry a thin GitHub-style rule.
+- **Inline-code chips & blockquote voice** — inline code in prose wears a
+  soft wash chip; blockquotes get hint-gray ink and a thin left bar.
+- **Section focus while reading** — `⌘.` now also works in the read view:
+  everything outside the section under the caret rests behind a
+  translucent paper wash, following the caret; comments and search stay
+  intact beneath it.
 
 ### Fixed
 

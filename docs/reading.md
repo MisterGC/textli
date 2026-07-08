@@ -40,6 +40,13 @@ review.
 Headings breathe asymmetrically — more space above (closing the previous
 section) than below (starting their own) — and `h1`/`h2` carry a thin
 rule, GitHub-style, so section breaks are visible from across the room.
+Inline code wears a soft chip wash so `identifiers` pop while scanning,
+and blockquotes get hint-gray ink with a thin bar at the left — a
+different voice for somebody else's words.
+
+`⌘.` turns on **section focus**: everything outside the section under the
+caret rests behind a translucent paper wash and follows the caret as you
+move — the rendered twin of the write view's paragraph focus.
 
 ## Code blocks
 

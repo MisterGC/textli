@@ -147,6 +147,16 @@ class _ReadingView(QTextBrowser):
         # inset is impossible that way — the view paints the band across
         # the full column and the margins inset only the code.
         self._code_bands: list[tuple[int, int]] = []
+        # Blockquote bars, same (first_pos, last_pos) shape per quote run.
+        self._quote_bars: list[tuple[int, int]] = []
+        self._quote_bar_color = QColor(ZEN_MD_SYNTAX_COLOR)
+        self._quote_bar_color.setAlpha(180)
+        # Section focus: everything outside (start_pos, end_pos) is dimmed
+        # under a translucent paper wash — nothing in the document mutates,
+        # so comments, search hits and marks stay intact beneath it.
+        self._focus_span: tuple[int, int] | None = None
+        self._focus_wash = QColor(ZEN_MD_BG)
+        self._focus_wash.setAlpha(175)
 
     def set_heading_rules(self, positions: list[int]):
         """Replace the set of block positions to underline; repaint."""
@@ -157,6 +167,17 @@ class _ReadingView(QTextBrowser):
         """Replace the set of code-band block ranges; repaint."""
         self._code_bands = list(bands)
         self.viewport().update()
+
+    def set_quote_bars(self, bars: list[tuple[int, int]]):
+        """Replace the set of blockquote bar ranges; repaint."""
+        self._quote_bars = list(bars)
+        self.viewport().update()
+
+    def set_focus_span(self, span: tuple[int, int] | None):
+        """Dim everything outside ``span`` (doc positions); None lifts it."""
+        if span != self._focus_span:
+            self._focus_span = span
+            self.viewport().update()
 
     def set_strikes(self, ranges):
         """Replace the strike set with ``ranges`` (each a rendered ``(start, end)``
@@ -206,10 +227,23 @@ class _ReadingView(QTextBrowser):
         if self._code_bands:
             self._paint_code_bands(doc, layout, off)
         super().paintEvent(event)
-        if not (self._strikes or self._heading_rules):
+        if not (self._strikes or self._heading_rules
+                or self._quote_bars or self._focus_span):
             return
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._quote_bars:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._quote_bar_color)
+            bar_x = doc.documentMargin() + 10 + off.x()
+            for first, last in self._quote_bars:
+                b0, b1 = doc.findBlock(first), doc.findBlock(last)
+                if not (b0.isValid() and b1.isValid()):
+                    continue
+                top = layout.blockBoundingRect(b0).top() + off.y()
+                bottom = layout.blockBoundingRect(b1).bottom() + off.y()
+                painter.drawRoundedRect(
+                    QRectF(bar_x, top + 2, 3.5, bottom - top - 4), 1.75, 1.75)
         if self._heading_rules:
             pen = QPen(self._rule_color)
             pen.setWidthF(1.2)
@@ -235,6 +269,21 @@ class _ReadingView(QTextBrowser):
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             self._paint_strike_range(painter, doc, layout, start, end, off)
+        if self._focus_span is not None:
+            # Painted last: the wash dims text, marks, bands and bars alike.
+            start, end = self._focus_span
+            b0, b1 = doc.findBlock(start), doc.findBlock(end)
+            if b0.isValid() and b1.isValid():
+                vp = self.viewport()
+                top = layout.blockBoundingRect(b0).top() + off.y()
+                bottom = layout.blockBoundingRect(b1).bottom() + off.y()
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(self._focus_wash)
+                if top > 0:
+                    painter.drawRect(QRectF(0, 0, vp.width(), top))
+                if bottom < vp.height():
+                    painter.drawRect(
+                        QRectF(0, bottom, vp.width(), vp.height() - bottom))
         painter.end()
 
     def _paint_strike_range(self, painter, doc, layout, start, end, off):
@@ -292,7 +341,7 @@ def editor_help_html() -> str:
         ("⌘R", "Toggle the source editor ↔ rendered reading view"),
         ("Esc", "Save &amp; close (⇧Esc cancels / discards pending changes)"),
         ("⌘↵", "Toggle full-window width"),
-        ("⌘.", "Section focus — dim all but the current paragraph"),
+        ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
         ("⌘+ / ⌘- / ⌘0", "Font size bigger / smaller / reset (persists)"),
         ("⌘⇧→ / ⌘⇧← / ⌘⇧↓", "Content column wider / narrower / reset (persists)"),
@@ -545,6 +594,9 @@ class ZenMarkdownEditor(QWidget):
         )
         self._rendered.setVisible(False)
         self._rendered.installEventFilter(self)
+        # Section focus in the read view follows the caret (⌘. gates it).
+        self._rendered.cursorPositionChanged.connect(
+            self._update_rendered_focus)
         layout.addWidget(self._rendered, stretch=1)
 
         # Animates accept/reject on the read view (fade what leaves, settle what
@@ -876,6 +928,7 @@ class ZenMarkdownEditor(QWidget):
         self._highlighter.set_focus_enabled(self._focus_enabled)
         if self._focus_enabled:
             self._update_focus()
+        self._update_rendered_focus()
         self.update()
 
     def _schedule_autosave(self):
@@ -1300,6 +1353,7 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(min(s_pos, len(src)))
             self._editor.setTextCursor(cur)
             self._editor.ensureCursorVisible()
+        self._update_rendered_focus()   # entering write mode lifts the wash
         self.update()
         self._refresh_status()
         # Flash last, after the view swap + repaint, so it sits clearly on top.
@@ -1394,7 +1448,10 @@ class ZenMarkdownEditor(QWidget):
         self._apply_mark_formats(doc, spans)
         self._style_code_blocks(doc)
         self._style_headings(doc)
+        self._style_inline_code(doc)
+        self._style_quotes(doc)
         self._settle_rendered_layout()
+        self._update_rendered_focus()
         self._refresh_status()   # review counts / progress just changed
 
     # ── `p` clean preview: the fully-accepted prose, no markup ──
@@ -1426,6 +1483,8 @@ class ZenMarkdownEditor(QWidget):
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
         self._style_headings(doc)
+        self._style_inline_code(doc)
+        self._style_quotes(doc)
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
@@ -1565,6 +1624,75 @@ class ZenMarkdownEditor(QWidget):
                     cur.mergeCharFormat(token_fmts[cls])
         self._rendered.set_code_bands(
             [(lines[0][0], lines[-1][0]) for _lang, lines in runs])
+
+    def _style_inline_code(self, doc):
+        """Chip wash for inline code in prose: Qt marks it fixed-pitch but
+        paints no background, so `identifiers` dissolve into body text.
+        Fenced blocks are skipped — they have the band."""
+        ranges = []
+        block = doc.begin()
+        while block.isValid():
+            if not block.blockFormat().hasProperty(
+                    QTextFormat.Property.BlockCodeFence):
+                it = block.begin()
+                while not it.atEnd():
+                    frag = it.fragment()
+                    if frag.charFormat().fontFixedPitch():
+                        ranges.append((frag.position(), frag.length()))
+                    it += 1
+            block = block.next()
+        fmt = QTextCharFormat()
+        fmt.setBackground(ZEN_MD_CODE_BLOCK_BG)
+        for pos, length in ranges:
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.mergeCharFormat(fmt)
+
+    def _style_quotes(self, doc):
+        """Blockquotes read as a different voice: hint-gray ink, plus a thin
+        vertical bar at the left painted by the view (Qt only indents
+        them). Consecutive quote blocks share one bar."""
+        ink = QTextCharFormat()
+        ink.setForeground(ZEN_HINT_COLOR)
+        bars = []
+        prev_quoted = False
+        block = doc.begin()
+        while block.isValid():
+            quoted = block.blockFormat().intProperty(
+                QTextFormat.Property.BlockQuoteLevel) > 0
+            if quoted:
+                if not prev_quoted:
+                    bars.append([block.position(), block.position()])
+                bars[-1][1] = block.position()
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                cur.setPosition(block.position() + max(0, block.length() - 1),
+                                QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(ink)
+            prev_quoted = quoted
+            block = block.next()
+        self._rendered.set_quote_bars([tuple(b) for b in bars])
+
+    def _update_rendered_focus(self):
+        """Keep the read view's focus wash on the section under the caret —
+        previous heading through the block before the next one. Sections
+        are the reading unit (the write view focuses paragraphs)."""
+        if not (self._rendered_mode and self._focus_enabled):
+            self._rendered.set_focus_span(None)
+            return
+        doc = self._rendered.document()
+        caret = self._rendered.textCursor().block()
+        b = caret
+        while b.isValid() and b.blockFormat().headingLevel() == 0:
+            b = b.previous()
+        start_block = b if b.isValid() else doc.begin()
+        e = caret.next()
+        while e.isValid() and e.blockFormat().headingLevel() == 0:
+            e = e.next()
+        end_pos = (e.position() - 1 if e.isValid()
+                   else doc.characterCount() - 1)
+        self._rendered.set_focus_span((start_block.position(), end_pos))
 
     def _style_headings(self, doc):
         """GitHub-flavored heading rhythm. A heading closes the previous
