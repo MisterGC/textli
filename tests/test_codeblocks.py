@@ -95,14 +95,20 @@ def _fg_by_text(doc):
     return got
 
 
-def test_every_fenced_block_sits_on_the_band():
+def test_every_fence_run_registers_a_painted_band():
+    # the band is painted by the view across the full column (block
+    # backgrounds would shift with the text-inset margins), so each fence
+    # run must be registered as a (first_pos, last_pos) band range
     ed = _editor()
     ed._toggle_rendered()
     blocks = _code_blocks(ed._rendered.document())
-    assert len(blocks) >= 3   # two python lines + one plain line
-    for b in blocks:
-        bg = b.blockFormat().background().color()
-        assert bg.name() == ZEN_MD_CODE_BLOCK_BG.name()
+    assert len(blocks) >= 3   # two python lines + one plain line, plus pads
+    bands = ed._rendered._code_bands
+    assert len(bands) == 2    # the python fence and the plain fence
+    positions = {b.position() for b in blocks}
+    for first, last in bands:
+        assert first in positions and last in positions
+        assert first < last
 
 
 def test_python_fence_wears_the_zen_token_colors():
@@ -148,17 +154,15 @@ def test_adjacent_fences_with_different_languages_stay_separate():
     fg = _fg_by_text(ed._rendered.document())
     # both lines say "import os"; only the python one may wear keyword blue —
     # the mapping keys by text, so equal texts colliding is fine: the test
-    # is that no crash occurs and blocks got the band.
+    # is that no crash occurs and both fences got their own band.
     blocks = _code_blocks(ed._rendered.document())
     assert len([b for b in blocks if b.text().strip()]) == 2
-    for b in blocks:
-        assert (b.blockFormat().background().color().name()
-                == ZEN_MD_CODE_BLOCK_BG.name())
+    assert len(ed._rendered._code_bands) == 2
 
 
 def test_fences_get_thin_pad_lines_top_and_bottom():
-    # breathing room: each fence starts and ends with an empty banded block
-    # set in a sub-height font, so the band shows air around the code (#11)
+    # breathing room: each fence starts and ends with an empty block set in
+    # a sub-height font, so the painted band shows air around the code (#11)
     ed = _editor("```python\nx = 1\n```\n")
     ed._toggle_rendered()
     blocks = _code_blocks(ed._rendered.document())
@@ -167,11 +171,13 @@ def test_fences_get_thin_pad_lines_top_and_bottom():
     assert first.text() == "" and last.text() == ""
     assert code.text() == "x = 1"
     assert first.charFormat().fontPointSize() < ed._font_size / 2 + 1
-    for b in blocks:
-        assert (b.blockFormat().background().color().name()
-                == ZEN_MD_CODE_BLOCK_BG.name())
-    # and the code is inset from the band's edge
-    assert code.blockFormat().leftMargin() > 0
+    # the band range spans pad to pad, and the code is inset within it
+    assert ed._rendered._code_bands == [(first.position(), last.position())]
+    assert code.blockFormat().leftMargin() >= ed._font_size
+    # the *band* must not move with the inset — the block itself carries no
+    # background at all (the view paints it full-column instead)
+    from PySide6.QtCore import Qt as QtCore_Qt
+    assert code.blockFormat().background().style() == QtCore_Qt.BrushStyle.NoBrush
 
 
 def test_multiline_string_across_blank_line_stays_one_string():

@@ -141,10 +141,21 @@ class _ReadingView(QTextBrowser):
         self._heading_rules: list[int] = []
         self._rule_color = QColor(ZEN_MD_SYNTAX_COLOR)
         self._rule_color.setAlpha(150)
+        # Code bands, one (first_block_pos, last_block_pos) per fence run.
+        # Painted here rather than via block backgrounds: Qt shifts a
+        # block's background along with its margins, so an in-band text
+        # inset is impossible that way — the view paints the band across
+        # the full column and the margins inset only the code.
+        self._code_bands: list[tuple[int, int]] = []
 
     def set_heading_rules(self, positions: list[int]):
         """Replace the set of block positions to underline; repaint."""
         self._heading_rules = list(positions)
+        self.viewport().update()
+
+    def set_code_bands(self, bands: list[tuple[int, int]]):
+        """Replace the set of code-band block ranges; repaint."""
+        self._code_bands = list(bands)
         self.viewport().update()
 
     def set_strikes(self, ranges):
@@ -165,14 +176,38 @@ class _ReadingView(QTextBrowser):
         """Line thickness scaled to the current font — strong but not heavy."""
         return max(2.0, self.font().pointSizeF() * 0.16)
 
+    def _paint_code_bands(self, doc, layout, off):
+        """The deeper-paper band behind each fence run, spanning the full
+        text column. Painted *before* the text so glyphs sit on top."""
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(ZEN_MD_CODE_BLOCK_BG)
+        margin = doc.documentMargin()
+        x1 = margin + off.x()
+        x2 = self.viewport().width() - margin + off.x()
+        for first, last in self._code_bands:
+            b0, b1 = doc.findBlock(first), doc.findBlock(last)
+            if not (b0.isValid() and b1.isValid()):
+                continue
+            top = layout.blockBoundingRect(b0).top() + off.y()
+            bottom = layout.blockBoundingRect(b1).bottom() + off.y()
+            if bottom < 0 or top > self.viewport().height():
+                continue
+            painter.drawRoundedRect(QRectF(x1, top, x2 - x1, bottom - top),
+                                    6.0, 6.0)
+        painter.end()
+
     def paintEvent(self, event):
-        super().paintEvent(event)
-        if not (self._strikes or self._heading_rules):
-            return
         doc = self.document()
         layout = doc.documentLayout()
         off = QPointF(-self.horizontalScrollBar().value(),
                       -self.verticalScrollBar().value())
+        if self._code_bands:
+            self._paint_code_bands(doc, layout, off)
+        super().paintEvent(event)
+        if not (self._strikes or self._heading_rules):
+            return
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._heading_rules:
@@ -1481,6 +1516,7 @@ class ZenMarkdownEditor(QWidget):
                 current_lang = None
             block = block.next()
         if not runs:
+            self._rendered.set_code_bands([])
             return
 
         token_fmts = {}
@@ -1494,21 +1530,21 @@ class ZenMarkdownEditor(QWidget):
             f.setForeground(color)
             f.setFontItalic(italic)
             token_fmts[cls] = f
-        band = QTextBlockFormat()
-        band.setBackground(ZEN_MD_CODE_BLOCK_BG)
-        # The band itself spans the full text width regardless of margins,
-        # so left/right margins read as in-band padding around the code.
-        # Em-scaled with a floor: a fixed pixel inset visually shrinks away
-        # as the font grows.
+        # In-band inset for the code: margins shift a block's *background*
+        # along with its text, so the band itself is painted by the view
+        # across the full column (set_code_bands below) and the margins
+        # here only push the code inward. Em-scaled with a floor: a fixed
+        # pixel inset visually shrinks away as the font grows.
+        inset = QTextBlockFormat()
         pad_h = max(ZEN_MD_CODE_PAD_H, round(self._font_size * 1.75))
-        band.setLeftMargin(pad_h)
-        band.setRightMargin(pad_h)
+        inset.setLeftMargin(pad_h)
+        inset.setRightMargin(pad_h)
 
         for lang, lines in runs:
             for pos, _text in lines:
                 cur = QTextCursor(doc)
                 cur.setPosition(pos)
-                cur.mergeBlockFormat(band)
+                cur.mergeBlockFormat(inset)
             # Map spans in the joined code back through per-line offsets
             # (a span can cross lines — split it at each boundary).
             joined = "\n".join(text for _pos, text in lines)
@@ -1527,6 +1563,8 @@ class ZenMarkdownEditor(QWidget):
                     cur.setPosition(dpos + (hi - js),
                                     QTextCursor.MoveMode.KeepAnchor)
                     cur.mergeCharFormat(token_fmts[cls])
+        self._rendered.set_code_bands(
+            [(lines[0][0], lines[-1][0]) for _lang, lines in runs])
 
     def _style_headings(self, doc):
         """GitHub-flavored heading rhythm. A heading closes the previous
