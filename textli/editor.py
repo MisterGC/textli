@@ -68,6 +68,7 @@ from textli.constants import (
     ZEN_HINT_COLOR,
     ZEN_MD_BG,
     ZEN_MD_CODE_BLOCK_BG,
+    ZEN_MD_CODE_PAD_H,
     ZEN_MD_CANVAS_DIM_COLOR,
     ZEN_MD_COMMENT_HL,
     ZEN_MD_SUGGEST_ADD,
@@ -1325,6 +1326,10 @@ class ZenMarkdownEditor(QWidget):
         doc = self._rendered.document()
         doc.setMarkdown(md, _MD_FEATURES)
         self._style_links(doc)
+        # Pad lines are *insertions* — they must land before the mark pass
+        # records comment/suggestion offsets. The band/token pass below only
+        # applies formats, which shift nothing.
+        self._pad_code_blocks(doc)
         self._apply_mark_formats(doc, spans)
         self._style_code_blocks(doc)
         self._settle_rendered_layout()
@@ -1356,6 +1361,7 @@ class ZenMarkdownEditor(QWidget):
         doc = self._rendered.document()
         doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
         self._style_links(doc)
+        self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
         self._rendered.set_strikes([])
         self._rendered_comments = []
@@ -1389,6 +1395,40 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos)
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.mergeCharFormat(fmt)
+
+    def _pad_code_blocks(self, doc):
+        """Vertical breathing room inside the code band. Block margins paint
+        as paper, not band, so each fence gets a real — but thin, sub-height
+        — empty code line at its top and bottom; they inherit the fence
+        block format and thus join the band. Runs are processed bottom-up
+        because every insert shifts all positions after it; callers must
+        invoke this before any pass that records document offsets."""
+        runs = []                     # [first_pos, last_pos, last_len]
+        prev_fenced = False
+        block = doc.begin()
+        while block.isValid():
+            fenced = block.blockFormat().hasProperty(
+                QTextFormat.Property.BlockCodeFence)
+            if fenced and not prev_fenced:
+                runs.append([block.position(), block.position(),
+                             len(block.text())])
+            elif fenced:
+                runs[-1][1] = block.position()
+                runs[-1][2] = len(block.text())
+            prev_fenced = fenced
+            block = block.next()
+        pad = QTextCharFormat()
+        pad.setFontPointSize(max(4.0, self._font_size * 0.45))
+        for first, last, last_len in reversed(runs):
+            cur = QTextCursor(doc)
+            cur.setPosition(last + last_len)
+            cur.insertBlock()             # empty block below, format kept
+            cur.setBlockCharFormat(pad)
+            cur = QTextCursor(doc)
+            cur.setPosition(first)
+            cur.insertBlock()             # splits: the empty half stays above
+            cur.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+            cur.setBlockCharFormat(pad)
 
     @staticmethod
     def _style_code_blocks(doc):
@@ -1429,6 +1469,10 @@ class ZenMarkdownEditor(QWidget):
             token_fmts[cls] = f
         band = QTextBlockFormat()
         band.setBackground(ZEN_MD_CODE_BLOCK_BG)
+        # The band itself spans the full text width regardless of margins,
+        # so left/right margins read as in-band padding around the code.
+        band.setLeftMargin(ZEN_MD_CODE_PAD_H)
+        band.setRightMargin(ZEN_MD_CODE_PAD_H)
 
         for lang, lines in runs:
             for pos, _text in lines:

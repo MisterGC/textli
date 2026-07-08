@@ -150,10 +150,28 @@ def test_adjacent_fences_with_different_languages_stay_separate():
     # the mapping keys by text, so equal texts colliding is fine: the test
     # is that no crash occurs and blocks got the band.
     blocks = _code_blocks(ed._rendered.document())
-    assert len(blocks) == 2
+    assert len([b for b in blocks if b.text().strip()]) == 2
     for b in blocks:
         assert (b.blockFormat().background().color().name()
                 == ZEN_MD_CODE_BLOCK_BG.name())
+
+
+def test_fences_get_thin_pad_lines_top_and_bottom():
+    # breathing room: each fence starts and ends with an empty banded block
+    # set in a sub-height font, so the band shows air around the code (#11)
+    ed = _editor("```python\nx = 1\n```\n")
+    ed._toggle_rendered()
+    blocks = _code_blocks(ed._rendered.document())
+    assert len(blocks) == 3
+    first, code, last = blocks
+    assert first.text() == "" and last.text() == ""
+    assert code.text() == "x = 1"
+    assert first.charFormat().fontPointSize() < ed._font_size / 2 + 1
+    for b in blocks:
+        assert (b.blockFormat().background().color().name()
+                == ZEN_MD_CODE_BLOCK_BG.name())
+    # and the code is inset from the band's edge
+    assert code.blockFormat().leftMargin() > 0
 
 
 def test_multiline_string_across_blank_line_stays_one_string():

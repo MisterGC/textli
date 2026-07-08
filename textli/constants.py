@@ -28,6 +28,7 @@ ZEN_MD_CODE_BG = QColor("#EDE9E3")
 # staying warm — plus a calm token scheme drawn from the palette above:
 # everything not listed stays body ink.
 ZEN_MD_CODE_BLOCK_BG = QColor("#E5DAC0")
+ZEN_MD_CODE_PAD_H = 14          # in-band breathing room left/right of the code
 ZEN_CODE_KEYWORD = QColor("#004578")     # the zen blue (titles, links)
 ZEN_CODE_STRING = QColor("#A83E2E")      # the warm suggestion red
 ZEN_CODE_COMMENT = QColor("#8A8580")     # hint gray (rendered italic)
