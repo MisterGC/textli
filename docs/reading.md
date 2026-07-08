@@ -35,6 +35,15 @@ awaits review (`42% · ~7 min left · 3 changes · 2 comments`). The review
 counts disappear as you resolve them — an empty whisper is a finished
 review.
 
+## Code blocks
+
+Fenced code sits on a full-width band in a deeper paper shade, so the code
+part of a document is visible at a glance. A language tag on the fence
+(` ```python `) adds calm syntax highlighting drawn from the zen palette —
+keywords in the title blue, strings in the warm red, comments in gray
+italic, numbers and constants in amber; everything else stays body ink. No
+tag means no colors: the band alone marks the block.
+
 ## Comments
 
 Select a span with `v` + motions, then:

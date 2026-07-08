@@ -23,6 +23,15 @@ ZEN_MD_WIDTH_STEP = 80          # per-keystroke width increment
 ZEN_MD_BG = QColor("#EEE5D0")
 ZEN_MD_HEADING_SIZES = {1: 22, 2: 18, 3: 15}
 ZEN_MD_CODE_BG = QColor("#EDE9E3")
+# Read-view code blocks: a full-width band in a deeper paper shade — enough
+# step-down from the page (#EEE5D0) to read as "code lives here" while
+# staying warm — plus a calm token scheme drawn from the palette above:
+# everything not listed stays body ink.
+ZEN_MD_CODE_BLOCK_BG = QColor("#E5DAC0")
+ZEN_CODE_KEYWORD = QColor("#004578")     # the zen blue (titles, links)
+ZEN_CODE_STRING = QColor("#A83E2E")      # the warm suggestion red
+ZEN_CODE_COMMENT = QColor("#8A8580")     # hint gray (rendered italic)
+ZEN_CODE_NUMBER = QColor("#C9A227")      # the overlay-card amber
 ZEN_MD_LINK_COLOR = QColor("#004578")
 ZEN_MD_MUTED_ALPHA = 100
 ZEN_MD_SYNTAX_COLOR = QColor("#B8B3AB")

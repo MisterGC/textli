@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from textli import codeblocks as md_codeblocks
 from textli import comments as md_comments
 from textli import links as md_links
 from textli import openfile
@@ -60,8 +61,13 @@ from textli.open_overlay import OpenFileOverlay
 from textli.search_overlay import SearchOverlay
 from textli.constants import (
     FONT_FAMILY,
+    ZEN_CODE_COMMENT,
+    ZEN_CODE_KEYWORD,
+    ZEN_CODE_NUMBER,
+    ZEN_CODE_STRING,
     ZEN_HINT_COLOR,
     ZEN_MD_BG,
+    ZEN_MD_CODE_BLOCK_BG,
     ZEN_MD_CANVAS_DIM_COLOR,
     ZEN_MD_COMMENT_HL,
     ZEN_MD_SUGGEST_ADD,
@@ -1320,6 +1326,7 @@ class ZenMarkdownEditor(QWidget):
         doc.setMarkdown(md, _MD_FEATURES)
         self._style_links(doc)
         self._apply_mark_formats(doc, spans)
+        self._style_code_blocks(doc)
         self._settle_rendered_layout()
         self._refresh_status()   # review counts / progress just changed
 
@@ -1349,6 +1356,7 @@ class ZenMarkdownEditor(QWidget):
         doc = self._rendered.document()
         doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
         self._style_links(doc)
+        self._style_code_blocks(doc)
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
@@ -1381,6 +1389,70 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos)
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.mergeCharFormat(fmt)
+
+    @staticmethod
+    def _style_code_blocks(doc):
+        """Make code blocks land as code: every fenced block sits on a
+        full-width band in the deeper paper shade (Qt paints no background
+        for them at all), and blocks with a language tag get the calm zen
+        token scheme via Pygments. Rendered blocks are one QTextBlock per
+        code *line*; consecutive lines of one fence are lexed as a single
+        unit so multi-line strings and comments hold together."""
+        runs = []            # (language, [(doc_pos, line_text), ...])
+        current_lang = None
+        block = doc.begin()
+        while block.isValid():
+            bf = block.blockFormat()
+            if bf.hasProperty(QTextFormat.Property.BlockCodeFence):
+                lang = bf.stringProperty(
+                    QTextFormat.Property.BlockCodeLanguage)
+                if current_lang is None or lang != current_lang:
+                    runs.append((lang, []))
+                current_lang = lang
+                runs[-1][1].append((block.position(), block.text()))
+            else:
+                current_lang = None
+            block = block.next()
+        if not runs:
+            return
+
+        token_fmts = {}
+        for cls, color, italic in (
+            ("keyword", ZEN_CODE_KEYWORD, False),
+            ("string", ZEN_CODE_STRING, False),
+            ("comment", ZEN_CODE_COMMENT, True),
+            ("number", ZEN_CODE_NUMBER, False),
+        ):
+            f = QTextCharFormat()
+            f.setForeground(color)
+            f.setFontItalic(italic)
+            token_fmts[cls] = f
+        band = QTextBlockFormat()
+        band.setBackground(ZEN_MD_CODE_BLOCK_BG)
+
+        for lang, lines in runs:
+            for pos, _text in lines:
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.mergeBlockFormat(band)
+            # Map spans in the joined code back through per-line offsets
+            # (a span can cross lines — split it at each boundary).
+            joined = "\n".join(text for _pos, text in lines)
+            offsets = []                       # (join_start, join_end, doc_pos)
+            at = 0
+            for pos, text in lines:
+                offsets.append((at, at + len(text), pos))
+                at += len(text) + 1            # the joining "\n"
+            for s, e, cls in md_codeblocks.highlight_spans(joined, lang):
+                for js, je, dpos in offsets:
+                    lo, hi = max(s, js), min(e, je)
+                    if lo >= hi:
+                        continue
+                    cur = QTextCursor(doc)
+                    cur.setPosition(dpos + (lo - js))
+                    cur.setPosition(dpos + (hi - js),
+                                    QTextCursor.MoveMode.KeepAnchor)
+                    cur.mergeCharFormat(token_fmts[cls])
 
     def _rendered_anchor_at_caret(self) -> str:
         """The anchor target under the read-view caret ('' if none). The

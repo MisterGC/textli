@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targets open in the default browser, `#heading-slug` targets jump within
   the document. Rendered links wear the zen link blue instead of Qt's
   palette default.
+- **Code blocks stand out in the read view** — fenced code sits on a
+  full-width band in a deeper paper shade; a language tag brings calm
+  zen-palette syntax highlighting (via Pygments, now a dependency):
+  keywords blue, strings warm red, comments gray italic, numbers amber.
 
 ### Fixed
 
