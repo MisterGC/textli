@@ -33,3 +33,21 @@ def test_read_status_review_counts_and_plurals():
     s = read_status(0.5, 220, changes=3, comment_count=1)
     assert s.endswith("3 changes · 1 comment")
     assert "change" not in read_status(0.5, 220)     # nothing pending, no noise
+
+
+def test_read_status_section_breadcrumb_leads():
+    # the section under the caret prefixes the whisper, then progress etc.
+    assert read_status(0.42, 1000, section="Design").startswith(
+        "§ Design · 42%")
+    s = read_status(0.5, 220, changes=2, section="Architecture")
+    assert s == "§ Architecture · 50% · ~1 min left · 2 changes"
+    # no section (before the first heading) → no breadcrumb, no stray marker
+    assert "§" not in read_status(0.5, 220)
+
+
+def test_read_status_section_elides_when_long():
+    long = "A very long heading that would otherwise crowd the whole whisper"
+    s = read_status(0.0, 220, section=long)
+    head = s.split(" · ")[0]
+    assert head.startswith("§ ") and head.endswith("…")
+    assert len(head) <= 2 + 48        # "§ " + capped section

@@ -80,3 +80,34 @@ def test_visual_mode_is_whispered_in_read_view():
         QEvent.Type.KeyPress, Qt.Key.Key_V,
         Qt.KeyboardModifier.NoModifier, "v", False, 1))
     assert not ed._status_label.text().startswith("VISUAL")
+
+
+def test_read_view_breadcrumbs_the_section_under_the_caret():
+    from PySide6.QtGui import QTextCursor
+    md = ("# One\n\nfirst body paragraph here\n\n"
+          "## Two\n\nsecond body paragraph here\n")
+    ed = _editor(md)
+    ed._toggle_rendered()
+
+    def caret_to(needle):
+        doc = ed._rendered.document()
+        block = doc.begin()
+        while block.isValid():
+            if needle in block.text():
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                ed._rendered.setTextCursor(cur)
+                return
+            block = block.next()
+        raise AssertionError(f"no block with {needle!r}")
+
+    caret_to("first body")
+    assert ed._status_label.text().startswith("§ One · ")
+    caret_to("second body")
+    assert ed._status_label.text().startswith("§ Two · ")
+
+
+def test_read_view_breadcrumb_absent_before_first_heading():
+    ed = _editor("plain preamble with no heading yet\n")
+    ed._toggle_rendered()
+    assert "§" not in ed._status_label.text()

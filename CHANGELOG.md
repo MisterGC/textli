@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   everything outside the section under the caret rests behind a
   translucent paper wash, following the caret; comments and search stay
   intact beneath it.
+- **Whisper breadcrumb while reading** — the read-view status leads with
+  the section under the caret (`§ Architecture · 42% · ~7 min left`), so a
+  long document always tells you where you are; empty before the first
+  heading, and it follows the caret.
 
 ### Fixed
 
@@ -57,8 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bare HTML-looking token in the source (e.g. `<variant>` outside code
   spans) no longer silently swallows every following paragraph in the read
   view — raw HTML now renders as the literal text that was typed.
-- Font zoom (`⌘+`/`⌘-`/`⌘0`) and print (`⌘P`) now work in the reading view
-  too; a size change re-renders the document and keeps the caret in place.
+- Font zoom (`⌘+`/`⌘-`/`⌘0`) now works in the reading view too; a size
+  change re-renders the document and keeps the caret in place.
+- Print (`⌘P`) in the reading view now prints the typeset page instead of
+  the raw CriticMarkup source, with the code band baked in as a real
+  background so fenced code stands out on paper.
+- Relative image links (`![](diagram.png)`) now render in the reading view
+  no matter where textli was launched from — resources resolve against the
+  document's own folder, not the process working directory.
 
 ## [0.1.0] - 2026-07-01
 

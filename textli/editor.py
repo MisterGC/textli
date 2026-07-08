@@ -333,8 +333,9 @@ def editor_help_html() -> str:
     commenting, and suggesting changes. <b>F1</b> shows this help.</p>
     <p>The faint line in the card's corner is the <b>whisper status</b>: while
     writing it shows the vim mode, word count, and this session's delta; while
-    reading, how far you are, roughly how many minutes remain, and what still
-    awaits review. It hides whenever a card (search, open, overview) is up.</p>
+    reading, the section you're in, how far you are, roughly how many minutes
+    remain, and what still awaits review. It hides whenever a card (search,
+    open, overview) is up.</p>
 
     <p style='{hdr}'>Views &amp; session</p>
     <table>{rows([
@@ -594,9 +595,11 @@ class ZenMarkdownEditor(QWidget):
         )
         self._rendered.setVisible(False)
         self._rendered.installEventFilter(self)
-        # Section focus in the read view follows the caret (⌘. gates it).
+        # Section focus and the whisper breadcrumb follow the read-view caret
+        # (a caret move that doesn't scroll won't fire the scrollbar signal).
         self._rendered.cursorPositionChanged.connect(
             self._update_rendered_focus)
+        self._rendered.cursorPositionChanged.connect(self._refresh_status)
         layout.addWidget(self._rendered, stretch=1)
 
         # Animates accept/reject on the read view (fade what leaves, settle what
@@ -701,7 +704,8 @@ class ZenMarkdownEditor(QWidget):
             text = md_status.read_status(
                 progress, words,
                 changes=len(self._rendered_suggestions),
-                comment_count=len(self._rendered_comments))
+                comment_count=len(self._rendered_comments),
+                section=self._current_rendered_section())
             if self._visual:
                 text = f"VISUAL{md_status.SEP}{text}"
         else:
@@ -1261,13 +1265,46 @@ class ZenMarkdownEditor(QWidget):
             sb.setValue(max(0, int(y - view.viewport().height() * 0.35)))
 
     def _print(self):
-        """Open native print dialog."""
-        self._highlighter.set_focus_enabled(False)
+        """⌘P — native print dialog. In the reading view it prints the typeset
+        page (not the raw source), with the code band baked in as a real block
+        background since the on-screen band is view-painting. In the write view
+        it prints the source with section-focus dimming off."""
+        write_mode = not self._rendered_mode
+        if write_mode:
+            self._highlighter.set_focus_enabled(False)
         printer = QPrinter()
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-            self._editor.print_(printer)
-        self._highlighter.set_focus_enabled(self._focus_enabled)
+            if write_mode:
+                self._editor.print_(printer)
+            else:
+                self._print_rendered(printer)
+        if write_mode:
+            self._highlighter.set_focus_enabled(self._focus_enabled)
+
+    def _print_rendered(self, printer):
+        """Print the read view's typeset page — via a clone whose code band is
+        re-expressed as a real block background, since the on-screen band is
+        view-painting. The live document is untouched."""
+        self._baked_print_doc().print_(printer)
+
+    def _baked_print_doc(self):
+        """A clone of the rendered document with the code band baked in as a
+        real block background — the one view-painted overlay that carries
+        meaning on paper. Heading rules and the quote bar stay screen-only
+        (no document-format equivalent). Cloning keeps the live view intact."""
+        doc = self._rendered.document().clone()
+        band = QTextBlockFormat()
+        band.setBackground(ZEN_MD_CODE_BLOCK_BG)
+        block = doc.begin()
+        while block.isValid():
+            if block.blockFormat().hasProperty(
+                    QTextFormat.Property.BlockCodeFence):
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                cur.mergeBlockFormat(band)
+            block = block.next()
+        return doc
 
     def _show_help(self):
         """F1 — the editor's own help dialog (modeless, so it never blocks the
@@ -1426,6 +1463,15 @@ class ZenMarkdownEditor(QWidget):
         anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
         self._mode_flash_anim = anim   # hold a ref so it isn't GC'd mid-run
 
+    def _apply_doc_base_url(self, doc):
+        """Resolve relative resources (images today, links later) against the
+        document's own folder instead of the process working directory — so
+        ``![](diagram.png)`` renders wherever textli was launched from. A
+        no-op for unsaved buffers, which have no folder to resolve against."""
+        if self._file_path is not None:
+            doc.setBaseUrl(
+                QUrl.fromLocalFile(str(self._file_path.parent) + "/"))
+
     def _render_markdown(self, source: str):
         """Render ``source`` into the read view: comment spans are highlighted
         (bodies hidden, revealed on demand), and suggestion marks are styled as
@@ -1440,6 +1486,7 @@ class ZenMarkdownEditor(QWidget):
         md, spans = md_comments.to_rendered(source)
         doc = self._rendered.document()
         doc.setMarkdown(md, _MD_FEATURES)
+        self._apply_doc_base_url(doc)
         self._style_links(doc)
         # Pad lines are *insertions* — they must land before the mark pass
         # records comment/suggestion offsets. The band/token pass below only
@@ -1479,6 +1526,7 @@ class ZenMarkdownEditor(QWidget):
         correctness."""
         doc = self._rendered.document()
         doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
+        self._apply_doc_base_url(doc)
         self._style_links(doc)
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
@@ -1693,6 +1741,15 @@ class ZenMarkdownEditor(QWidget):
         end_pos = (e.position() - 1 if e.isValid()
                    else doc.characterCount() - 1)
         self._rendered.set_focus_span((start_block.position(), end_pos))
+
+    def _current_rendered_section(self) -> str:
+        """The heading of the section under the read-view caret — the whisper
+        breadcrumb. Empty before the first heading (the document's preamble
+        has no section to name)."""
+        b = self._rendered.textCursor().block()
+        while b.isValid() and b.blockFormat().headingLevel() == 0:
+            b = b.previous()
+        return b.text().strip() if b.isValid() else ""
 
     def _style_headings(self, doc):
         """GitHub-flavored heading rhythm. A heading closes the previous

@@ -39,11 +39,19 @@ def write_status(mode: str, words: int, session_delta: int) -> str:
     return SEP.join(parts)
 
 
+# Longest section name the whisper carries before eliding — a breadcrumb, not
+# a headline; anything past this earns an ellipsis rather than pushing the
+# progress and review counts off the card.
+_SECTION_MAX = 48
+
+
 def read_status(progress: float, words_total: int,
-                changes: int = 0, comment_count: int = 0) -> str:
-    """The read-view whisper: ``42% · ~7 min left · 3 changes · 2 comments``.
+                changes: int = 0, comment_count: int = 0,
+                section: str = "") -> str:
+    """The read-view whisper: ``§ Design · 42% · ~7 min left · 2 comments``.
     ``progress`` is the fraction of the document the view has scrolled past
-    (0..1); review parts appear only while there is something to review."""
+    (0..1); ``section`` is the heading under the caret (empty before the first
+    heading). Review parts appear only while there is something to review."""
     progress = min(1.0, max(0.0, progress))
     parts = [f"{round(progress * 100)}%"]
     minutes = math.ceil(words_total * (1.0 - progress) / WORDS_PER_MINUTE)
@@ -53,4 +61,9 @@ def read_status(progress: float, words_total: int,
         parts.append(f"{changes} change{'s' if changes != 1 else ''}")
     if comment_count:
         parts.append(f"{comment_count} comment{'s' if comment_count != 1 else ''}")
+    section = section.strip()
+    if section:
+        if len(section) > _SECTION_MAX:
+            section = section[:_SECTION_MAX - 1].rstrip() + "…"
+        parts.insert(0, f"§ {section}")
     return SEP.join(parts)

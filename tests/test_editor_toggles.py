@@ -348,3 +348,81 @@ def test_font_zoom_in_read_view_survives_clean_preview():
     assert _press(ed, Qt.Key.Key_Plus, _CTRL_MOD)
     assert ed._font_size == base + 1
     assert ed._preview   # still in the clean preview after the re-render
+
+
+# ── Relative images resolve against the document's folder (#15) ──
+
+def test_relative_image_resolves_against_the_document_folder():
+    import tempfile
+    from pathlib import Path
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtCore import QUrl
+
+    QApplication.instance() or QApplication([])
+    docdir = Path(tempfile.mkdtemp(prefix="textli_img_"))
+    img = QImage(120, 80, QImage.Format.Format_RGB32)
+    img.fill(QColor("#3366cc"))
+    img.save(str(docdir / "diagram.png"))
+    mdfile = docdir / "note.md"
+    md = "# Title\n\n![diagram](diagram.png)\n"
+    mdfile.write_text(md)
+
+    cwd = os.getcwd()
+    os.chdir(tempfile.mkdtemp(prefix="textli_cwd_"))   # not the doc's folder
+    try:
+        parent = QWidget()
+        parent.resize(700, 500)
+        ed = ZenMarkdownEditor(parent, md, title="t", file_path=mdfile)
+        ed._parent = parent
+        ed._toggle_rendered()
+        doc = ed._rendered.document()
+        # the document knows its own folder, so Qt resolves relative resource
+        # names (images, links) against it rather than the process cwd
+        assert doc.baseUrl() == QUrl.fromLocalFile(str(docdir) + "/")
+    finally:
+        os.chdir(cwd)
+
+
+def test_unsaved_buffer_has_no_base_url():
+    ed = _editor()             # no file_path
+    ed._toggle_rendered()
+    assert ed._rendered.document().baseUrl().isEmpty()
+
+
+# ── Read-view print bakes the code band into the page (#16) ──
+
+def test_baked_print_doc_carries_the_code_band():
+    from PySide6.QtGui import QTextFormat
+    from textli.constants import ZEN_MD_CODE_BLOCK_BG
+
+    md = "text before\n\n```python\nx = 1\n```\n\ntext after\n"
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(700, 500)
+    ed = ZenMarkdownEditor(parent, md, title="t")
+    ed._parent = parent
+    ed._toggle_rendered()
+
+    printed = ed._baked_print_doc()
+
+    def banded(doc):
+        out = []
+        b = doc.begin()
+        while b.isValid():
+            fenced = b.blockFormat().hasProperty(
+                QTextFormat.Property.BlockCodeFence)
+            bg = b.blockFormat().background().color()
+            out.append((fenced, b.text(),
+                        bg == ZEN_MD_CODE_BLOCK_BG))
+            b = b.next()
+        return out
+
+    # every fenced block in the printed clone wears the band background...
+    assert any(fenced and has_bg for fenced, _t, has_bg in banded(printed))
+    assert all(has_bg for fenced, _t, has_bg in banded(printed) if fenced)
+    # ...and no prose block does
+    assert not any(has_bg for fenced, _t, has_bg in banded(printed)
+                   if not fenced)
+    # the live view is untouched — the band there is view-painting, not a bg
+    assert not any(has_bg for fenced, _t, has_bg
+                   in banded(ed._rendered.document()) if fenced)

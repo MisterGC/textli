@@ -29,11 +29,14 @@ number of sessions.
 
 ## The whisper status
 
-The faint line in the card's corner tracks the read: how far through the
-document you are, roughly how many reading minutes remain, and what still
-awaits review (`42% · ~7 min left · 3 changes · 2 comments`). The review
-counts disappear as you resolve them — an empty whisper is a finished
-review.
+The faint line in the card's corner tracks the read: the section you're in,
+how far through the document you are, roughly how many reading minutes
+remain, and what still awaits review
+(`§ Architecture · 42% · ~7 min left · 3 changes · 2 comments`). The
+section breadcrumb follows the caret — so a long document always tells you
+where you are without opening the headings overview — and is absent before
+the first heading. The review counts disappear as you resolve them: an
+empty whisper is a finished review.
 
 ## Typography
 
@@ -56,6 +59,11 @@ part of a document is visible at a glance. A language tag on the fence
 keywords in the title blue, strings in the warm red, comments in gray
 italic, numbers and constants in amber; everything else stays body ink. No
 tag means no colors: the band alone marks the block.
+
+Printing (`⌘P`) from the reading view prints the typeset page, not the raw
+source, and carries the code band onto paper. Images referenced by a
+relative path (`![](diagram.png)`) render against the document's own
+folder, so they show wherever you launched textli from.
 
 ## Comments
 
