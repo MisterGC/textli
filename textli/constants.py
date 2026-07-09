@@ -38,12 +38,15 @@ ZEN_MD_LINK_COLOR = QColor("#004578")
 # on the warm page so it reads at a glance without pulling all attention; the
 # letter stays visible through it. Replaces Qt's near-invisible 1px line.
 ZEN_MD_CARET = QColor(0, 69, 120, 72)
-# Read-view focus reading mode (`f`): the current paragraph stays full
-# opacity; above and below, a paper wash ramps to this max alpha over
-# ~FALLOFF_LINES line-heights ("quick degradation"), so peripheral text
-# recedes and the eye rests on the centered reading line.
+# Read-view focus reading mode (`f`): a spotlight centred on the caret line
+# (not the paragraph — so brightness never snaps at block boundaries). A
+# fully-bright band of CORE_LINES half-height each side of the caret, then a
+# paper wash ramping to DIM_MAX over FALLOFF_LINES more line-heights. The
+# caret is locked at centre, so this reads as a stable vignette the text
+# flows through as it scrolls.
 ZEN_MD_FOCUS_DIM_MAX = 212
-ZEN_MD_FOCUS_FALLOFF_LINES = 2.0
+ZEN_MD_FOCUS_CORE_LINES = 1.3
+ZEN_MD_FOCUS_FALLOFF_LINES = 3.0
 # Read-view tables: a header row in the code-band paper shade, thin gridlines
 # in a warm gray that reads on the page without drawing the eye.
 ZEN_MD_TABLE_HEADER_BG = QColor("#E5DAC0")

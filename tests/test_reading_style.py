@@ -228,7 +228,7 @@ def _read_focus_editor():
     v = ed._rendered
     v.setFixedSize(800, 600)
     v.document().setTextWidth(v.viewport().width())
-    ed._rendered.set_focus_gradient(None)
+    ed._rendered.set_focus_reading(False)
     return ed, v
 
 
@@ -241,28 +241,34 @@ def _put(v, needle, extra=0):
     return idx
 
 
-def test_f_turns_on_focus_gradient_and_persists():
+def test_f_turns_on_focus_reading_and_persists():
     from textli import settings as md_settings
     ed, v = _read_focus_editor()
-    assert v._focus_gradient is None
+    assert v._focus_reading is False
     ed._toggle_read_focus()
     assert ed._read_focus is True
-    assert v._focus_gradient is not None      # spotlight on the caret paragraph
+    assert v._focus_reading is True           # caret-centred spotlight on
     assert md_settings.app_settings().value(
         "zen_md/read_focus", False, type=bool) is True
     ed._toggle_read_focus()
     assert ed._read_focus is False
-    assert v._focus_gradient is None
+    assert v._focus_reading is False
 
 
-def test_focus_gradient_tracks_the_caret_paragraph():
+def test_focus_spotlight_keeps_the_caret_centred_moving_a_line():
+    # distance-based, not paragraph-based: a one-line move keeps the caret at
+    # centre (the vignette slides with it) — no snap between blocks
     ed, v = _read_focus_editor()
     ed._toggle_read_focus()
-    _put(v, "Paragraph 6", 3)
-    doc = v.document()
-    span = v._focus_gradient
-    block = doc.findBlock(span[0])
-    assert "Paragraph 6" in block.text()
+    _put(v, "Paragraph 8", 3)
+    target = v.viewport().height() / 2
+    line_h = v.fontMetrics().height()
+    from PySide6.QtGui import QTextCursor
+    for _ in range(3):
+        cur = v.textCursor()
+        cur.movePosition(QTextCursor.MoveOperation.Down)
+        v.setTextCursor(cur)
+        assert abs(v.cursorRect().center().y() - target) <= line_h
 
 
 def test_focus_mode_centers_the_caret_line():
@@ -296,9 +302,9 @@ def test_f_supersedes_section_focus_and_vice_versa():
     assert ed._focus_enabled is True and ed._read_focus is False
 
 
-def test_leaving_read_mode_lifts_the_gradient():
+def test_leaving_read_mode_lifts_the_spotlight():
     ed, v = _read_focus_editor()
     ed._toggle_read_focus()
-    assert v._focus_gradient is not None
+    assert v._focus_reading is True
     ed._toggle_rendered()                      # back to the write view
-    assert v._focus_gradient is None
+    assert v._focus_reading is False

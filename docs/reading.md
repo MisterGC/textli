@@ -73,9 +73,10 @@ move — the rendered twin of the write view's paragraph focus.
 `f` turns on **focus reading mode** — a deeper, immersive read. The caret
 line holds at the centre of the view and the page scrolls under it
 (typewriter-style; at the very start or end of the document the caret
-travels to the top/bottom instead), while a **gradient spotlight** keeps
-the current paragraph at full opacity and fades everything else with
-distance, so your attention stays on the line you're reading. It persists
+travels to the top/bottom instead), while a **spotlight** centred on the
+reading line fades the text away by distance. Because the fade keys off the
+caret's position rather than paragraph edges, brightness slides smoothly as
+you scroll — a heading or a short line never makes it jump. It persists
 across sessions and supersedes `⌘.` while it's on (only one focus at a
 time). Comments, marks and search stay live beneath the wash.
 

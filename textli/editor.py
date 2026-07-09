@@ -90,6 +90,7 @@ from textli.constants import (
     ZEN_MD_HEADING_SIZES,
     ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_CARET,
+    ZEN_MD_FOCUS_CORE_LINES,
     ZEN_MD_FOCUS_DIM_MAX,
     ZEN_MD_FOCUS_FALLOFF_LINES,
     ZEN_MD_LINK_COLOR,
@@ -170,10 +171,11 @@ class _ReadingView(QTextBrowser):
         self._focus_span: tuple[int, int] | None = None
         self._focus_wash = QColor(ZEN_MD_BG)
         self._focus_wash.setAlpha(175)
-        # Focus reading mode (`f`): the current paragraph (start, end) stays
-        # full opacity; a paper-wash gradient ramps to full dim above and
-        # below it. Distinct from the section wash above — only one is ever on.
-        self._focus_gradient: tuple[int, int] | None = None
+        # Focus reading mode (`f`): a spotlight centred on the caret line — a
+        # bright band fading to a paper wash by distance, so brightness never
+        # snaps at paragraph boundaries. Distinct from the section wash above;
+        # only one is ever on.
+        self._focus_reading = False
         self._focus_dim = QColor(ZEN_MD_BG)
         self._focus_dim.setAlpha(ZEN_MD_FOCUS_DIM_MAX)
         # Caret: hide Qt's near-invisible 1px line and paint a soft block over
@@ -205,11 +207,10 @@ class _ReadingView(QTextBrowser):
             self._focus_span = span
             self.viewport().update()
 
-    def set_focus_gradient(self, span: tuple[int, int] | None):
-        """Focus reading mode: keep ``span`` (the current paragraph) bright and
-        ramp a paper wash to full dim above/below it; None lifts it."""
-        if span != self._focus_gradient:
-            self._focus_gradient = span
+    def set_focus_reading(self, on: bool):
+        """Focus reading mode on/off — a caret-centred spotlight vignette."""
+        if on != self._focus_reading:
+            self._focus_reading = on
             self.viewport().update()
 
     def set_strikes(self, ranges):
@@ -261,7 +262,7 @@ class _ReadingView(QTextBrowser):
             self._paint_code_bands(doc, layout, off)
         super().paintEvent(event)
         if (self._strikes or self._heading_rules or self._quote_bars
-                or self._focus_span or self._focus_gradient):
+                or self._focus_span or self._focus_reading):
             self._paint_overlays(doc, layout, off)
         # The caret sits on top of every wash — it's always in the bright band,
         # but painting it last guarantees it's never dimmed.
@@ -322,42 +323,41 @@ class _ReadingView(QTextBrowser):
                 if bottom < vp.height():
                     painter.drawRect(
                         QRectF(0, bottom, vp.width(), vp.height() - bottom))
-        if self._focus_gradient is not None:
-            self._paint_focus_gradient(doc, layout, off, painter)
+        if self._focus_reading:
+            self._paint_focus_reading(painter)
         painter.end()
 
-    def _paint_focus_gradient(self, doc, layout, off, painter):
-        """Focus reading mode: the current paragraph stays bright; above and
-        below it a paper wash ramps from transparent (at the paragraph edge) to
-        full dim over a few line-heights, then holds — a calm spotlight that
-        keeps peripheral text from being read."""
-        start, end = self._focus_gradient
-        b0, b1 = doc.findBlock(start), doc.findBlock(end)
-        if not (b0.isValid() and b1.isValid()):
-            return
+    def _paint_focus_reading(self, painter):
+        """Focus reading mode: a spotlight centred on the caret line. A bright
+        band (``CORE_LINES`` half-height each side) fades to a paper wash over
+        ``FALLOFF_LINES`` more line-heights, then holds. Because the fade keys
+        off the caret's *position* — not paragraph edges — brightness slides
+        smoothly as the text scrolls and never snaps between blocks."""
         vp = self.viewport()
-        band_top = layout.blockBoundingRect(b0).top() + off.y()
-        band_bot = layout.blockBoundingRect(b1).bottom() + off.y()
-        falloff = max(1.0, QFontMetricsF(self.font()).height()
-                      * ZEN_MD_FOCUS_FALLOFF_LINES)
+        line_h = QFontMetricsF(self.font()).height()
+        cy = self.cursorRect().center().y()
+        core = line_h * ZEN_MD_FOCUS_CORE_LINES
+        falloff = max(1.0, line_h * ZEN_MD_FOCUS_FALLOFF_LINES)
         clear = QColor(self._focus_dim)
         clear.setAlpha(0)
         painter.setPen(Qt.PenStyle.NoPen)
-        if band_top > 0:                       # wash above the paragraph
-            g = QLinearGradient(0.0, band_top, 0.0, band_top - falloff)
+        top = cy - core
+        if top > 0:                            # wash above the reading band
+            g = QLinearGradient(0.0, top, 0.0, top - falloff)
             g.setSpread(QGradient.Spread.PadSpread)
             g.setColorAt(0.0, clear)
             g.setColorAt(1.0, self._focus_dim)
             painter.setBrush(QBrush(g))
-            painter.drawRect(QRectF(0, 0, vp.width(), band_top))
-        if band_bot < vp.height():             # and below it
-            g = QLinearGradient(0.0, band_bot, 0.0, band_bot + falloff)
+            painter.drawRect(QRectF(0, 0, vp.width(), top))
+        bottom = cy + core
+        if bottom < vp.height():               # and below it
+            g = QLinearGradient(0.0, bottom, 0.0, bottom + falloff)
             g.setSpread(QGradient.Spread.PadSpread)
             g.setColorAt(0.0, clear)
             g.setColorAt(1.0, self._focus_dim)
             painter.setBrush(QBrush(g))
-            painter.drawRect(QRectF(0, band_bot, vp.width(),
-                                    vp.height() - band_bot))
+            painter.drawRect(QRectF(0, bottom, vp.width(),
+                                    vp.height() - bottom))
 
     def _paint_strike_range(self, painter, doc, layout, start, end, off):
         """Draw the strike across ``[start, end)`` line by line (a range can wrap),
@@ -1940,15 +1940,13 @@ class ZenMarkdownEditor(QWidget):
         self._flash_mode("FOCUS" if self._read_focus else "READ")
 
     def _update_read_focus(self):
-        """Track the focus spotlight to the caret's paragraph and re-centre the
-        line. A no-op (lifts the gradient) when the mode or read view is off."""
-        if not (self._read_focus and self._rendered_mode):
-            self._rendered.set_focus_gradient(None)
-            return
-        block = self._rendered.textCursor().block()
-        self._rendered.set_focus_gradient(
-            (block.position(), block.position() + max(0, block.length() - 1)))
-        self._read_focus_recenter()
+        """Enable the caret-centred spotlight and re-centre the reading line.
+        A no-op (lifts the vignette) when the mode or read view is off."""
+        on = self._read_focus and self._rendered_mode
+        self._rendered.set_focus_reading(on)
+        if on:
+            self._read_focus_recenter()
+            self._rendered.viewport().update()
 
     def _read_focus_recenter(self):
         """Hold the caret line at the vertical centre of the read view; the

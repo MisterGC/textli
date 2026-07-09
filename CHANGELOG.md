@@ -48,9 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intact beneath it.
 - **Focus reading mode** (`f`) — an immersive read: the caret line locks to
   the centre and the page scrolls under it (typewriter-style, pinning at the
-  document ends), while a gradient spotlight keeps the current paragraph
-  bright and fades everything else with distance. Persists across sessions
-  and supersedes `⌘.` while on.
+  document ends), while a spotlight centred on the reading line fades text
+  by distance — brightness slides smoothly as you scroll instead of snapping
+  at paragraph edges. Persists across sessions and supersedes `⌘.` while on.
 - **Whisper breadcrumb while reading** — the read-view status leads with
   the section under the caret (`§ Architecture · 42% · ~7 min left`), so a
   long document always tells you where you are; empty before the first
