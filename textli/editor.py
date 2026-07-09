@@ -505,7 +505,7 @@ def editor_help_html() -> str:
         ("h j k l · w b e · 0 $", "Move a caret through the rendered text"),
         ("gg / G", "Document start / end"),
         ("⌃d / ⌃u · ⌃f / ⌃b / Space", "Half-page · full-page scroll"),
-        ("f", "Focus reading mode — caret-lock at centre + a gradient spotlight on the current paragraph (persists)"),
+        ("f", "Focus reading mode — caret-lock at centre + a spotlight on the reading line, fading text by distance (persists)"),
         ("gh", "Headings overview — j/k preview live, Enter keeps, Esc restores your spot"),
         ("gl", "Links overview — same jump-list; Enter follows the picked link"),
         ("↵", "Follow the link under the caret — a <span style='font-family:monospace'>.md</span> opens in place, web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
