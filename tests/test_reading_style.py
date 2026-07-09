@@ -314,7 +314,8 @@ def test_leaving_read_mode_lifts_the_spotlight():
 
 def test_comment_field_is_roomy_and_handwritten():
     from textli.constants import (
-        COMMENT_FONT_FAMILY, ZEN_MD_COMMENT_HEIGHT, ZEN_MD_COMMENT_WIDTH)
+        COMMENT_FONT_FAMILY, ZEN_MD_COMMENT_INK,
+        ZEN_MD_COMMENT_HEIGHT, ZEN_MD_COMMENT_WIDTH)
     ed = _editor()
     ed._toggle_rendered()
     v = ed._rendered
@@ -324,12 +325,14 @@ def test_comment_field_is_roomy_and_handwritten():
     f = ed._comment_field
     assert f.font().family() == COMMENT_FONT_FAMILY      # handwriting face
     assert f.font().pointSize() > ed._font_size          # larger than body ink
+    assert ZEN_MD_COMMENT_INK.name() in f.styleSheet()   # fountain-pen blue
     assert f.height() == min(ZEN_MD_COMMENT_HEIGHT, v.viewport().height() - 16)
     assert f.width() == min(ZEN_MD_COMMENT_WIDTH, v.viewport().width() - 24)
 
 
-def test_caveat_is_bundled():
+def test_handwriting_font_is_bundled():
     from pathlib import Path
     import textli.fonts as fonts
-    assert "Caveat.ttf" in fonts._BUNDLED_FONTS
-    assert (Path(fonts.__file__).parent / "fonts" / "Caveat.ttf").exists()
+    assert "ArchitectsDaughter.ttf" in fonts._BUNDLED_FONTS
+    assert (Path(fonts.__file__).parent / "fonts"
+            / "ArchitectsDaughter.ttf").exists()

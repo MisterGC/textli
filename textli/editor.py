@@ -70,6 +70,7 @@ from textli.constants import (
     COMMENT_FONT_FAMILY,
     FONT_FAMILY,
     ZEN_MD_COMMENT_HEIGHT,
+    ZEN_MD_COMMENT_INK,
     ZEN_MD_COMMENT_SIZE_BOOST,
     ZEN_MD_COMMENT_WIDTH,
     ZEN_CODE_COMMENT,
@@ -3135,14 +3136,15 @@ class ZenMarkdownEditor(QWidget):
             field = QPlainTextEdit(self._rendered.viewport())
             field.installEventFilter(self)
             self._comment_field = field
-        # A comment reads as a handwritten margin note: Caveat, a few points
-        # larger than body text, in a roomy box (rebuilt each open so a font
-        # zoom since last time is reflected).
+        # A comment reads as a handwritten margin note: Architects Daughter in
+        # a fountain-pen royal blue, a few points larger than body text, in a
+        # roomy box (font restyled each open so a font zoom since last time is
+        # reflected).
         field.setFont(QFont(
             COMMENT_FONT_FAMILY, self._font_size + ZEN_MD_COMMENT_SIZE_BOOST))
         field.setStyleSheet(
             f"QPlainTextEdit {{"
-            f" background: #FBF7EC; color: {ZEN_TEXT_COLOR.name()};"
+            f" background: #FBF7EC; color: {ZEN_MD_COMMENT_INK.name()};"
             f" border: 1px solid #C9A227; border-radius: 6px;"
             f" padding: 8px 10px;"
             f" selection-background-color: #B8D4E8;"

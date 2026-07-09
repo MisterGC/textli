@@ -105,8 +105,8 @@ Select a span with `v` + motions, then:
 
 Commented spans get a soft highlighter wash in the rendered text, so review
 feedback is visible without shouting. The comment editor opens as a roomy
-note in a handwriting face, so leaving a remark feels like annotating the
-margin rather than filling in a form.
+note in a legible handwriting face, inked in fountain-pen blue, so leaving a
+remark feels like annotating the margin rather than filling in a form.
 
 ## Suggestions (track changes)
 

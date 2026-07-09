@@ -1,8 +1,9 @@
 """Bundled-font registration for textli.
 
-Ships JetBrains Mono Nerd Font (the editor face) and Caveat (the handwriting
-face used for comment annotations) so the editor renders identically
-everywhere, whether run standalone or embedded in a host application.
+Ships JetBrains Mono Nerd Font (the editor face) and Architects Daughter
+(the handwriting face used for comment annotations) so the editor renders
+identically everywhere, whether run standalone or embedded in a host
+application.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from PySide6.QtGui import QFontDatabase
 _BUNDLED_FONTS = (
     "JetBrainsMonoNerdFont-Regular.ttf",
     "JetBrainsMonoNerdFont-Bold.ttf",
-    "Caveat.ttf",
+    "ArchitectsDaughter.ttf",
 )
 
 
