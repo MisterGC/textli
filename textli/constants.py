@@ -9,6 +9,13 @@ from PySide6.QtGui import QColor
 
 # ── Typography ───────────────────────────────────────────────────
 FONT_FAMILY = "JetBrainsMono Nerd Font"
+# Handwriting face for comment annotations (bundled Caveat, OFL) — a comment
+# reads as a margin note, not a form field. Rendered a few points larger than
+# body text, as its x-height runs small.
+COMMENT_FONT_FAMILY = "Caveat"
+ZEN_MD_COMMENT_SIZE_BOOST = 5   # points added over the body size in the field
+ZEN_MD_COMMENT_HEIGHT = 150     # default height of the inline comment editor
+ZEN_MD_COMMENT_WIDTH = 420      # default width (clamped to the viewport)
 
 # ── Zen palette ──────────────────────────────────────────────────
 ZEN_TEXT_COLOR = QColor("#403A30")

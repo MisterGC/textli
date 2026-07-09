@@ -308,3 +308,28 @@ def test_leaving_read_mode_lifts_the_spotlight():
     assert v._focus_reading is True
     ed._toggle_rendered()                      # back to the write view
     assert v._focus_reading is False
+
+
+# ── Comment editor: roomy + handwritten (annotation feel) ──
+
+def test_comment_field_is_roomy_and_handwritten():
+    from textli.constants import (
+        COMMENT_FONT_FAMILY, ZEN_MD_COMMENT_HEIGHT, ZEN_MD_COMMENT_WIDTH)
+    ed = _editor()
+    ed._toggle_rendered()
+    v = ed._rendered
+    v.setFixedSize(900, 600)
+    v.document().setTextWidth(v.viewport().width())
+    ed._show_comment_field(5, "a note in the margin")
+    f = ed._comment_field
+    assert f.font().family() == COMMENT_FONT_FAMILY      # handwriting face
+    assert f.font().pointSize() > ed._font_size          # larger than body ink
+    assert f.height() == min(ZEN_MD_COMMENT_HEIGHT, v.viewport().height() - 16)
+    assert f.width() == min(ZEN_MD_COMMENT_WIDTH, v.viewport().width() - 24)
+
+
+def test_caveat_is_bundled():
+    from pathlib import Path
+    import textli.fonts as fonts
+    assert "Caveat.ttf" in fonts._BUNDLED_FONTS
+    assert (Path(fonts.__file__).parent / "fonts" / "Caveat.ttf").exists()

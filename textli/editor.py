@@ -67,7 +67,11 @@ from textli import status as md_status
 from textli.open_overlay import OpenFileOverlay
 from textli.search_overlay import SearchOverlay
 from textli.constants import (
+    COMMENT_FONT_FAMILY,
     FONT_FAMILY,
+    ZEN_MD_COMMENT_HEIGHT,
+    ZEN_MD_COMMENT_SIZE_BOOST,
+    ZEN_MD_COMMENT_WIDTH,
     ZEN_CODE_COMMENT,
     ZEN_CODE_KEYWORD,
     ZEN_CODE_NUMBER,
@@ -3129,26 +3133,29 @@ class ZenMarkdownEditor(QWidget):
         field = self._comment_field
         if field is None:
             field = QPlainTextEdit(self._rendered.viewport())
-            field.setFont(QFont(
-                FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 2)))
-            field.setStyleSheet(
-                f"QPlainTextEdit {{"
-                f" background: #FBF7EC; color: {ZEN_TEXT_COLOR.name()};"
-                f" border: 1px solid #C9A227; border-radius: 6px;"
-                f" padding: 6px;"
-                f" selection-background-color: #B8D4E8;"
-                f"}}"
-            )
             field.installEventFilter(self)
             self._comment_field = field
+        # A comment reads as a handwritten margin note: Caveat, a few points
+        # larger than body text, in a roomy box (rebuilt each open so a font
+        # zoom since last time is reflected).
+        field.setFont(QFont(
+            COMMENT_FONT_FAMILY, self._font_size + ZEN_MD_COMMENT_SIZE_BOOST))
+        field.setStyleSheet(
+            f"QPlainTextEdit {{"
+            f" background: #FBF7EC; color: {ZEN_TEXT_COLOR.name()};"
+            f" border: 1px solid #C9A227; border-radius: 6px;"
+            f" padding: 8px 10px;"
+            f" selection-background-color: #B8D4E8;"
+            f"}}"
+        )
         field.setPlainText(body)
         cur = self._rendered.textCursor()
         cur.setPosition(end_pos)
         rect = self._rendered.cursorRect(cur)
         vp = self._rendered.viewport()
-        w = min(380, vp.width() - 24)
+        w = min(ZEN_MD_COMMENT_WIDTH, vp.width() - 24)
         field.setFixedWidth(w)
-        field.setFixedHeight(84)
+        field.setFixedHeight(min(ZEN_MD_COMMENT_HEIGHT, vp.height() - 16))
         x = max(8, min(rect.left(), vp.width() - w - 8))
         y = min(rect.bottom() + 4, vp.height() - field.height() - 8)
         field.move(x, max(8, y))

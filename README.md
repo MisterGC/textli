@@ -81,5 +81,6 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled fonts are licensed under the
-[SIL Open Font License](textli/fonts/OFL.txt).
+MIT — see [LICENSE](LICENSE). Bundled fonts — JetBrains Mono and Caveat —
+are licensed under the SIL Open Font License
+([JetBrains Mono](textli/fonts/OFL.txt), [Caveat](textli/fonts/Caveat-OFL.txt)).
