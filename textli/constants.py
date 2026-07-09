@@ -45,8 +45,8 @@ ZEN_MD_CARET = QColor(0, 69, 120, 72)
 # caret is locked at centre, so this reads as a stable vignette the text
 # flows through as it scrolls.
 ZEN_MD_FOCUS_DIM_MAX = 212
-ZEN_MD_FOCUS_CORE_LINES = 1.3
-ZEN_MD_FOCUS_FALLOFF_LINES = 3.0
+ZEN_MD_FOCUS_CORE_LINES = 3.2
+ZEN_MD_FOCUS_FALLOFF_LINES = 3.5
 # Read-view tables: a header row in the code-band paper shade, thin gridlines
 # in a warm gray that reads on the page without drawing the eye.
 ZEN_MD_TABLE_HEADER_BG = QColor("#E5DAC0")
