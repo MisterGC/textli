@@ -70,6 +70,15 @@ eye the way a hard cursor would.
 caret rests behind a translucent paper wash and follows the caret as you
 move — the rendered twin of the write view's paragraph focus.
 
+`f` turns on **focus reading mode** — a deeper, immersive read. The caret
+line holds at the centre of the view and the page scrolls under it
+(typewriter-style; at the very start or end of the document the caret
+travels to the top/bottom instead), while a **gradient spotlight** keeps
+the current paragraph at full opacity and fades everything else with
+distance, so your attention stays on the line you're reading. It persists
+across sessions and supersedes `⌘.` while it's on (only one focus at a
+time). Comments, marks and search stay live beneath the wash.
+
 ## Code blocks
 
 Fenced code sits on a full-width band in a deeper paper shade, so the code

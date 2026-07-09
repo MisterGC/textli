@@ -50,6 +50,7 @@ complete key reference, or see the
 | `Esc` | Save & close (`⇧Esc` cancels) |
 | `⌘↵` | Full-window width |
 | `⌘.` | Section focus (dim all but the current paragraph / section) |
+| `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
 | `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |

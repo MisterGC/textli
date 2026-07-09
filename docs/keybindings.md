@@ -60,6 +60,7 @@ See [Opening files](opening.md) for how the matching works.
 | `h j k l` · `w b e` · `0 $` | Move a caret through the rendered text |
 | `gg / G` | Document start / end |
 | `⌃d / ⌃u` · `⌃f / ⌃b / Space` | Half-page · full-page scroll |
+| `f` | Focus reading mode — caret-lock at centre + gradient spotlight on the current paragraph (persists) |
 | `gh` | Headings overview — `j`/`k` preview live, `Enter` keeps, `Esc` restores your spot |
 | `gl` | Links overview — same jump-list; `Enter` follows the picked link |
 | `↵` | Follow the link under the caret — a `.md` opens in place, web/mail in the browser, `#heading` jumps there, anything else via the system handler |

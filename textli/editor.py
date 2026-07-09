@@ -28,7 +28,9 @@ from PySide6.QtGui import (
     QDesktopServices,
     QFont,
     QFontMetricsF,
+    QGradient,
     QKeyEvent,
+    QLinearGradient,
     QPainter,
     QPen,
     QTextBlockFormat,
@@ -88,6 +90,8 @@ from textli.constants import (
     ZEN_MD_HEADING_SIZES,
     ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_CARET,
+    ZEN_MD_FOCUS_DIM_MAX,
+    ZEN_MD_FOCUS_FALLOFF_LINES,
     ZEN_MD_LINK_COLOR,
     ZEN_MD_TABLE_BORDER,
     ZEN_MD_TABLE_HEADER_BG,
@@ -166,6 +170,12 @@ class _ReadingView(QTextBrowser):
         self._focus_span: tuple[int, int] | None = None
         self._focus_wash = QColor(ZEN_MD_BG)
         self._focus_wash.setAlpha(175)
+        # Focus reading mode (`f`): the current paragraph (start, end) stays
+        # full opacity; a paper-wash gradient ramps to full dim above and
+        # below it. Distinct from the section wash above — only one is ever on.
+        self._focus_gradient: tuple[int, int] | None = None
+        self._focus_dim = QColor(ZEN_MD_BG)
+        self._focus_dim.setAlpha(ZEN_MD_FOCUS_DIM_MAX)
         # Caret: hide Qt's near-invisible 1px line and paint a soft block over
         # the current glyph instead (vim-style), so it's findable on the warm
         # page while placing comments. Repaint as it moves or focus shifts.
@@ -193,6 +203,13 @@ class _ReadingView(QTextBrowser):
         """Dim everything outside ``span`` (doc positions); None lifts it."""
         if span != self._focus_span:
             self._focus_span = span
+            self.viewport().update()
+
+    def set_focus_gradient(self, span: tuple[int, int] | None):
+        """Focus reading mode: keep ``span`` (the current paragraph) bright and
+        ramp a paper wash to full dim above/below it; None lifts it."""
+        if span != self._focus_gradient:
+            self._focus_gradient = span
             self.viewport().update()
 
     def set_strikes(self, ranges):
@@ -243,10 +260,14 @@ class _ReadingView(QTextBrowser):
         if self._code_bands:
             self._paint_code_bands(doc, layout, off)
         super().paintEvent(event)
+        if (self._strikes or self._heading_rules or self._quote_bars
+                or self._focus_span or self._focus_gradient):
+            self._paint_overlays(doc, layout, off)
+        # The caret sits on top of every wash — it's always in the bright band,
+        # but painting it last guarantees it's never dimmed.
         self._paint_caret(off)
-        if not (self._strikes or self._heading_rules
-                or self._quote_bars or self._focus_span):
-            return
+
+    def _paint_overlays(self, doc, layout, off):
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._quote_bars:
@@ -301,7 +322,42 @@ class _ReadingView(QTextBrowser):
                 if bottom < vp.height():
                     painter.drawRect(
                         QRectF(0, bottom, vp.width(), vp.height() - bottom))
+        if self._focus_gradient is not None:
+            self._paint_focus_gradient(doc, layout, off, painter)
         painter.end()
+
+    def _paint_focus_gradient(self, doc, layout, off, painter):
+        """Focus reading mode: the current paragraph stays bright; above and
+        below it a paper wash ramps from transparent (at the paragraph edge) to
+        full dim over a few line-heights, then holds — a calm spotlight that
+        keeps peripheral text from being read."""
+        start, end = self._focus_gradient
+        b0, b1 = doc.findBlock(start), doc.findBlock(end)
+        if not (b0.isValid() and b1.isValid()):
+            return
+        vp = self.viewport()
+        band_top = layout.blockBoundingRect(b0).top() + off.y()
+        band_bot = layout.blockBoundingRect(b1).bottom() + off.y()
+        falloff = max(1.0, QFontMetricsF(self.font()).height()
+                      * ZEN_MD_FOCUS_FALLOFF_LINES)
+        clear = QColor(self._focus_dim)
+        clear.setAlpha(0)
+        painter.setPen(Qt.PenStyle.NoPen)
+        if band_top > 0:                       # wash above the paragraph
+            g = QLinearGradient(0.0, band_top, 0.0, band_top - falloff)
+            g.setSpread(QGradient.Spread.PadSpread)
+            g.setColorAt(0.0, clear)
+            g.setColorAt(1.0, self._focus_dim)
+            painter.setBrush(QBrush(g))
+            painter.drawRect(QRectF(0, 0, vp.width(), band_top))
+        if band_bot < vp.height():             # and below it
+            g = QLinearGradient(0.0, band_bot, 0.0, band_bot + falloff)
+            g.setSpread(QGradient.Spread.PadSpread)
+            g.setColorAt(0.0, clear)
+            g.setColorAt(1.0, self._focus_dim)
+            painter.setBrush(QBrush(g))
+            painter.drawRect(QRectF(0, band_bot, vp.width(),
+                                    vp.height() - band_bot))
 
     def _paint_strike_range(self, painter, doc, layout, start, end, off):
         """Draw the strike across ``[start, end)`` line by line (a range can wrap),
@@ -449,6 +505,7 @@ def editor_help_html() -> str:
         ("h j k l · w b e · 0 $", "Move a caret through the rendered text"),
         ("gg / G", "Document start / end"),
         ("⌃d / ⌃u · ⌃f / ⌃b / Space", "Half-page · full-page scroll"),
+        ("f", "Focus reading mode — caret-lock at centre + a gradient spotlight on the current paragraph (persists)"),
         ("gh", "Headings overview — j/k preview live, Enter keeps, Esc restores your spot"),
         ("gl", "Links overview — same jump-list; Enter follows the picked link"),
         ("↵", "Follow the link under the caret — a <span style='font-family:monospace'>.md</span> opens in place, web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
@@ -536,6 +593,11 @@ class ZenMarkdownEditor(QWidget):
         # while writing, so the eyes never chase the text down the page.
         self._typewriter = settings.value(
             "zen_md/typewriter", False, type=bool
+        )
+        # Focus reading mode (`f`, read view): caret-lock at screen centre plus
+        # a gradient spotlight on the current paragraph. Persists like ⌘T.
+        self._read_focus = settings.value(
+            "zen_md/read_focus", False, type=bool
         )
 
         # Load persisted content-column width preference (adjustable like font).
@@ -672,6 +734,7 @@ class ZenMarkdownEditor(QWidget):
         # (a caret move that doesn't scroll won't fire the scrollbar signal).
         self._rendered.cursorPositionChanged.connect(
             self._update_rendered_focus)
+        self._rendered.cursorPositionChanged.connect(self._update_read_focus)
         self._rendered.cursorPositionChanged.connect(self._refresh_status)
         layout.addWidget(self._rendered, stretch=1)
 
@@ -1005,6 +1068,11 @@ class ZenMarkdownEditor(QWidget):
         paragraph). Off by default."""
         self._focus_enabled = not self._focus_enabled
         self._highlighter.set_focus_enabled(self._focus_enabled)
+        if self._focus_enabled and self._read_focus:
+            # Only one focus at a time: ⌘. turns off `f` reading mode.
+            self._read_focus = False
+            md_settings.app_settings().setValue("zen_md/read_focus", False)
+            self._update_read_focus()
         if self._focus_enabled:
             self._update_focus()
         self._update_rendered_focus()
@@ -1466,6 +1534,7 @@ class ZenMarkdownEditor(QWidget):
             self._editor.setTextCursor(cur)
             self._editor.ensureCursorVisible()
         self._update_rendered_focus()   # entering write mode lifts the wash
+        self._update_read_focus()       # ...and the focus-reading gradient
         self.update()
         self._refresh_status()
         # Flash last, after the view swap + repaint, so it sits clearly on top.
@@ -1575,6 +1644,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_tables(doc)
         self._settle_rendered_layout()
         self._update_rendered_focus()
+        self._update_read_focus()
         self._refresh_status()   # review counts / progress just changed
 
     # ── `p` clean preview: the fully-accepted prose, no markup ──
@@ -1615,6 +1685,7 @@ class ZenMarkdownEditor(QWidget):
         self._rendered_suggestions = []
         self._active_comment = -1
         self._settle_rendered_layout()
+        self._update_read_focus()
         self._refresh_status()
 
     # ── Links: zen-styled in the read view, Enter follows in either view ──
@@ -1849,6 +1920,48 @@ class ZenMarkdownEditor(QWidget):
         end_pos = (e.position() - 1 if e.isValid()
                    else doc.characterCount() - 1)
         self._rendered.set_focus_span((start_block.position(), end_pos))
+
+    # ── `f` focus reading mode: caret-lock + gradient spotlight ──
+
+    def _toggle_read_focus(self):
+        """f — focus reading mode (read view, persists). The caret line holds
+        at screen centre with the page scrolling under it, and a gradient
+        spotlight keeps the current paragraph bright while the rest recedes.
+        Supersedes the ⌘. section wash while it's on."""
+        self._read_focus = not self._read_focus
+        md_settings.app_settings().setValue(
+            "zen_md/read_focus", self._read_focus)
+        if self._read_focus and self._focus_enabled:
+            # Only one focus at a time: f wins, lift the section wash.
+            self._focus_enabled = False
+            self._highlighter.set_focus_enabled(False)
+            self._update_rendered_focus()
+        self._update_read_focus()
+        self._flash_mode("FOCUS" if self._read_focus else "READ")
+
+    def _update_read_focus(self):
+        """Track the focus spotlight to the caret's paragraph and re-centre the
+        line. A no-op (lifts the gradient) when the mode or read view is off."""
+        if not (self._read_focus and self._rendered_mode):
+            self._rendered.set_focus_gradient(None)
+            return
+        block = self._rendered.textCursor().block()
+        self._rendered.set_focus_gradient(
+            (block.position(), block.position() + max(0, block.length() - 1)))
+        self._read_focus_recenter()
+
+    def _read_focus_recenter(self):
+        """Hold the caret line at the vertical centre of the read view; the
+        scrollbar clamps naturally at the document's ends, so the caret travels
+        to the top/bottom there instead of centring past the edge."""
+        if not (self._read_focus and self._rendered_mode):
+            return
+        v = self._rendered
+        target = int(v.viewport().height() * 0.5)
+        delta = v.cursorRect().center().y() - target
+        if delta:
+            sb = v.verticalScrollBar()
+            sb.setValue(sb.value() + delta)
 
     def _current_rendered_section(self) -> str:
         """The heading of the section under the read-view caret — the whisper
@@ -2774,6 +2887,11 @@ class ZenMarkdownEditor(QWidget):
         # p — toggle the clean preview (fully-accepted prose, no markup).
         if key == Qt.Key.Key_P and not ctrl:
             self._toggle_preview()
+            return True
+
+        # f — toggle focus reading mode (caret-lock + gradient spotlight).
+        if key == Qt.Key.Key_F and not ctrl and not shift:
+            self._toggle_read_focus()
             return True
 
         # ]c / [c — step to the next / previous comment (two-key, vim diff-style).

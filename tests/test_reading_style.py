@@ -208,3 +208,97 @@ def test_caret_cell_handles_end_of_block():
     v.setTextCursor(cur)
     cell = v._caret_cell(QPointF(0, 0))
     assert cell is not None and cell.width() > 0
+
+
+# ── `f` focus reading mode: caret-lock + gradient spotlight ──
+
+LONG = "\n\n".join(
+    f"## Section {i}\n\nParagraph {i} " + "word " * 30 for i in range(1, 16)
+) + "\n"
+
+
+def _read_focus_editor():
+    # `f` persists via QSettings, which conftest shares across tests — start
+    # each focus test from a known OFF state so order can't leak in.
+    from textli import settings as md_settings
+    md_settings.app_settings().setValue("zen_md/read_focus", False)
+    ed = _editor(LONG)
+    ed._read_focus = False
+    ed._toggle_rendered()
+    v = ed._rendered
+    v.setFixedSize(800, 600)
+    v.document().setTextWidth(v.viewport().width())
+    ed._rendered.set_focus_gradient(None)
+    return ed, v
+
+
+def _put(v, needle, extra=0):
+    from PySide6.QtGui import QTextCursor
+    idx = v.toPlainText().index(needle) + extra
+    cur = v.textCursor()
+    cur.setPosition(idx)
+    v.setTextCursor(cur)
+    return idx
+
+
+def test_f_turns_on_focus_gradient_and_persists():
+    from textli import settings as md_settings
+    ed, v = _read_focus_editor()
+    assert v._focus_gradient is None
+    ed._toggle_read_focus()
+    assert ed._read_focus is True
+    assert v._focus_gradient is not None      # spotlight on the caret paragraph
+    assert md_settings.app_settings().value(
+        "zen_md/read_focus", False, type=bool) is True
+    ed._toggle_read_focus()
+    assert ed._read_focus is False
+    assert v._focus_gradient is None
+
+
+def test_focus_gradient_tracks_the_caret_paragraph():
+    ed, v = _read_focus_editor()
+    ed._toggle_read_focus()
+    _put(v, "Paragraph 6", 3)
+    doc = v.document()
+    span = v._focus_gradient
+    block = doc.findBlock(span[0])
+    assert "Paragraph 6" in block.text()
+
+
+def test_focus_mode_centers_the_caret_line():
+    ed, v = _read_focus_editor()
+    ed._toggle_read_focus()
+    _put(v, "Paragraph 8", 3)
+    center = v.cursorRect().center().y()
+    target = v.viewport().height() / 2
+    line_h = v.fontMetrics().height()
+    assert abs(center - target) <= line_h    # within a line of dead-center
+
+
+def test_focus_mode_pins_to_top_at_document_start():
+    from PySide6.QtGui import QTextCursor
+    ed, v = _read_focus_editor()
+    ed._toggle_read_focus()
+    cur = v.textCursor()
+    cur.movePosition(QTextCursor.MoveOperation.Start)
+    v.setTextCursor(cur)
+    # can't centre past the top edge — the view stays pinned, caret above centre
+    assert v.verticalScrollBar().value() == 0
+    assert v.cursorRect().center().y() < v.viewport().height() / 2
+
+
+def test_f_supersedes_section_focus_and_vice_versa():
+    ed, v = _read_focus_editor()
+    ed._focus_enabled = True                  # ⌘. section focus on
+    ed._toggle_read_focus()                    # f should switch it off
+    assert ed._read_focus is True and ed._focus_enabled is False
+    ed._toggle_focus()                         # ⌘. back on should switch f off
+    assert ed._focus_enabled is True and ed._read_focus is False
+
+
+def test_leaving_read_mode_lifts_the_gradient():
+    ed, v = _read_focus_editor()
+    ed._toggle_read_focus()
+    assert v._focus_gradient is not None
+    ed._toggle_rendered()                      # back to the write view
+    assert v._focus_gradient is None
