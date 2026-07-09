@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections import namedtuple
 from pathlib import Path
@@ -35,6 +36,10 @@ from PySide6.QtGui import (
     QTextCursor,
     QTextDocument,
     QTextFormat,
+    QTextFrameFormat,
+    QTextLength,
+    QTextTable,
+    QTextTableFormat,
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWidgets import (
@@ -83,6 +88,9 @@ from textli.constants import (
     ZEN_MD_HEADING_SIZES,
     ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_LINK_COLOR,
+    ZEN_MD_TABLE_BORDER,
+    ZEN_MD_TABLE_HEADER_BG,
+    ZEN_MD_TABLE_PAD,
     ZEN_MD_MAX_WIDTH,
     ZEN_MD_MAX_WIDTH_MAX,
     ZEN_MD_MAX_WIDTH_MIN,
@@ -333,9 +341,9 @@ def editor_help_html() -> str:
     commenting, and suggesting changes. <b>F1</b> shows this help.</p>
     <p>The faint line in the card's corner is the <b>whisper status</b>: while
     writing it shows the vim mode, word count, and this session's delta; while
-    reading, the section you're in, how far you are, roughly how many minutes
-    remain, and what still awaits review. It hides whenever a card (search,
-    open, overview) is up.</p>
+    reading, the section you're in (or where a link goes when the caret is on
+    one), how far you are, roughly how many minutes remain, and what still
+    awaits review. It hides whenever a card (search, open, overview) is up.</p>
 
     <p style='{hdr}'>Views &amp; session</p>
     <table>{rows([
@@ -387,7 +395,9 @@ def editor_help_html() -> str:
         ("gg / G", "Document start / end"),
         ("⌃d / ⌃u · ⌃f / ⌃b / Space", "Half-page · full-page scroll"),
         ("gh", "Headings overview — j/k preview live, Enter keeps, Esc restores your spot"),
-        ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
+        ("gl", "Links overview — same jump-list; Enter follows the picked link"),
+        ("↵", "Follow the link under the caret — a <span style='font-family:monospace'>.md</span> opens in place, web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
+        ("gb / ⌫", "Back to the document the last link was followed from"),
         ("go", "Open another file (stays in the reading view)"),
     ])}</table>
 
@@ -548,6 +558,14 @@ class ZenMarkdownEditor(QWidget):
         self._overview_sel = 0
         self._overview_title = ""
         self._overview_scroll_top = False
+        # `gl` follows the picked row (a link); `gc`/`gh` just land on it.
+        self._overview_targets = None
+        # In-session back-stack of (path, caret, scroll) for link navigation —
+        # `gb`/Backspace walks it. Not persisted (position memory owns resume).
+        self._nav_stack = []
+        # Transient toast for link targets / grafli notice / nav landings.
+        self._notice_flash: QLabel | None = None
+        self._last_notice = ""            # test seam for the toast text
         # F1 help dialog (the editor owns its own help).
         self._help_dialog: QDialog | None = None
         layout = QVBoxLayout(self)
@@ -701,11 +719,13 @@ class ZenMarkdownEditor(QWidget):
             sb = self._rendered.verticalScrollBar()
             span = sb.maximum() + sb.pageStep()
             progress = (sb.value() + sb.pageStep()) / span if span else 1.0
+            href = self._rendered_anchor_at_caret()
             text = md_status.read_status(
                 progress, words,
                 changes=len(self._rendered_suggestions),
                 comment_count=len(self._rendered_comments),
-                section=self._current_rendered_section())
+                section=self._current_rendered_section(),
+                link=self._link_hint(href) if href else "")
             if self._visual:
                 text = f"VISUAL{md_status.SEP}{text}"
         else:
@@ -1497,6 +1517,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._style_quotes(doc)
+        self._style_tables(doc)
         self._settle_rendered_layout()
         self._update_rendered_focus()
         self._refresh_status()   # review counts / progress just changed
@@ -1533,6 +1554,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._style_quotes(doc)
+        self._style_tables(doc)
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
@@ -1722,6 +1744,37 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         self._rendered.set_quote_bars([tuple(b) for b in bars])
 
+    def _style_tables(self, doc):
+        """Give Markdown tables the paper palette: thin collapsed gridlines in
+        a warm gray, cell padding for air, and a header row in the code-band
+        shade, bold. These are real ``QTextTable`` formats (not view-painting),
+        so they survive ``⌘P`` print."""
+        for frame in doc.rootFrame().childFrames():
+            if not isinstance(frame, QTextTable):
+                continue
+            tf = frame.format()
+            tf.setBorder(1)
+            tf.setBorderStyle(
+                QTextFrameFormat.BorderStyle.BorderStyle_Solid)
+            tf.setBorderBrush(ZEN_MD_TABLE_BORDER)
+            tf.setBorderCollapse(True)
+            tf.setCellPadding(ZEN_MD_TABLE_PAD)
+            tf.setCellSpacing(0)
+            # Don't stretch to the column — let the table size to its content.
+            tf.setWidth(QTextLength(QTextLength.Type.VariableLength, 0))
+            frame.setFormat(tf)
+            header = QTextCharFormat()
+            header.setFontWeight(QFont.Weight.Bold)
+            for col in range(frame.columns()):
+                cell = frame.cellAt(0, col)
+                cf = cell.format()
+                cf.setBackground(ZEN_MD_TABLE_HEADER_BG)
+                cell.setFormat(cf)
+                cur = cell.firstCursorPosition()
+                cur.setPosition(cell.lastCursorPosition().position(),
+                                QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(header)
+
     def _update_rendered_focus(self):
         """Keep the read view's focus wash on the section under the caret —
         previous heading through the block before the next one. Sections
@@ -1803,6 +1856,152 @@ class ZenMarkdownEditor(QWidget):
         """Seam for tests; the real thing hands the URL to the OS."""
         QDesktopServices.openUrl(url)
 
+    # ── Read-view link following: files open in place, the rest is routed ──
+
+    def _follow_rendered_link(self, href: str) -> bool:
+        """Read-view Enter on a link. In-document ``#slug`` jumps and web/mail
+        targets behave as in the write view; a file target is resolved against
+        the current document's folder and routed by type — ``.md`` opens in
+        textli (with back-nav), ``.grafli`` shows a stay-tuned notice, anything
+        else opens with the system handler."""
+        if href.startswith("#"):
+            self._jump_to_anchor(href[1:])
+            return True
+        scheme = QUrl(href).scheme().lower()
+        if scheme in ("http", "https", "mailto"):
+            self._open_external(QUrl(href))
+            return True
+        if scheme and scheme != "file":       # ftp, custom schemes → the OS
+            self._open_external(QUrl(href))
+            return True
+        return self._open_local_target(href)
+
+    def _resolve_target(self, href: str) -> tuple[Path | None, str]:
+        """Resolve a file href to an absolute path and its ``#fragment`` (both
+        may be empty). Relative paths resolve against the current document's
+        folder — like image resources — so a folder of docs links naturally."""
+        path_part, _, frag = href.partition("#")
+        if not path_part or self._file_path is None:
+            return None, frag
+        url = QUrl(path_part)
+        target = Path(url.toLocalFile()) if url.scheme() == "file" \
+            else Path(path_part)
+        if not target.is_absolute():
+            target = self._file_path.parent / target
+        return Path(os.path.normpath(str(target))), frag
+
+    def _open_local_target(self, href: str) -> bool:
+        """Route a resolved file target by type. Returns True when handled
+        (Enter is consumed); False only when there is nothing to resolve."""
+        target, frag = self._resolve_target(href)
+        if target is None:
+            return False
+        suffix = target.suffix.lower()
+        if suffix == ".grafli":
+            self._flash_notice("Opening grafli files is not yet supported "
+                               "but will be soon, stay tuned")
+            return True
+        if suffix in (".md", ".markdown"):
+            if not target.exists():
+                self._flash_notice(f"not found: {target.name}")
+                return True
+            self._navigate_to_md(target, frag)
+            return True
+        # any other resource — hand the local file to the system handler
+        if target.exists():
+            self._open_external(QUrl.fromLocalFile(str(target)))
+        else:
+            self._flash_notice(f"not found: {target.name}")
+        return True
+
+    def _nav_location(self) -> tuple:
+        """Where the reader is now — pushed on the back-stack before a link
+        navigates away, so ``gb`` can restore caret and scroll exactly."""
+        return (self._file_path,
+                self._rendered.textCursor().position(),
+                self._rendered.verticalScrollBar().value())
+
+    def _navigate_to_md(self, target: Path, fragment: str = ""):
+        """Open another Markdown file in the reading view, remembering where we
+        were so ``gb`` walks back. A same-file link with a fragment just jumps;
+        a ``#fragment`` on another file lands on that heading."""
+        if target == self._file_path:
+            if fragment:
+                self._jump_to_anchor(fragment)
+            return
+        self._nav_stack.append(self._nav_location())
+        self._switch_file(target)
+        if fragment:
+            self._jump_to_anchor(fragment)
+        self._flash_notice(f"→ {target.name}")
+
+    def _navigate_back(self):
+        """gb / Backspace — return to the document a link was followed from,
+        exactly where it was left. A no-op (with a whisper) at the root."""
+        if not self._nav_stack:
+            self._flash_notice("no page to go back to")
+            return
+        path, pos, scroll = self._nav_stack.pop()
+        if path is not None and path != self._file_path:
+            self._switch_file(path)
+        cur = self._rendered.textCursor()
+        cur.setPosition(min(pos, self._rendered.document().characterCount() - 1))
+        self._rendered.setTextCursor(cur)
+        self._rendered.verticalScrollBar().setValue(scroll)
+        if path is not None:
+            self._flash_notice(f"← {path.name}")
+
+    def _link_hint(self, href: str) -> str:
+        """A short 'where Enter goes' for the whisper: a filename for a file
+        link, the host for a web link, the raw ``#slug`` for an in-doc jump."""
+        if href.startswith("#"):
+            return href
+        url = QUrl(href)
+        scheme = url.scheme().lower()
+        if scheme in ("http", "https"):
+            return url.host() or href
+        if scheme == "mailto":
+            return url.path() or href
+        return Path(href.partition("#")[0]).name or href
+
+    def _flash_notice(self, text: str):
+        """A brief, quiet toast near the card's bottom — link targets, the
+        grafli notice, and back/forward landings. Calmer and smaller than the
+        big READ/WRITE mode flash."""
+        self._last_notice = text
+        if self._notice_flash is None:
+            lbl = QLabel(self)
+            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setTextFormat(Qt.TextFormat.PlainText)
+            self._notice_flash = lbl
+            self._notice_flash_effect = QGraphicsOpacityEffect(lbl)
+            lbl.setGraphicsEffect(self._notice_flash_effect)
+        lbl = self._notice_flash
+        lbl.setFont(QFont(
+            FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 2)))
+        lbl.setStyleSheet(
+            f"QLabel {{ color: {ZEN_TEXT_COLOR.name()};"
+            f" background: #FBF7EC; border: 1px solid #C9A227;"
+            f" border-radius: 8px; padding: 6px 14px; }}")
+        lbl.setText(text)
+        lbl.adjustSize()
+        card = self._card_rect()
+        lbl.move(int(card.center().x()) - lbl.width() // 2,
+                 int(card.bottom()) - lbl.height() - 48)
+        lbl.show()
+        lbl.raise_()
+        self._notice_flash_effect.setOpacity(1.0)
+        anim = QPropertyAnimation(self._notice_flash_effect, b"opacity", self)
+        anim.setDuration(2200)
+        anim.setKeyValueAt(0.0, 1.0)
+        anim.setKeyValueAt(0.35, 1.0)     # hold, then fade
+        anim.setKeyValueAt(1.0, 0.0)
+        anim.finished.connect(lbl.hide)
+        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+        self._notice_flash_anim = anim    # hold a ref so it isn't GC'd mid-run
+
     # ── `gc` / `gh` jump-list overviews (changes / headings) ──
 
     @staticmethod
@@ -1846,6 +2045,29 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         return rows
 
+    def _build_links_list(self):
+        """Every link as ``(start, end, href, text)`` in document order —
+        contiguous fragments of one anchor merged into a single row."""
+        doc = self._rendered.document()
+        rows = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                href = frag.charFormat().anchorHref()
+                if href:
+                    s = frag.position()
+                    e = s + frag.length()
+                    if rows and rows[-1][2] == href and rows[-1][1] == s:
+                        prev = rows[-1]
+                        rows[-1] = (prev[0], e, href, prev[3] + frag.text())
+                    else:
+                        rows.append((s, e, href, frag.text()))
+                it += 1
+            block = block.next()
+        return rows
+
     def _open_changes_overview(self):
         """gc — jump-list of every change and comment in the document."""
         marker = {"substitute": "±", "insert": "+", "delete": "−", "comment": "✎"}
@@ -1868,16 +2090,36 @@ class ZenMarkdownEditor(QWidget):
         ]
         self._open_overview(rows, f"Headings ({len(rows)})", scroll_top=True)
 
-    def _open_overview(self, rows, title: str, *, scroll_top: bool):
+    def _open_links_overview(self):
+        """gl — jump-list of every link, to step between them; unlike gh/gc,
+        Enter *follows* the picked link (files open in place, the rest routed).
+        Rebuilt from the live document each time."""
+        rows, targets = [], []
+        for s, e, href, text in self._build_links_list():
+            hint = self._link_hint(href)
+            rows.append((s, e,
+                f"<span style='color:{ZEN_MD_LINK_COLOR.name()}'>"
+                f"{self._esc_html(text or hint)}</span>&nbsp;"
+                f"<span style='color:{ZEN_HINT_COLOR.name()}'>"
+                f"→ {self._esc_html(hint)}</span>"))
+            targets.append(href)
+        self._open_overview(rows, f"Links ({len(rows)})",
+                            scroll_top=False, targets=targets)
+
+    def _open_overview(self, rows, title: str, *, scroll_top: bool,
+                       targets=None):
         """Show the jump-list overlay for ``rows`` (each ``(start, end, html)``),
         selecting the row nearest the caret. j/k moves *and previews* (the view
         follows the selection live), Enter keeps the spot, Esc returns to where
-        the reader was, a digit jumps directly. A no-op for an empty list."""
+        the reader was, a digit jumps directly. A no-op for an empty list. When
+        ``targets`` is given (one href per row), Enter follows the link instead
+        of just landing on it — that's the `gl` links overview."""
         if not rows:
             return
         self._overview_rows = rows
         self._overview_title = title
         self._overview_scroll_top = scroll_top
+        self._overview_targets = targets
         # Where the reader came from — Esc promises to put this back exactly.
         self._overview_origin = (self._rendered.verticalScrollBar().value(),
                                  self._rendered.textCursor().position())
@@ -1978,10 +2220,14 @@ class ZenMarkdownEditor(QWidget):
 
     def _jump_to_overview_row(self, idx: int):
         """Commit row ``idx``: preview it (caret on the span, scrolled per the
-        list's style) and close the overview there."""
+        list's style) and close the overview there. For the `gl` links overview
+        (``_overview_targets`` set) the picked link is then followed."""
+        targets = self._overview_targets
         if 0 <= idx < len(self._overview_rows):
             self._preview_overview_row(idx)
         self._close_overview()
+        if targets and 0 <= idx < len(targets):
+            self._follow_rendered_link(targets[idx])
 
     def _cancel_overview(self):
         """Esc — put the reader back exactly where the overview found them
@@ -2502,16 +2748,26 @@ class ZenMarkdownEditor(QWidget):
             return True
         if (getattr(self, "_rendered_pending_g", False)
                 and not ctrl and not shift
-                and key in (Qt.Key.Key_C, Qt.Key.Key_H, Qt.Key.Key_O)):
+                and key in (Qt.Key.Key_C, Qt.Key.Key_H, Qt.Key.Key_O,
+                            Qt.Key.Key_L, Qt.Key.Key_B)):
             self._rendered_pending_g = False
             if key == Qt.Key.Key_C:
                 self._open_changes_overview()
             elif key == Qt.Key.Key_H:
                 self._open_headings_overview()
+            elif key == Qt.Key.Key_L:
+                self._open_links_overview()
+            elif key == Qt.Key.Key_B:
+                self._navigate_back()
             else:
                 self._open_file_dialog()
             return True
         self._rendered_pending_g = False
+
+        # Backspace — browser-style back through followed .md links.
+        if key == Qt.Key.Key_Backspace and not ctrl:
+            self._navigate_back()
+            return True
 
         # `/` — in-document search; n/N — step through hits.
         if event.text() == "/":
@@ -2549,7 +2805,7 @@ class ZenMarkdownEditor(QWidget):
         # edit the active comment inline. ⇧D — delete it.
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not ctrl:
             href = self._rendered_anchor_at_caret()
-            if href and self._follow_link(href):
+            if href and self._follow_rendered_link(href):
                 return True
             self._reveal_active_comment()
             return True

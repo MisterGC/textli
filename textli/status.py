@@ -45,13 +45,24 @@ def write_status(mode: str, words: int, session_delta: int) -> str:
 _SECTION_MAX = 48
 
 
+def _crumb(text: str) -> str:
+    """Elide a leading breadcrumb (section or link) to keep the whisper from
+    crowding out the progress and review counts."""
+    text = text.strip()
+    if len(text) > _SECTION_MAX:
+        text = text[:_SECTION_MAX - 1].rstrip() + "…"
+    return text
+
+
 def read_status(progress: float, words_total: int,
                 changes: int = 0, comment_count: int = 0,
-                section: str = "") -> str:
+                section: str = "", link: str = "") -> str:
     """The read-view whisper: ``§ Design · 42% · ~7 min left · 2 comments``.
     ``progress`` is the fraction of the document the view has scrolled past
     (0..1); ``section`` is the heading under the caret (empty before the first
-    heading). Review parts appear only while there is something to review."""
+    heading). When the caret is on a link, ``link`` leads instead — ``→ where
+    Enter goes`` — since that's the salient thing. Review parts appear only
+    while there is something to review."""
     progress = min(1.0, max(0.0, progress))
     parts = [f"{round(progress * 100)}%"]
     minutes = math.ceil(words_total * (1.0 - progress) / WORDS_PER_MINUTE)
@@ -61,9 +72,8 @@ def read_status(progress: float, words_total: int,
         parts.append(f"{changes} change{'s' if changes != 1 else ''}")
     if comment_count:
         parts.append(f"{comment_count} comment{'s' if comment_count != 1 else ''}")
-    section = section.strip()
-    if section:
-        if len(section) > _SECTION_MAX:
-            section = section[:_SECTION_MAX - 1].rstrip() + "…"
-        parts.insert(0, f"§ {section}")
+    if link.strip():
+        parts.insert(0, f"→ {_crumb(link)}")
+    elif section.strip():
+        parts.insert(0, f"§ {_crumb(section)}")
     return SEP.join(parts)

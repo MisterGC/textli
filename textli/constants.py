@@ -34,6 +34,11 @@ ZEN_CODE_STRING = QColor("#A83E2E")      # the warm suggestion red
 ZEN_CODE_COMMENT = QColor("#8A8580")     # hint gray (rendered italic)
 ZEN_CODE_NUMBER = QColor("#C9A227")      # the overlay-card amber
 ZEN_MD_LINK_COLOR = QColor("#004578")
+# Read-view tables: a header row in the code-band paper shade, thin gridlines
+# in a warm gray that reads on the page without drawing the eye.
+ZEN_MD_TABLE_HEADER_BG = QColor("#E5DAC0")
+ZEN_MD_TABLE_BORDER = QColor("#C7B99B")
+ZEN_MD_TABLE_PAD = 6            # cell breathing room (px)
 ZEN_MD_MUTED_ALPHA = 100
 ZEN_MD_SYNTAX_COLOR = QColor("#B8B3AB")
 ZEN_MD_FONT_SIZE = 16

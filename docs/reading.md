@@ -20,10 +20,19 @@ number of sessions.
   digit jumps directly, ++esc++ returns you exactly where you were.
 - `/` — **search** with a live fuzzy hit list (same as the
   [write view](writing.md)); `n` / `N` step through the hits.
-- ++enter++ with the caret on a link **follows it**: web and mail targets
-  open in your default browser, `#heading` targets jump within the
-  document. Links are set in the zen link blue so they read as links
-  without shouting; clicking works too.
+- ++enter++ with the caret on a link **follows it**, routed by target: a
+  `.md` file opens in place (so a folder of linked notes reads like a small
+  wiki, and `other.md#section` lands on that heading), web and mail open in
+  your default browser, `#heading` jumps within the document, and anything
+  else (`.html`, images, PDFs…) opens with the system handler. A `.grafli`
+  link says it's not supported yet; a link to a missing file whispers
+  *not found* rather than creating one. Links are set in the zen link blue
+  so they read as links without shouting; clicking works too.
+- `gb` or ++backspace++ — **back** to the document you followed the last
+  link from, exactly where you left it.
+- `gl` — **links overview**: the same jump-list popup as `gh`, listing every
+  link with where it points; `j`/`k` preview, ++enter++ follows the
+  selection.
 - `go` — open another file without leaving the reading view (see
   [Opening files](opening.md)).
 
@@ -35,8 +44,10 @@ remain, and what still awaits review
 (`§ Architecture · 42% · ~7 min left · 3 changes · 2 comments`). The
 section breadcrumb follows the caret — so a long document always tells you
 where you are without opening the headings overview — and is absent before
-the first heading. The review counts disappear as you resolve them: an
-empty whisper is a finished review.
+the first heading. When the caret is on a link the breadcrumb turns into
+`→ where ++enter++ goes` (a filename, host, or `#slug`), so you see the
+destination before committing. The review counts disappear as you resolve
+them: an empty whisper is a finished review.
 
 ## Typography
 
@@ -46,6 +57,10 @@ rule, GitHub-style, so section breaks are visible from across the room.
 Inline code wears a soft chip wash so `identifiers` pop while scanning,
 and blockquotes get hint-gray ink with a thin bar at the left — a
 different voice for somebody else's words.
+
+Tables get the paper palette too: a bold header row in the code-band shade,
+thin warm gridlines, and cell padding for air — real table formatting, so
+it prints with the rest of the page.
 
 `⌘.` turns on **section focus**: everything outside the section under the
 caret rests behind a translucent paper wash and follows the caret as you

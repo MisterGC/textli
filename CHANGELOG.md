@@ -49,7 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Whisper breadcrumb while reading** — the read-view status leads with
   the section under the caret (`§ Architecture · 42% · ~7 min left`), so a
   long document always tells you where you are; empty before the first
-  heading, and it follows the caret.
+  heading, and it follows the caret. When the caret is on a link it turns
+  into `→ where Enter goes` (filename, host, or `#slug`).
+- **Table styling in the read view** — Markdown tables get a bold header
+  row in the code-band paper shade, thin warm gridlines, and cell padding;
+  real table formatting, so it prints too.
+- **Follow links to files** — in the reading view `Enter` on a link is
+  routed by target: a `.md` opens in place (with `other.md#section` landing
+  on the heading), a `.grafli` shows a "not yet supported, stay tuned"
+  notice, and anything else opens with the system handler. `gb` (or
+  `Backspace`) walks back through the documents you followed, and a brief
+  toast names where you land. `gl` opens a links overview — the same
+  jump-list as `gh`/`gc` — whose `Enter` follows the picked link. A link to
+  a missing file whispers *not found* instead of creating one.
 
 ### Fixed
 

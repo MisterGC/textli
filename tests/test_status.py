@@ -51,3 +51,13 @@ def test_read_status_section_elides_when_long():
     head = s.split(" · ")[0]
     assert head.startswith("§ ") and head.endswith("…")
     assert len(head) <= 2 + 48        # "§ " + capped section
+
+
+def test_read_status_link_target_leads_and_wins_over_section():
+    # on a link, the whisper shows where Enter goes instead of the section
+    s = read_status(0.3, 500, section="Design", link="other.md")
+    assert s.startswith("→ other.md · 30%")
+    assert "§" not in s
+    # progress/review parts still follow the link crumb
+    s2 = read_status(0.5, 220, changes=2, link="https://example.com")
+    assert s2 == "→ https://example.com · 50% · ~1 min left · 2 changes"

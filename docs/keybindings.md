@@ -61,7 +61,9 @@ See [Opening files](opening.md) for how the matching works.
 | `gg / G` | Document start / end |
 | `⌃d / ⌃u` · `⌃f / ⌃b / Space` | Half-page · full-page scroll |
 | `gh` | Headings overview — `j`/`k` preview live, `Enter` keeps, `Esc` restores your spot |
-| `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there |
+| `gl` | Links overview — same jump-list; `Enter` follows the picked link |
+| `↵` | Follow the link under the caret — a `.md` opens in place, web/mail in the browser, `#heading` jumps there, anything else via the system handler |
+| `gb` / `⌫` | Back to the document the last link was followed from |
 | `go` | Open another file (stays in the reading view) |
 
 ## Reading view — comments
