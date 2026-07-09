@@ -10,14 +10,16 @@ from PySide6.QtGui import QColor
 # ── Typography ───────────────────────────────────────────────────
 FONT_FAMILY = "JetBrainsMono Nerd Font"
 # Handwriting face for comment annotations (bundled Caveat, OFL) — a comment
-# reads as a margin note, not a form field. Inked in a fountain-pen royal
-# blue on the warm page. The small boost over body size keeps it proportional
-# to the document (Caveat's x-height runs small, so it needs a little).
+# reads as a margin note, not a form field. The note wears the same tint a
+# commented span gets in the text (ZEN_MD_COMMENT_NOTE_BG, below), inked in a
+# dark warm red that sits on it. The small boost over body size keeps it
+# proportional to the document (Caveat's x-height runs small).
 COMMENT_FONT_FAMILY = "Caveat"
-ZEN_MD_COMMENT_INK = QColor("#2A4B8F")
-ZEN_MD_COMMENT_SIZE_BOOST = 3   # points added over the body size in the field
-ZEN_MD_COMMENT_HEIGHT = 150     # default height of the inline comment editor
-ZEN_MD_COMMENT_WIDTH = 420      # default width (clamped to the viewport)
+ZEN_MD_COMMENT_INK = QColor("#6E2A1C")
+ZEN_MD_COMMENT_SIZE_BOOST = 3    # points added over the body size in the field
+ZEN_MD_COMMENT_WIDTH = 360       # fixed width; text wraps within it
+ZEN_MD_COMMENT_MIN_HEIGHT = 46   # starts small (about a line), then grows
+ZEN_MD_COMMENT_MAX_HEIGHT = 200  # grows to here with content, then scrolls
 
 # ── Zen palette ──────────────────────────────────────────────────
 ZEN_TEXT_COLOR = QColor("#403A30")
@@ -79,6 +81,22 @@ ZEN_MD_CANVAS_DIM_COLOR = QColor(0, 0, 0, 165)  # canvas — strong step-back
 # translucent so it composites over the warm paper as a soft highlighter wash
 # that accompanies the zen style without shouting.
 ZEN_MD_COMMENT_HL = QColor(199, 92, 78, 72)
+
+
+def _flatten(fg: QColor, bg: QColor) -> QColor:
+    """Composite translucent ``fg`` over opaque ``bg`` → an opaque color."""
+    a = fg.alphaF()
+    return QColor(
+        round(bg.red() * (1 - a) + fg.red() * a),
+        round(bg.green() * (1 - a) + fg.green() * a),
+        round(bg.blue() * (1 - a) + fg.blue() * a),
+    )
+
+
+# The comment note editor wears the exact tint a commented span gets in the
+# text — the highlight wash flattened over the page — so the note you write
+# and the mark it leaves read as one thing.
+ZEN_MD_COMMENT_NOTE_BG = _flatten(ZEN_MD_COMMENT_HL, ZEN_MD_BG)
 
 # Suggestion (track-changes) styling in the rendered read view. Removed text is
 # struck through with a strong (bold-weight) line so it's unmistakable, while

@@ -312,10 +312,10 @@ def test_leaving_read_mode_lifts_the_spotlight():
 
 # ── Comment editor: roomy + handwritten (annotation feel) ──
 
-def test_comment_field_is_roomy_and_handwritten():
+def test_comment_field_is_a_tinted_handwritten_note():
     from textli.constants import (
         COMMENT_FONT_FAMILY, ZEN_MD_COMMENT_INK,
-        ZEN_MD_COMMENT_HEIGHT, ZEN_MD_COMMENT_WIDTH)
+        ZEN_MD_COMMENT_NOTE_BG, ZEN_MD_COMMENT_WIDTH)
     ed = _editor()
     ed._toggle_rendered()
     v = ed._rendered
@@ -323,11 +323,34 @@ def test_comment_field_is_roomy_and_handwritten():
     v.document().setTextWidth(v.viewport().width())
     ed._show_comment_field(5, "a note in the margin")
     f = ed._comment_field
+    ss = f.styleSheet()
     assert f.font().family() == COMMENT_FONT_FAMILY      # handwriting face
     assert f.font().pointSize() > ed._font_size          # larger than body ink
-    assert ZEN_MD_COMMENT_INK.name() in f.styleSheet()   # fountain-pen blue
-    assert f.height() == min(ZEN_MD_COMMENT_HEIGHT, v.viewport().height() - 16)
+    assert ZEN_MD_COMMENT_INK.name() in ss              # dark red ink
+    assert ZEN_MD_COMMENT_NOTE_BG.name() in ss          # same tint as the mark
     assert f.width() == min(ZEN_MD_COMMENT_WIDTH, v.viewport().width() - 24)
+
+
+def test_comment_note_bg_matches_the_highlight_over_paper():
+    from textli.constants import (
+        _flatten, ZEN_MD_COMMENT_HL, ZEN_MD_BG, ZEN_MD_COMMENT_NOTE_BG)
+    assert ZEN_MD_COMMENT_NOTE_BG.name() == _flatten(
+        ZEN_MD_COMMENT_HL, ZEN_MD_BG).name()
+
+
+def test_comment_field_grows_with_text_then_caps():
+    from textli.constants import (
+        ZEN_MD_COMMENT_MAX_HEIGHT, ZEN_MD_COMMENT_MIN_HEIGHT)
+    ed = _editor()
+    ed._toggle_rendered()
+    v = ed._rendered
+    v.setFixedSize(900, 600)
+    v.document().setTextWidth(v.viewport().width())
+    ed._show_comment_field(5, "one short line")
+    small = ed._comment_field.height()
+    assert ZEN_MD_COMMENT_MIN_HEIGHT <= small < ZEN_MD_COMMENT_MAX_HEIGHT
+    ed._comment_field.setPlainText("word " * 300)   # textChanged → autosize
+    assert ed._comment_field.height() == ZEN_MD_COMMENT_MAX_HEIGHT
 
 
 def test_handwriting_font_is_bundled():

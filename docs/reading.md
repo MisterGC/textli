@@ -104,10 +104,11 @@ Select a span with `v` + motions, then:
 - ++enter++ — reveal-edit the active comment; `⇧D` deletes it.
 
 Commented spans get a soft highlighter wash in the rendered text, so review
-feedback is visible without shouting. The comment editor opens as a roomy
-note in a handwriting face, inked in fountain-pen blue and sized to sit with
-the document, so leaving a remark feels like annotating the margin rather
-than filling in a form.
+feedback is visible without shouting. The comment editor opens as a small
+note tinted like the mark it leaves, in a handwriting face and dark red ink;
+it grows as you write — wrapping to width, scrolling once it's tall enough —
+so leaving a remark feels like annotating the margin rather than filling in
+a form.
 
 ## Suggestions (track changes)
 

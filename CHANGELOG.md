@@ -62,10 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Visible read-view caret** — a soft zen-blue block over the current
   glyph (vim-style) replaces Qt's near-invisible 1px line, so it's easy to
   see where you are when placing a comment; the letter still shows through.
-- **Comments read like margin notes** — the inline comment editor is bigger
-  by default and set in a handwriting face (bundled Caveat, OFL) inked in
-  fountain-pen blue, sized to sit proportional to the document, so leaving a
-  remark feels like annotating rather than filling a form field.
+- **Comments read like margin notes** — the inline comment editor wears the
+  same tint a commented span gets in the text, set in a handwriting face
+  (bundled Caveat, OFL) in dark red ink and sized to sit with the document.
+  It starts small and grows with what you write — wrapping to a fixed width,
+  scrolling once it reaches a max height — so a remark feels like annotating
+  rather than filling a form field.
 - **Follow links to files** — in the reading view `Enter` on a link is
   routed by target: a `.md` opens in place (with `other.md#section` landing
   on the heading), a `.grafli` shows a "not yet supported, stay tuned"

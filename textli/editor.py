@@ -69,8 +69,10 @@ from textli.search_overlay import SearchOverlay
 from textli.constants import (
     COMMENT_FONT_FAMILY,
     FONT_FAMILY,
-    ZEN_MD_COMMENT_HEIGHT,
     ZEN_MD_COMMENT_INK,
+    ZEN_MD_COMMENT_MAX_HEIGHT,
+    ZEN_MD_COMMENT_MIN_HEIGHT,
+    ZEN_MD_COMMENT_NOTE_BG,
     ZEN_MD_COMMENT_SIZE_BOOST,
     ZEN_MD_COMMENT_WIDTH,
     ZEN_CODE_COMMENT,
@@ -3130,40 +3132,75 @@ class ZenMarkdownEditor(QWidget):
         self._show_comment_field(end, comment.body)
 
     def _show_comment_field(self, end_pos: int, body: str):
-        """Place the inline comment editor just below the active span."""
+        """Place the inline comment editor just below the active span. It reads
+        as a handwritten margin note — Caveat in dark red ink on the same tint
+        a commented span wears in the text — and starts small, growing with the
+        text up to a max (then scrolling), so an empty note isn't a big box."""
         field = self._comment_field
         if field is None:
             field = QPlainTextEdit(self._rendered.viewport())
+            field.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+            field.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            field.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             field.installEventFilter(self)
+            field.textChanged.connect(self._autosize_comment_field)
             self._comment_field = field
-        # A comment reads as a handwritten margin note: Caveat in a
-        # fountain-pen royal blue, sized to sit proportional to the body, in a
-        # roomy box (font restyled each open so a font zoom since last time is
-        # reflected).
+        # Font restyled each open so a font zoom since last time is reflected.
         field.setFont(QFont(
             COMMENT_FONT_FAMILY, self._font_size + ZEN_MD_COMMENT_SIZE_BOOST))
         field.setStyleSheet(
             f"QPlainTextEdit {{"
-            f" background: #FBF7EC; color: {ZEN_MD_COMMENT_INK.name()};"
+            f" background: {ZEN_MD_COMMENT_NOTE_BG.name()};"
+            f" color: {ZEN_MD_COMMENT_INK.name()};"
             f" border: 1px solid #C9A227; border-radius: 6px;"
-            f" padding: 8px 10px;"
-            f" selection-background-color: #B8D4E8;"
+            f" padding: 6px 10px;"
+            f" selection-background-color: #E7C6A0;"
             f"}}"
         )
+        self._comment_anchor_pos = end_pos
+        field.setFixedWidth(min(ZEN_MD_COMMENT_WIDTH,
+                               self._rendered.viewport().width() - 24))
         field.setPlainText(body)
-        cur = self._rendered.textCursor()
-        cur.setPosition(end_pos)
-        rect = self._rendered.cursorRect(cur)
-        vp = self._rendered.viewport()
-        w = min(ZEN_MD_COMMENT_WIDTH, vp.width() - 24)
-        field.setFixedWidth(w)
-        field.setFixedHeight(min(ZEN_MD_COMMENT_HEIGHT, vp.height() - 16))
-        x = max(8, min(rect.left(), vp.width() - w - 8))
-        y = min(rect.bottom() + 4, vp.height() - field.height() - 8)
-        field.move(x, max(8, y))
         field.show()
+        self._autosize_comment_field()   # sets height + places the field
         field.setFocus()
         field.moveCursor(QTextCursor.MoveOperation.End)
+
+    def _autosize_comment_field(self):
+        """Grow the note to fit its text — from a small start up to a max, then
+        let it scroll — and keep it anchored below the span, on screen.
+
+        QPlainTextEdit reports its document height in *lines*, not pixels, so
+        the wrapped pixel height is measured with a throwaway QTextDocument at
+        the same font and wrap width (deterministic, no dependence on the
+        widget's lazy layout)."""
+        field = self._comment_field
+        if field is None:
+            return
+        vw = field.viewport().width()
+        if vw <= 0:                       # not laid out yet — estimate from width
+            vw = field.width() - 28
+        probe = QTextDocument()
+        probe.setDefaultFont(field.font())
+        probe.setDocumentMargin(field.document().documentMargin())
+        probe.setTextWidth(vw)
+        probe.setPlainText(field.toPlainText())
+        chrome = 18   # 6px padding top+bottom, 1px border, a little slack
+        wanted = probe.size().height() + chrome
+        h = int(min(ZEN_MD_COMMENT_MAX_HEIGHT,
+                    max(ZEN_MD_COMMENT_MIN_HEIGHT, wanted)))
+        field.setFixedHeight(h)
+        vp = self._rendered.viewport()
+        cur = self._rendered.textCursor()
+        cur.setPosition(min(self._comment_anchor_pos,
+                            self._rendered.document().characterCount() - 1))
+        rect = self._rendered.cursorRect(cur)
+        w = field.width()
+        x = max(8, min(rect.left(), vp.width() - w - 8))
+        y = min(rect.bottom() + 4, vp.height() - h - 8)
+        field.move(x, max(8, y))
 
     def _hide_comment_field(self):
         if self._comment_field is not None:
