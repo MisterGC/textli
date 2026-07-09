@@ -16,7 +16,7 @@ FONT_FAMILY = "JetBrainsMono Nerd Font"
 # proportional to the document (Caveat's x-height runs small).
 COMMENT_FONT_FAMILY = "Caveat"
 ZEN_MD_COMMENT_INK = QColor("#6E2A1C")
-ZEN_MD_COMMENT_SIZE_BOOST = 3    # points added over the body size in the field
+ZEN_MD_COMMENT_SIZE_BOOST = 4    # points added over the body size in the field
 ZEN_MD_COMMENT_WIDTH = 360       # fixed width; text wraps within it
 ZEN_MD_COMMENT_MIN_HEIGHT = 46   # starts small (about a line), then grows
 ZEN_MD_COMMENT_MAX_HEIGHT = 200  # grows to here with content, then scrolls
