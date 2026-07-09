@@ -333,6 +333,5 @@ def test_comment_field_is_roomy_and_handwritten():
 def test_handwriting_font_is_bundled():
     from pathlib import Path
     import textli.fonts as fonts
-    assert "ArchitectsDaughter.ttf" in fonts._BUNDLED_FONTS
-    assert (Path(fonts.__file__).parent / "fonts"
-            / "ArchitectsDaughter.ttf").exists()
+    assert "Caveat.ttf" in fonts._BUNDLED_FONTS
+    assert (Path(fonts.__file__).parent / "fonts" / "Caveat.ttf").exists()

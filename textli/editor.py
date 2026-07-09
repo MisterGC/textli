@@ -3136,8 +3136,8 @@ class ZenMarkdownEditor(QWidget):
             field = QPlainTextEdit(self._rendered.viewport())
             field.installEventFilter(self)
             self._comment_field = field
-        # A comment reads as a handwritten margin note: Architects Daughter in
-        # a fountain-pen royal blue, a few points larger than body text, in a
+        # A comment reads as a handwritten margin note: Caveat in a
+        # fountain-pen royal blue, sized to sit proportional to the body, in a
         # roomy box (font restyled each open so a font zoom since last time is
         # reflected).
         field.setFont(QFont(
