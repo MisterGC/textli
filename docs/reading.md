@@ -62,6 +62,10 @@ Tables get the paper palette too: a bold header row in the code-band shade,
 thin warm gridlines, and cell padding for air — real table formatting, so
 it prints with the rest of the page.
 
+The caret is a soft blue block over the current glyph — vim-style, easy to
+find on the warm page when you're placing a comment, without pulling the
+eye the way a hard cursor would.
+
 `⌘.` turns on **section focus**: everything outside the section under the
 caret rests behind a translucent paper wash and follows the caret as you
 move — the rendered twin of the write view's paragraph focus.

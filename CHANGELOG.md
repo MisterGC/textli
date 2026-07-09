@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Table styling in the read view** — Markdown tables get a bold header
   row in the code-band paper shade, thin warm gridlines, and cell padding;
   real table formatting, so it prints too.
+- **Visible read-view caret** — a soft zen-blue block over the current
+  glyph (vim-style) replaces Qt's near-invisible 1px line, so it's easy to
+  see where you are when placing a comment; the letter still shows through.
 - **Follow links to files** — in the reading view `Enter` on a link is
   routed by target: a `.md` opens in place (with `other.md#section` landing
   on the heading), a `.grafli` shows a "not yet supported, stay tuned"

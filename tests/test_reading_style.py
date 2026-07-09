@@ -162,3 +162,49 @@ def test_leaving_read_mode_lifts_the_wash():
     assert ed._rendered._focus_span is not None
     ed._toggle_rendered()   # back to write
     assert ed._rendered._focus_span is None
+
+
+# ── Read-view block caret (visible on the warm page for comment placement) ──
+
+def test_read_view_hides_the_native_thin_caret():
+    ed = _editor()
+    ed._toggle_rendered()
+    # width 0 hides Qt's 1px line; the view paints its own soft block instead
+    assert ed._rendered.cursorWidth() == 0
+
+
+def _lay_out(v):
+    """Give the headless view a real layout so line geometry exists."""
+    v.setFixedSize(800, 600)
+    v.document().setTextWidth(v.viewport().width())
+
+
+def test_caret_cell_covers_the_current_glyph():
+    from PySide6.QtCore import QPointF
+    ed = _editor()
+    ed._toggle_rendered()
+    v = ed._rendered
+    _lay_out(v)
+    idx = v.toPlainText().index("Prose")
+    cur = v.textCursor()
+    cur.setPosition(idx)
+    v.setTextCursor(cur)
+    cell = v._caret_cell(QPointF(0, 0))
+    assert cell is not None
+    assert cell.width() > 0 and cell.height() > 0
+
+
+def test_caret_cell_handles_end_of_block():
+    # at a block end there is no next glyph — falls back to a space width,
+    # never raising
+    from PySide6.QtCore import QPointF
+    ed = _editor()
+    ed._toggle_rendered()
+    v = ed._rendered
+    _lay_out(v)
+    block = v.document().begin()
+    cur = v.textCursor()
+    cur.setPosition(block.position() + max(0, block.length() - 1))
+    v.setTextCursor(cur)
+    cell = v._caret_cell(QPointF(0, 0))
+    assert cell is not None and cell.width() > 0

@@ -87,6 +87,7 @@ from textli.constants import (
     ZEN_MD_FONT_SIZE_MIN,
     ZEN_MD_HEADING_SIZES,
     ZEN_MD_SYNTAX_COLOR,
+    ZEN_MD_CARET,
     ZEN_MD_LINK_COLOR,
     ZEN_MD_TABLE_BORDER,
     ZEN_MD_TABLE_HEADER_BG,
@@ -165,6 +166,13 @@ class _ReadingView(QTextBrowser):
         self._focus_span: tuple[int, int] | None = None
         self._focus_wash = QColor(ZEN_MD_BG)
         self._focus_wash.setAlpha(175)
+        # Caret: hide Qt's near-invisible 1px line and paint a soft block over
+        # the current glyph instead (vim-style), so it's findable on the warm
+        # page while placing comments. Repaint as it moves or focus shifts.
+        self.setCursorWidth(0)
+        self._caret_color = QColor(ZEN_MD_CARET)
+        self.cursorPositionChanged.connect(self.viewport().update)
+        self.selectionChanged.connect(self.viewport().update)
 
     def set_heading_rules(self, positions: list[int]):
         """Replace the set of block positions to underline; repaint."""
@@ -235,6 +243,7 @@ class _ReadingView(QTextBrowser):
         if self._code_bands:
             self._paint_code_bands(doc, layout, off)
         super().paintEvent(event)
+        self._paint_caret(off)
         if not (self._strikes or self._heading_rules
                 or self._quote_bars or self._focus_span):
             return
@@ -316,6 +325,52 @@ class _ReadingView(QTextBrowser):
                 painter.drawLine(QPointF(x1 + off.x(), y + off.y()),
                                  QPointF(x2 + off.x(), y + off.y()))
             block = block.next()
+
+    def _caret_cell(self, off):
+        """The glyph-cell rectangle under the caret (viewport coords), or None
+        if it can't be laid out — the soft block is painted here. Width is the
+        advance to the next glyph; at a line end it falls back to a space."""
+        pos = self.textCursor().position()
+        doc = self.document()
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return None
+        bl = block.layout()
+        rel = pos - block.position()
+        line = bl.lineForTextPosition(rel)
+        if not line.isValid():
+            return None
+        x1 = line.cursorToX(rel)[0]
+        if rel < block.length() - 1:
+            w = max(line.cursorToX(rel + 1)[0] - x1, 4.0)
+        else:
+            w = QFontMetricsF(self.font()).horizontalAdvance(" ")
+        r = line.naturalTextRect()
+        top = doc.documentLayout().blockBoundingRect(block).top() + r.top()
+        return QRectF(x1 + off.x(), top + off.y(), w, r.height())
+
+    def _paint_caret(self, off):
+        """The soft block caret over the current glyph, only while the view has
+        focus (an open card takes focus, so the caret rests then)."""
+        if not self.hasFocus():
+            return
+        cell = self._caret_cell(off)
+        if cell is None:
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._caret_color)
+        painter.drawRoundedRect(cell, 2.0, 2.0)
+        painter.end()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.viewport().update()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.viewport().update()
 
 
 def editor_help_html() -> str:

@@ -34,6 +34,10 @@ ZEN_CODE_STRING = QColor("#A83E2E")      # the warm suggestion red
 ZEN_CODE_COMMENT = QColor("#8A8580")     # hint gray (rendered italic)
 ZEN_CODE_NUMBER = QColor("#C9A227")      # the overlay-card amber
 ZEN_MD_LINK_COLOR = QColor("#004578")
+# Read-view caret: a soft block over the current glyph (vim-style), cool blue
+# on the warm page so it reads at a glance without pulling all attention; the
+# letter stays visible through it. Replaces Qt's near-invisible 1px line.
+ZEN_MD_CARET = QColor(0, 69, 120, 72)
 # Read-view tables: a header row in the code-band paper shade, thin gridlines
 # in a warm gray that reads on the page without drawing the eye.
 ZEN_MD_TABLE_HEADER_BG = QColor("#E5DAC0")
