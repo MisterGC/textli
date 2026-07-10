@@ -71,6 +71,16 @@ Opened on a file (the standalone `textli` CLI always is), the editor
 **autosaves** while you type — there is no save command to remember. Lean on
 git for durable checkpoints.
 
+It also **watches the file** and reflects changes made outside textli — an
+agent rewriting the doc from the comments you just left, a `git` checkout,
+another app — **in place**, keeping your view, caret and scroll, with a faint
+*reloaded* whisper. So the read → comment → "update the doc from my comments"
+→ read loop needs no restart to see the result. If you happen to have unsaved
+edits of your own when the file changes underneath you, textli holds off
+rather than clobbering either side: it whispers a warning and keeps what
+you're typing (which wins on the next autosave). Reconciling a genuine
+two-sided conflict is coming.
+
 The editor also **holds your place**: closing a file remembers the view you
 were in and where — reopening it (CLI or `go`) resumes exactly there, in the
 [reading view](reading.md) too. Explicit targets win: `-r` forces the

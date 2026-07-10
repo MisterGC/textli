@@ -576,6 +576,13 @@ class ZenMarkdownEditor(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._file_path = file_path
         self._original_text = text
+        # Live-reload: the content we last know is on disk — set on load and
+        # after every autosave. On a file change, ``fileChanged`` compares the
+        # disk against this to tell an external edit from our own write, and
+        # the buffer against it to tell a clean reload from a conflict.
+        self._disk_snapshot = text
+        self._reloading = False       # guard: our own reload isn't a local edit
+        self._reload_timer = None     # coalesces a burst of fileChanged events
         # The editor always opens editable; reading is the ⌘R rendered view.
         self._read_only = False
         # Section-focus dim (everything but the current paragraph) — off by
@@ -1009,31 +1016,83 @@ class ZenMarkdownEditor(QWidget):
         self._watcher.fileChanged.connect(self._on_file_changed)
 
     def _on_file_changed(self, path: str):
-        """Reload file content when it changes externally (read-only mode)."""
-        if not self._read_only:
-            return
-        p = Path(path)
-        if not p.exists():
-            return
-        # Preserve cursor position
-        cursor_pos = self._editor.textCursor().position()
-        text = p.read_text(encoding="utf-8")
-        self._editor.setPlainText(text)
-        self._apply_heading_layout()
-        cursor = self._editor.textCursor()
-        cursor.setPosition(min(cursor_pos, len(text)))
-        self._editor.setTextCursor(cursor)
-        # Re-add path to watcher (some systems remove it after change)
+        """Something wrote the open file. Re-arm the watch — a replace-by-rename
+        drops it on many platforms — and debounce: editors and agents often
+        write in a burst (temp file, rename), firing several events. The
+        settled decision happens in :meth:`_reload_if_changed`."""
         if self._watcher and path not in self._watcher.files():
             self._watcher.addPath(path)
+        if self._reload_timer is None:
+            self._reload_timer = QTimer(self)
+            self._reload_timer.setSingleShot(True)
+            self._reload_timer.timeout.connect(self._reload_if_changed)
+        self._reload_timer.start(150)
+
+    def _reload_if_changed(self):
+        """Reflect an external edit in place. Read the file and compare: in sync
+        or our own last write → ignore; changed with a clean buffer → reload,
+        keeping the view, caret and scroll; changed while the buffer has unsaved
+        local edits → a conflict, so warn and keep the buffer (it wins on the
+        next autosave), leaving reconciliation to #24."""
+        if getattr(self, "_editor", None) is None:
+            return                       # mid-teardown; child refs may be gone
+        if not self._file_path or not self._file_path.exists():
+            return
+        if self._watcher and str(self._file_path) not in self._watcher.files():
+            self._watcher.addPath(str(self._file_path))
+        try:
+            disk = self._file_path.read_text(encoding="utf-8")
+        except OSError:
+            return                       # mid-write; a later event settles it
+        if disk == self._editor.toPlainText() or disk == self._disk_snapshot:
+            self._disk_snapshot = disk   # our own write, or already in sync
+            return
+        if self._editor.toPlainText() == self._disk_snapshot:
+            self._reload_from_disk(disk)     # no unsaved edits → clean reload
+            self._flash_notice("↻ reloaded — file changed on disk")
+        else:
+            self._flash_notice("⚠ file changed on disk — kept your edits")
+
+    def _reload_from_disk(self, text: str):
+        """Replace the buffer with ``text`` from disk, restoring the active
+        view's caret and scroll and re-rendering the read view so comments and
+        suggestions come back. Guarded so the replacement isn't taken for a
+        local edit (which would re-save and echo back through the watcher)."""
+        self._reloading = True
+        try:
+            if self._rendered_mode:
+                sb = self._rendered.verticalScrollBar()
+                scroll, caret = sb.value(), self._rendered.textCursor().position()
+                self._editor.setPlainText(text)
+                self._apply_heading_layout()
+                self._render_markdown(text)
+                rendered = self._rendered.document().toPlainText()
+                cur = self._rendered.textCursor()
+                cur.setPosition(min(caret, len(rendered)))
+                self._rendered.setTextCursor(cur)
+                if not self._read_focus:     # focus mode re-locks the caret itself
+                    sb.setValue(min(scroll, sb.maximum()))
+            else:
+                sb = self._editor.verticalScrollBar()
+                scroll, caret = sb.value(), self._editor.textCursor().position()
+                self._editor.setPlainText(text)
+                self._apply_heading_layout()
+                cur = self._editor.textCursor()
+                cur.setPosition(min(caret, len(text)))
+                self._editor.setTextCursor(cur)
+                sb.setValue(min(scroll, sb.maximum()))
+            self._disk_snapshot = text
+        finally:
+            self._reloading = False
+        self._refresh_status()
 
     def _enable_autosave(self):
         """Doc-backed notes open editable, so wire up autosave from the start
-        (debounced) — the editor owns the file while open."""
+        (debounced). The file watcher stays live alongside it: an external edit
+        reloads in place rather than being overwritten blind (see
+        :meth:`_on_file_changed`)."""
         if not self._file_path:
             return
-        if self._watcher:
-            self._watcher.removePath(str(self._file_path))
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(500)
@@ -1086,15 +1145,21 @@ class ZenMarkdownEditor(QWidget):
         self.update()
 
     def _schedule_autosave(self):
+        if self._reloading:      # a disk reload isn't a local edit to save back
+            return
         if self._autosave_timer:
             self._autosave_timer.start()
 
     def _autosave(self):
         if not self._file_path or self._read_only:
             return
-        self._file_path.write_text(
-            self._editor.toPlainText(), encoding="utf-8",
-        )
+        text = self._editor.toPlainText()
+        self._file_path.write_text(text, encoding="utf-8")
+        # Record what we put on disk so the watcher can tell this write from an
+        # external one, and re-arm the watch (a truncating write can drop it).
+        self._disk_snapshot = text
+        if self._watcher and str(self._file_path) not in self._watcher.files():
+            self._watcher.addPath(str(self._file_path))
         self.file_saved.emit(self._file_path)
 
     # ── Per-file position memory ──
@@ -1218,6 +1283,11 @@ class ZenMarkdownEditor(QWidget):
             self._watcher.removePath(str(self._file_path))
         self._file_path = path
         text = path.read_text(encoding="utf-8") if path.exists() else ""
+        self._disk_snapshot = text       # new file's on-disk baseline
+        if self._watcher is None:        # started on a not-yet-existing file
+            self._setup_file_watcher()
+        elif path.exists():
+            self._watcher.addPath(str(path))
         self._editor.setPlainText(text)
         # setPlainText scheduled an autosave; a mere open must not touch the
         # disk (a new file would materialize empty before any typing).

@@ -35,7 +35,9 @@ textli -r review.md                 # start in the reading view
 
 The editor opens ready to type (vim NORMAL mode) and autosaves while you
 work, and every file **resumes where you left it** — view mode, caret and
-scroll included. A faint **whisper status** in the card's corner keeps you
+scroll included. It also **watches the open file**, so edits made outside
+textli (an agent applying your comments, a `git` checkout) reload in place
+without a restart. A faint **whisper status** in the card's corner keeps you
 oriented —
 mode, word count, and session delta while writing; the section you're in,
 progress, minutes left, and open review items while reading. Press `F1` inside the editor for the

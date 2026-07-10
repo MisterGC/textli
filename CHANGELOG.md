@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   open review items while reading. Hidden while any overlay card is up.
 - **Position memory** — every file resumes where you left it: view mode,
   caret and read-view scroll (`-r` and `#heading-slug` still win).
+- **Live reload of external edits** — textli watches the open file and
+  reflects changes made outside it (an agent applying your comments, a `git`
+  checkout, another app) in place, keeping the view, caret and scroll, with a
+  faint *reloaded* whisper — no restart to see them. Its own autosaves are
+  never mistaken for external writes. If the buffer has unsaved local edits
+  when the file changes underneath, it warns and keeps them (they win on the
+  next save) instead of clobbering; two-sided conflict reconciliation is
+  tracked separately.
 - **Typewriter scrolling** (`⌘T`) — the caret line holds steady while the
   page moves; persists across sessions.
 - **Follow links with `Enter`** — in either view, the caret on
