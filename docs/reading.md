@@ -5,13 +5,94 @@ preview: a caret moves through the rendered text with vim motions, and the
 whole review workflow — comments and suggested changes — lives here.
 `⌘R` again returns to the source, caret kept in place.
 
+Leave a file while reading and it remembers: reopening it resumes the
+reading view at the very spot you left, so a long review survives any
+number of sessions.
+
 ## Navigating
 
 - `h j k l`, `w / b / e`, `0 / $` — move the caret through the prose.
 - `gg / G` — document start / end; `⌃d / ⌃u`, `⌃f / ⌃b`, ++space++ —
   half-page and full-page scrolling.
-- `gh` — **headings overview**: an outline jump-list of the document
-  (`j`/`k` to move, ++enter++ or a digit to jump, ++esc++ to close).
+- `gh` — **headings overview**: an outline jump-list of the document,
+  opened on the section you're in. `j`/`k` move the selection *and preview
+  it live* — the view follows; ++enter++ stays at the previewed spot, a
+  digit jumps directly, ++esc++ returns you exactly where you were.
+- `/` — **search** with a live fuzzy hit list (same as the
+  [write view](writing.md)); `n` / `N` step through the hits.
+- ++enter++ with the caret on a link **follows it**, routed by target: a
+  `.md` file opens in place (so a folder of linked notes reads like a small
+  wiki, and `other.md#section` lands on that heading), web and mail open in
+  your default browser, `#heading` jumps within the document, and anything
+  else (`.html`, images, PDFs…) opens with the system handler. A `.grafli`
+  link says it's not supported yet; a link to a missing file whispers
+  *not found* rather than creating one. Links are set in the zen link blue
+  so they read as links without shouting; clicking works too.
+- `gb` or ++backspace++ — **back** to the document you followed the last
+  link from, exactly where you left it.
+- `gl` — **links overview**: the same jump-list popup as `gh`, listing every
+  link with where it points; `j`/`k` preview, ++enter++ follows the
+  selection.
+- `go` — open another file without leaving the reading view (see
+  [Opening files](opening.md)).
+
+## The whisper status
+
+The faint line in the card's corner tracks the read: the section you're in,
+how far through the document you are, roughly how many reading minutes
+remain, and what still awaits review
+(`§ Architecture · 42% · ~7 min left · 3 changes · 2 comments`). The
+section breadcrumb follows the caret — so a long document always tells you
+where you are without opening the headings overview — and is absent before
+the first heading. When the caret is on a link the breadcrumb turns into
+`→ where ++enter++ goes` (a filename, host, or `#slug`), so you see the
+destination before committing. The review counts disappear as you resolve
+them: an empty whisper is a finished review.
+
+## Typography
+
+Headings breathe asymmetrically — more space above (closing the previous
+section) than below (starting their own) — and `h1`/`h2` carry a thin
+rule, GitHub-style, so section breaks are visible from across the room.
+Inline code wears a soft chip wash so `identifiers` pop while scanning,
+and blockquotes get hint-gray ink with a thin bar at the left — a
+different voice for somebody else's words.
+
+Tables get the paper palette too: a bold header row in the code-band shade,
+thin warm gridlines, and cell padding for air — real table formatting, so
+it prints with the rest of the page.
+
+The caret is a soft blue block over the current glyph — vim-style, easy to
+find on the warm page when you're placing a comment, without pulling the
+eye the way a hard cursor would.
+
+`⌘.` turns on **section focus**: everything outside the section under the
+caret rests behind a translucent paper wash and follows the caret as you
+move — the rendered twin of the write view's paragraph focus.
+
+`f` turns on **focus reading mode** — a deeper, immersive read. The caret
+line holds at the centre of the view and the page scrolls under it
+(typewriter-style; at the very start or end of the document the caret
+travels to the top/bottom instead), while a **spotlight** centred on the
+reading line fades the text away by distance. Because the fade keys off the
+caret's position rather than paragraph edges, brightness slides smoothly as
+you scroll — a heading or a short line never makes it jump. It persists
+across sessions and supersedes `⌘.` while it's on (only one focus at a
+time). Comments, marks and search stay live beneath the wash.
+
+## Code blocks
+
+Fenced code sits on a full-width band in a deeper paper shade, so the code
+part of a document is visible at a glance. A language tag on the fence
+(` ```python `) adds calm syntax highlighting drawn from the zen palette —
+keywords in the title blue, strings in the warm red, comments in gray
+italic, numbers and constants in amber; everything else stays body ink. No
+tag means no colors: the band alone marks the block.
+
+Printing (`⌘P`) from the reading view prints the typeset page, not the raw
+source, and carries the code band onto paper. Images referenced by a
+relative path (`![](diagram.png)`) render against the document's own
+folder, so they show wherever you launched textli from.
 
 ## Comments
 
@@ -23,7 +104,11 @@ Select a span with `v` + motions, then:
 - ++enter++ — reveal-edit the active comment; `⇧D` deletes it.
 
 Commented spans get a soft highlighter wash in the rendered text, so review
-feedback is visible without shouting.
+feedback is visible without shouting. The comment editor opens as a small
+note tinted like the mark it leaves, in a handwriting face and dark red ink;
+it grows as you write — wrapping to width, scrolling once it's tall enough —
+so leaving a remark feels like annotating the margin rather than filling in
+a form.
 
 ## Suggestions (track changes)
 
@@ -34,7 +119,9 @@ feedback is visible without shouting.
 - `a` / `x` — accept / reject the suggestion under the caret and advance
   to the next open one.
 - `⇧A` / `⇧X` — accept / reject **all** suggestions at once.
-- `gc` — **changes overview**: a jump-list of every suggestion and comment.
+- `gc` — **changes overview**: a jump-list of every suggestion and comment,
+  with the same live preview as `gh` (`j`/`k` follow, ++enter++ keeps,
+  ++esc++ restores).
 - `p` — **clean preview**: read the prose as if every suggestion were
   accepted; the source stays untouched until you actually accept.
 

@@ -96,6 +96,44 @@ def test_entering_read_mode_settles_scroll_range():
     assert sb.maximum() >= doc_h - ed._rendered.viewport().height() - 50
 
 
+def test_comment_commit_keeps_scroll_range_settled():
+    # Regression: committing a comment in the reading view re-renders via
+    # setMarkdown and immediately restored the scrollbar against Qt's lazy
+    # pre-layout *estimate* — the range could stick wrong and scrolling ended
+    # short of the real document end (until ⌘R ⌘R forced a fresh settle).
+    # _render_markdown itself settles the layout now, so every commit path
+    # restores scroll/caret against the real range.
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(900, 600)
+    parent.show()
+    big = "# Top\n\n" + "\n\n".join(
+        f"Paragraph {i} keeps some prose around target{i} inside." + " word" * 30
+        for i in range(400))
+    ed = ZenMarkdownEditor(parent, big, title="t")
+    ed._parent = parent
+    ed._toggle_rendered()
+    sb = ed._rendered.verticalScrollBar()
+    sb.setValue(sb.maximum() // 2)          # reading somewhere mid-document
+    pos = sb.value()
+    # Author a comment near the reading position, through the real path.
+    rendered = ed._rendered.document().toPlainText()
+    r0 = rendered.index("target200")
+    ed._begin_comment_for_span(r0, r0 + len("target200"))
+    assert ed._comment_field is not None
+    ed._comment_field.setPlainText("check this")
+    ed._commit_comment_field()
+    assert "{>>check this<<}" in ed._editor.toPlainText()
+    # Capture the range BEFORE querying documentSize() — that query itself
+    # forces a full layout and would repair a stale scrollbar, masking the bug.
+    max_after_commit = sb.maximum()
+    doc_h = ed._rendered.document().documentLayout().documentSize().height()
+    assert max_after_commit <= doc_h
+    assert max_after_commit >= doc_h - ed._rendered.viewport().height() - 50
+    # And the reader's place survived the re-render (no clamp to a stale max).
+    assert abs(sb.value() - pos) <= ed._rendered.viewport().height() // 2
+
+
 def test_mode_flash_on_toggle():
     ed = _editor()
     ed._toggle_rendered()
@@ -235,8 +273,156 @@ def test_editor_help_covers_the_latest_features():
     html = editor_help_html()
     # reading-view review surface must be documented
     for token in ("Suggest a change", "Accept / reject", "Changes overview",
-                  "Headings overview", "Clean preview", "CriticMarkup"):
+                  "Headings overview", "Clean preview", "CriticMarkup",
+                  "Follow the link under the caret"):
         assert token in html
     # and the keys themselves
     for key in (">gc<", ">gh<", ">p<", ">s<", ">]s / [s<"):
         assert key in html
+
+
+# ── Raw HTML never swallows the document (#5) ──
+
+def test_bare_html_tag_does_not_swallow_following_text():
+    # A tag-looking token outside code spans used to open an HTML element that
+    # never closes; every following paragraph vanished from the read view and
+    # only code-span contents survived. NoHTML renders it literally instead.
+    md = ("start '--target <variant>' tail with `code1` and prose.\n\n"
+          "second paragraph still visible.\n")
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 700)
+    ed = ZenMarkdownEditor(parent, md, title="T")
+    ed._parent = parent
+    ed._toggle_rendered()
+    text = ed._rendered.toPlainText()
+    assert "<variant>" in text
+    assert "tail with" in text
+    assert "second paragraph still visible." in text
+
+
+def test_bare_html_tag_renders_literally_in_clean_preview_too():
+    md = "alpha <variant> beta\n\ngamma stays.\n"
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 700)
+    ed = ZenMarkdownEditor(parent, md, title="T")
+    ed._parent = parent
+    ed._toggle_rendered()
+    ed._toggle_preview()
+    text = ed._rendered.toPlainText()
+    assert "<variant>" in text and "beta" in text and "gamma stays." in text
+
+
+# ── Font zoom works in the reading view too (#10) ──
+
+def test_font_zoom_works_in_the_reading_view():
+    ed = _editor()
+    ed._toggle_rendered()
+    base = ed._font_size
+    assert _press(ed, Qt.Key.Key_Plus, _CTRL_MOD)
+    assert ed._font_size == base + 1
+    assert ed._rendered.font().pointSize() == base + 1
+    # the rendered document really re-rendered at the new size
+    assert "<h1" in ed._rendered.toHtml().lower()
+    assert _press(ed, Qt.Key.Key_0, _CTRL_MOD)
+    assert ed._font_size == base
+
+
+def test_font_zoom_in_read_view_keeps_the_caret_position():
+    ed = _editor()
+    ed._toggle_rendered()
+    cur = ed._rendered.textCursor()
+    target = ed._rendered.toPlainText().index("two")
+    cur.setPosition(target)
+    ed._rendered.setTextCursor(cur)
+    _press(ed, Qt.Key.Key_Minus, _CTRL_MOD)
+    assert ed._rendered.textCursor().position() == target
+
+
+def test_font_zoom_in_read_view_survives_clean_preview():
+    ed = _editor()
+    ed._toggle_rendered()
+    ed._toggle_preview()
+    base = ed._font_size
+    assert _press(ed, Qt.Key.Key_Plus, _CTRL_MOD)
+    assert ed._font_size == base + 1
+    assert ed._preview   # still in the clean preview after the re-render
+
+
+# ── Relative images resolve against the document's folder (#15) ──
+
+def test_relative_image_resolves_against_the_document_folder():
+    import tempfile
+    from pathlib import Path
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtCore import QUrl
+
+    QApplication.instance() or QApplication([])
+    docdir = Path(tempfile.mkdtemp(prefix="textli_img_"))
+    img = QImage(120, 80, QImage.Format.Format_RGB32)
+    img.fill(QColor("#3366cc"))
+    img.save(str(docdir / "diagram.png"))
+    mdfile = docdir / "note.md"
+    md = "# Title\n\n![diagram](diagram.png)\n"
+    mdfile.write_text(md)
+
+    cwd = os.getcwd()
+    os.chdir(tempfile.mkdtemp(prefix="textli_cwd_"))   # not the doc's folder
+    try:
+        parent = QWidget()
+        parent.resize(700, 500)
+        ed = ZenMarkdownEditor(parent, md, title="t", file_path=mdfile)
+        ed._parent = parent
+        ed._toggle_rendered()
+        doc = ed._rendered.document()
+        # the document knows its own folder, so Qt resolves relative resource
+        # names (images, links) against it rather than the process cwd
+        assert doc.baseUrl() == QUrl.fromLocalFile(str(docdir) + "/")
+    finally:
+        os.chdir(cwd)
+
+
+def test_unsaved_buffer_has_no_base_url():
+    ed = _editor()             # no file_path
+    ed._toggle_rendered()
+    assert ed._rendered.document().baseUrl().isEmpty()
+
+
+# ── Read-view print bakes the code band into the page (#16) ──
+
+def test_baked_print_doc_carries_the_code_band():
+    from PySide6.QtGui import QTextFormat
+    from textli.constants import ZEN_MD_CODE_BLOCK_BG
+
+    md = "text before\n\n```python\nx = 1\n```\n\ntext after\n"
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(700, 500)
+    ed = ZenMarkdownEditor(parent, md, title="t")
+    ed._parent = parent
+    ed._toggle_rendered()
+
+    printed = ed._baked_print_doc()
+
+    def banded(doc):
+        out = []
+        b = doc.begin()
+        while b.isValid():
+            fenced = b.blockFormat().hasProperty(
+                QTextFormat.Property.BlockCodeFence)
+            bg = b.blockFormat().background().color()
+            out.append((fenced, b.text(),
+                        bg == ZEN_MD_CODE_BLOCK_BG))
+            b = b.next()
+        return out
+
+    # every fenced block in the printed clone wears the band background...
+    assert any(fenced and has_bg for fenced, _t, has_bg in banded(printed))
+    assert all(has_bg for fenced, _t, has_bg in banded(printed) if fenced)
+    # ...and no prose block does
+    assert not any(has_bg for fenced, _t, has_bg in banded(printed)
+                   if not fenced)
+    # the live view is untouched — the band there is view-painting, not a bg
+    assert not any(has_bg for fenced, _t, has_bg
+                   in banded(ed._rendered.document()) if fenced)

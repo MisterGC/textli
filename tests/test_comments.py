@@ -275,3 +275,37 @@ def test_real_sentinels_are_private_use():
     md, _ = mc.to_sentineled("x {==y==}{>>z<<}")
     assert mc.SENTINEL_START in md and mc.SENTINEL_END in md
     assert "{==" not in md and "{>>" not in md
+
+
+def test_comment_wrapping_a_fenced_block_parses_and_renders_clean():
+    # Regression: commenting a whole code block glues the markers to the fence
+    # lines ({==``` … ```⏎==}{>>…<<} — snap_out_of_code places boundaries at the
+    # region edges). The glued {== used to hide the opening fence from
+    # _code_ranges, so the *closing* ``` opened a phantom code region that
+    # swallowed the comment's own delimiters — the mark stayed literal and the
+    # read view rendered raw markup + a garbled block.
+    src = ("Intro prose.\n\n"
+           "{==```\n"
+           "diagram line one <tag>\n"
+           "diagram line two\n"
+           "```\n"
+           "==}{>>does this cover all versions?<<}\n\n"
+           "After prose.\n")
+    marks = mc.parse_marks(src)
+    assert [(m.kind, m.body) for m in marks] == [
+        ("comment", "does this cover all versions?")]
+    md, spans = mc.to_rendered(src)
+    assert len(spans) == 1
+    # markup gone, fence lines clean — sentinels sit *inside* the code content
+    assert "{==" not in md and "{>>" not in md
+    lines = md.splitlines()
+    assert lines.count("```") == 2                      # bare, unprefixed fences
+    assert md.index("```") < md.index(mc.SENTINEL_START)
+    assert md.index(mc.SENTINEL_END) < md.rindex("```")
+
+
+def test_fence_examples_in_code_still_stay_literal():
+    # the tolerance must not weaken the rule that markup *inside* code is a
+    # literal syntax example, never a parsed mark
+    src = "```\n{==not a comment==}{>>just docs<<}\n```\n"
+    assert mc.parse_marks(src) == []

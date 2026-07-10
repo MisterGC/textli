@@ -34,8 +34,15 @@ textli -r review.md                 # start in the reading view
 ```
 
 The editor opens ready to type (vim NORMAL mode) and autosaves while you
-work. Press `F1` inside the editor for the complete key reference, or see
-the [documentation](https://mistergc.github.io/textli/).
+work, and every file **resumes where you left it** — view mode, caret and
+scroll included. It also **watches the open file**, so edits made outside
+textli (an agent applying your comments, a `git` checkout) reload in place
+without a restart. A faint **whisper status** in the card's corner keeps you
+oriented —
+mode, word count, and session delta while writing; the section you're in,
+progress, minutes left, and open review items while reading. Press `F1` inside the editor for the
+complete key reference, or see the
+[documentation](https://mistergc.github.io/textli/).
 
 ### The short version
 
@@ -44,9 +51,16 @@ the [documentation](https://mistergc.github.io/textli/).
 | `⌘R` | Toggle write ↔ reading view |
 | `Esc` | Save & close (`⇧Esc` cancels) |
 | `⌘↵` | Full-window width |
-| `⌘.` | Section focus (dim all but the current paragraph) |
+| `⌘.` | Section focus (dim all but the current paragraph / section) |
+| `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
+| `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
+| `go` | Open another file — fuzzy history + per-segment path completion |
+| `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |
+| `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
+| `gl` | Links overview — jump-list of every link (reading view) |
+| `/` | Fuzzy in-document search (`n`/`N` next/previous hit) |
 | `F1` | Full help |
 
 ## Embed
@@ -69,5 +83,6 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled fonts are licensed under the
-[SIL Open Font License](textli/fonts/OFL.txt).
+MIT — see [LICENSE](LICENSE). Bundled fonts — JetBrains Mono and Caveat —
+are licensed under the SIL Open Font License
+([JetBrains Mono](textli/fonts/OFL.txt), [Caveat](textli/fonts/Caveat-OFL.txt)).

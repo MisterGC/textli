@@ -69,3 +69,57 @@ def test_plain_markdown_renders_unchanged():
     ed._toggle_rendered()
     assert "<h1" in ed._rendered.toHtml().lower()
     assert "plain text only" in ed._rendered.toPlainText()
+
+
+def test_commented_code_block_renders_as_code():
+    # Regression: a comment wrapping a whole fenced block ({==``` … ```⏎==})
+    # broke the read view from that section on — the fence went unrecognized,
+    # the block's pseudo-HTML content got parsed as markup and swallowed, and
+    # the raw CriticMarkup leaked into the render.
+    md = ("Intro.\n\n"
+          "{==```\n"
+          "pipeline <app-overview [jsonLink]> stage\n"
+          "second diagram line\n"
+          "```\n"
+          "==}{>>which versions does this cover?<<}\n\n"
+          "**After** the block.\n")
+    ed = _editor(md)
+    ed._toggle_rendered()
+    shown = ed._rendered.toPlainText()
+    # block content is literal code — the pseudo-HTML tag survives as text
+    assert "pipeline <app-overview [jsonLink]> stage" in shown
+    assert "After the block." in shown
+    assert "{==" not in shown and "{>>" not in shown
+    assert "which versions" not in shown          # body hidden as usual
+    assert len(ed._rendered_comments) == 1
+    # the highlight covers the code content
+    start, end, _c = ed._rendered_comments[0]
+    assert "second diagram line" in shown[start:end]
+
+
+def test_document_with_comment_lays_out_completely():
+    # Regression: any mutation after setMarkdown (the comment formats and
+    # sentinel deletions) can corrupt Qt's incremental layout — it then
+    # permanently believes layout is finished while most blocks have no line
+    # layouts, and the read view paints *blank* past the stuck point no matter
+    # how far it is scrolled (hit the wild on a long doc with one comment and
+    # a code block: everything after ~one viewport was invisible). The settle
+    # now force-relays the whole document, so every block must end up with a
+    # real line layout.
+    md = ("# Top\n\nIntro {==with a comment==}{>>check<<} here.\n\n" +
+          "\n\n".join(f"Paragraph {i} " + "word " * 30 for i in range(120)))
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 700)
+    parent.show()          # line layouts only exist for shown widgets
+    ed = ZenMarkdownEditor(parent, md, title="T")
+    ed._parent = parent
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    block = doc.firstBlock()
+    unlaid = []
+    while block.isValid():
+        if block.text().strip() and block.layout().lineCount() == 0:
+            unlaid.append(block.blockNumber())
+        block = block.next()
+    assert unlaid == []

@@ -10,7 +10,8 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌘R` | Toggle the source editor ↔ rendered reading view |
 | `Esc` | Save & close (`⇧Esc` cancels / discards pending changes) |
 | `⌘↵` | Toggle full-window width |
-| `⌘.` | Section focus — dim all but the current paragraph |
+| `⌘.` | Section focus — dim all but the current paragraph (writing) / section (reading) |
+| `⌘T` | Typewriter scrolling — hold the caret line steady while writing (persists) |
 | `⌘+` / `⌘-` / `⌘0` | Font size bigger / smaller / reset (persists) |
 | `⌘⇧→` / `⌘⇧←` / `⌘⇧↓` | Content column wider / narrower / reset (persists) |
 | `⌘J` | Word-jump overlay (Easymotion-style two-key jump) |
@@ -27,6 +28,30 @@ The complete reference — the same content the editor shows on `F1`.
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
 | `Esc` | Back to NORMAL mode |
 | `x` · `dd` · `dw` | Delete char · line · to next word |
+| `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
+| `go` | Open another file — history is fuzzy-matched, paths complete per segment |
+
+## Search (`/`) — both views
+
+| Key | Action |
+| --- | --- |
+| `/` | Search the document — matching lines ranked best-first (exact above fuzzy) |
+| (type) | Live hit list; the view scrolls to preview the selected hit |
+| `⌃n / ⌃p` · `↓ / ↑` | Move the selection |
+| `Enter` · `Esc` | Jump to the hit · cancel back to where you were |
+| `n / N` | Next / previous hit (wraps; the query survives `⌘R`) |
+
+## Open-file dialog (`go`)
+
+| Key | Action |
+| --- | --- |
+| (type) | Fuzzy-match your history (files & their folders); a path (with `/` or `~`) also completes the filesystem, segment by segment |
+| `⌃n / ⌃p` · `↓ / ↑` | Move the selection |
+| `Tab` | Complete — extend to the common prefix, else adopt the selected row |
+| `Enter` | Open the selected file (a directory descends into it); with no match, open the typed path as a new file |
+| `Esc` | Cancel, back to the editor |
+
+See [Opening files](opening.md) for how the matching works.
 
 ## Reading view — navigate
 
@@ -35,7 +60,12 @@ The complete reference — the same content the editor shows on `F1`.
 | `h j k l` · `w b e` · `0 $` | Move a caret through the rendered text |
 | `gg / G` | Document start / end |
 | `⌃d / ⌃u` · `⌃f / ⌃b / Space` | Half-page · full-page scroll |
-| `gh` | Headings overview — an outline jump-list (`j`/`k`, `Enter`/digit, `Esc`) |
+| `f` | Focus reading mode — caret-lock at centre + a spotlight on the reading line, fading text by distance (persists) |
+| `gh` | Headings overview — `j`/`k` preview live, `Enter` keeps, `Esc` restores your spot |
+| `gl` | Links overview — same jump-list; `Enter` follows the picked link |
+| `↵` | Follow the link under the caret — a `.md` opens in place, web/mail in the browser, `#heading` jumps there, anything else via the system handler |
+| `gb` / `⌫` | Back to the document the last link was followed from |
+| `go` | Open another file (stays in the reading view) |
 
 ## Reading view — comments
 
@@ -54,5 +84,5 @@ The complete reference — the same content the editor shows on `F1`.
 | `]s / [s` | Step to the next / previous suggestion |
 | `a / x` | Accept / reject the suggestion under the caret and advance to the next |
 | `⇧A / ⇧X` | Accept / reject all suggestions at once |
-| `gc` | Changes overview — a jump-list of every change & comment |
+| `gc` | Changes overview — every change & comment, same live preview as `gh` |
 | `p` | Clean preview — the prose with every suggestion accepted (source untouched) |
