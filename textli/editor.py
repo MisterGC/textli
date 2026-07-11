@@ -113,6 +113,7 @@ from textli.constants import (
     ZEN_TEXT_COLOR,
     _CTRL_MOD,
 )
+from textli.fonts import register_bundled_fonts
 from textli.highlight import MarkdownHighlighter, compute_focus_range
 from textli.jump import WordJumpOverlay
 from textli.suggest import SuggestionAnimator
@@ -568,6 +569,10 @@ class ZenMarkdownEditor(QWidget):
         canvas: QWidget | None = None,
     ):
         super().__init__(parent)
+        # Bundled faces (JetBrains Mono, Caveat) — register on construction so
+        # an embedding host renders identically to the standalone app without
+        # extra wiring; idempotent, so the standalone call stays harmless (#25).
+        register_bundled_fonts()
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         # Translucent so the dim wash painted in paintEvent composites over
         # the parent's content (e.g. a host canvas) instead of obscuring it.

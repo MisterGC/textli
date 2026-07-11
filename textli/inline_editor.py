@@ -23,6 +23,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QFrame, QPlainTextEdit
 
+from textli.fonts import register_bundled_fonts
 from textli.highlight import MarkdownHighlighter
 from textli.vim import VimKeyHandler, VimMode
 
@@ -50,6 +51,8 @@ class InlineVimEditor(QPlainTextEdit):
         parent=None,
     ):
         super().__init__(parent)
+        # Bundled faces available to embedders too, no extra wiring (idempotent, #25).
+        register_bundled_fonts()
         self._done = False
         self._commit_on_focus_out = commit_on_focus_out
         self._max_lines = max_lines

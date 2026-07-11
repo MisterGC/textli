@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Embedded editors now render comments in the bundled Caveat handwriting face:
+  the public widgets (`ZenMarkdownEditor`, `InlineVimEditor`) register the
+  bundled fonts on construction (idempotently), so a host like grafli no longer
+  falls back to the plain body font the way only the standalone CLI avoided.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added
