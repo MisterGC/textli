@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the write view (and `InlineVimEditor`), riding the editor's native undo
   stack, so a NORMAL-mode edit is reversible without dropping to INSERT for
   `⌘Z`.
+- **Vim counts, VISUAL operators and yank/paste in the write view** — a leading
+  count repeats the next motion or edit (`3j`, `2dd`, `5w`, `4x`); `v` starts a
+  VISUAL selection that the motions extend, with `d` / `y` / `c` to delete, yank
+  or change it; and `yy` / `yw` yank, `p` / `P` paste, sharing one register with
+  the delete commands (so `dd` then `p` moves a line). Text objects, dot-repeat,
+  macros and named registers stay out — the write view keeps to vim essentials.
 
 ### Fixed
 

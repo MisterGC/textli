@@ -27,8 +27,11 @@ The complete reference — the same content the editor shows on `F1`.
 | `0 / $` · `gg / G` | Line start / end · document start / end |
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
 | `Esc` | Back to NORMAL mode |
-| `x` · `dd` · `dw` | Delete char · line · to next word |
+| `x` · `dd` · `dw` | Delete char · line · to next word (into the register) |
 | `u` · `⌃r` | Undo · redo the last change |
+| `v` | VISUAL — extend a selection with the motions, then `d` / `y` / `c` |
+| `yy` · `yw` · `p` / `P` | Yank line / word · paste after / before |
+| `2j` · `3dd` | A leading count repeats the next motion or edit |
 | `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
 

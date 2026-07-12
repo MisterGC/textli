@@ -16,7 +16,13 @@ The essentials work the way your fingers expect:
   start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
 - **Edits** — `x` (char), `dd` (line), `dw` (to next word).
 - **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
-- **VISUAL** — `v` starts a selection that the motions extend.
+- **VISUAL** — `v` starts a selection that the motions extend; `d` / `y` / `c`
+  then delete, yank or change it.
+- **Yank & paste** — `yy` / `yw` yank a line / word, `p` / `P` paste after /
+  before. Deletes (`x`, `dd`, `dw`) fill the same register, so a `dd` then `p`
+  moves a line.
+- **Counts** — a leading number repeats the next motion or edit: `3j`, `5w`,
+  `2dd`, `4x`.
 
 In NORMAL mode `Esc` saves and closes the editor; `⇧Esc` cancels and
 discards pending changes.
