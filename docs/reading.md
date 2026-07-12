@@ -51,6 +51,11 @@ them: an empty whisper is a finished review.
 
 ## Typography
 
+The rendered page is set in **Literata**, a warm serif made for long-form
+reading, so the read view reads like a typeset page rather than the monospace
+source — while fenced and inline code keep the monospace face. (The write view
+stays in its monospace column.)
+
 Headings breathe asymmetrically — more space above (closing the previous
 section) than below (starting their own) — and `h1`/`h2` carry a thin
 rule, GitHub-style, so section breaks are visible from across the room.

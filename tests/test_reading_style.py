@@ -9,6 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli.constants import (  # noqa: E402
+    FONT_FAMILY,
+    READING_FONT_FAMILY,
     ZEN_HINT_COLOR,
     ZEN_MD_CODE_BLOCK_BG,
 )
@@ -70,6 +72,28 @@ def test_chips_survive_the_clean_preview():
     frags = {f.text(): f for _b, f in _fragments(ed._rendered.document())}
     assert (frags["inline_code"].charFormat().background().color().name()
             == ZEN_MD_CODE_BLOCK_BG.name())
+
+
+# ── reading face (#31) ──
+
+def test_read_view_prose_uses_the_reading_face():
+    ed = _editor()
+    ed._toggle_rendered()
+    assert ed._rendered.font().family() == READING_FONT_FAMILY
+    # body prose inherits the document default (Literata) — not pinned to a face
+    frags = {f.text(): f for _b, f in _fragments(ed._rendered.document())}
+    assert not frags["Prose with "].charFormat().fontFamilies()
+
+
+def test_code_stays_monospace_under_the_reading_face():
+    ed = _editor()
+    ed._toggle_rendered()
+    frags = {f.text(): f for _b, f in _fragments(ed._rendered.document())}
+    assert frags["inline_code"].charFormat().fontFamilies() == [FONT_FAMILY]
+    # fenced code too (every token fragment on the code line)
+    for block, frag in _fragments(ed._rendered.document()):
+        if block.text() == "x = 1":
+            assert frag.charFormat().fontFamilies() == [FONT_FAMILY]
 
 
 # ── blockquotes ──

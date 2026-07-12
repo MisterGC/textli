@@ -69,6 +69,7 @@ from textli.search_overlay import SearchOverlay
 from textli.constants import (
     COMMENT_FONT_FAMILY,
     FONT_FAMILY,
+    READING_FONT_FAMILY,
     ZEN_MD_COMMENT_INK,
     ZEN_MD_COMMENT_MAX_HEIGHT,
     ZEN_MD_COMMENT_MIN_HEIGHT,
@@ -741,7 +742,7 @@ class ZenMarkdownEditor(QWidget):
         # Read-only rendered Markdown view (⌘R toggles editor <-> this).
         self._rendered = _ReadingView()
         self._rendered.setOpenExternalLinks(True)
-        self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+        self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
         self._rendered.setStyleSheet(
             f"QTextBrowser {{"
             f" background: {ZEN_MD_BG.name()}; color: {ZEN_TEXT_COLOR.name()};"
@@ -1682,7 +1683,7 @@ class ZenMarkdownEditor(QWidget):
             self._preview = False
             src = self._editor.toPlainText()
             src_caret = self._editor.textCursor().position()
-            self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+            self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
             # Show the view *before* rendering: a hidden widget has no layout
             # geometry yet (first ⌘R), and the render settles the document
             # layout against the viewport width — which must be the real one.
@@ -1821,6 +1822,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_code_blocks(doc)
         self._style_headings(doc)
         self._style_inline_code(doc)
+        self._apply_code_font(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
         self._settle_rendered_layout()
@@ -1859,6 +1861,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_code_blocks(doc)
         self._style_headings(doc)
         self._style_inline_code(doc)
+        self._apply_code_font(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
         self._rendered.set_strikes([])
@@ -2025,6 +2028,29 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos)
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.mergeCharFormat(fmt)
+
+    def _apply_code_font(self, doc):
+        """Pin code back to the monospace face. Qt flags code fixed-pitch but
+        leaves its family at the document default — now the proportional
+        reading face (#31) — so inline code and fenced blocks would otherwise
+        render in the reading serif. Format-only: shifts no offsets."""
+        mono = QTextCharFormat()
+        mono.setFontFamilies([FONT_FAMILY])
+        block = doc.begin()
+        while block.isValid():
+            is_fence = block.blockFormat().hasProperty(
+                QTextFormat.Property.BlockCodeFence)
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                if is_fence or frag.charFormat().fontFixedPitch():
+                    cur = QTextCursor(doc)
+                    cur.setPosition(frag.position())
+                    cur.setPosition(frag.position() + frag.length(),
+                                    QTextCursor.MoveMode.KeepAnchor)
+                    cur.mergeCharFormat(mono)
+                it += 1
+            block = block.next()
 
     def _style_quotes(self, doc):
         """Blockquotes read as a different voice: hint-gray ink, plus a thin
@@ -3758,7 +3784,7 @@ class ZenMarkdownEditor(QWidget):
         # Gutter width is char-based; re-apply after font change.
         self._apply_heading_layout()
         if self._rendered_mode:
-            self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+            self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
             pos = self._rendered.textCursor().position()
             src = self._editor.toPlainText()
             if self._preview:

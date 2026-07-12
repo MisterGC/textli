@@ -9,6 +9,11 @@ from PySide6.QtGui import QColor
 
 # ── Typography ───────────────────────────────────────────────────
 FONT_FAMILY = "JetBrainsMono Nerd Font"
+# Reading face for the rendered read view (bundled Literata, OFL) — a warm,
+# book-oriented serif so long-form prose reads like a typeset page rather than
+# source code. Only the read view uses it; the write view keeps the monospace
+# column, and code (fenced + inline) is pinned back to FONT_FAMILY.
+READING_FONT_FAMILY = "Literata"
 # Handwriting face for comment annotations (bundled Caveat, OFL) — a comment
 # reads as a margin note, not a form field. The note wears the same tint a
 # commented span gets in the text (ZEN_MD_COMMENT_NOTE_BG, below), inked in a

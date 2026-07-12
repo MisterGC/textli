@@ -15,6 +15,8 @@ _BUNDLED_FONTS = (
     "JetBrainsMonoNerdFont-Regular.ttf",
     "JetBrainsMonoNerdFont-Bold.ttf",
     "Caveat.ttf",
+    "Literata-Regular.ttf",
+    "Literata-Bold.ttf",
 )
 
 _registered = False
