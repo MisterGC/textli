@@ -8,6 +8,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QApplication, QPlainTextEdit
 
+from textli.constants import _CTRL_MOD
 from textli.vim import VimKeyHandler, VimMode
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -18,6 +19,10 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+def _key(key, text="", mods=Qt.KeyboardModifier.NoModifier) -> QKeyEvent:
+    return QKeyEvent(QEvent.Type.KeyPress, key, mods, text)
 
 
 def _handler(text: str) -> tuple[QPlainTextEdit, VimKeyHandler]:
@@ -76,3 +81,21 @@ def test_insert_mode_enter_inserts_newline():
     )
     assert handler.handle_key(event) is True
     assert editor.toPlainText() == "ab\n"
+
+
+def test_normal_u_undoes_last_edit():
+    """`u` in NORMAL undoes the last change on the editor's native undo stack."""
+    editor, handler = _handler("abcdef")
+    assert handler.handle_key(_key(Qt.Key.Key_X, "x")) is True   # → bcdef
+    assert editor.toPlainText() == "bcdef"
+    assert handler.handle_key(_key(Qt.Key.Key_U, "u")) is True
+    assert editor.toPlainText() == "abcdef"
+
+
+def test_normal_ctrl_r_redoes():
+    """`Ctrl-r` redoes what `u` just undid (physical Ctrl, Meta on macOS)."""
+    editor, handler = _handler("abcdef")
+    handler.handle_key(_key(Qt.Key.Key_X, "x"))                  # → bcdef
+    handler.handle_key(_key(Qt.Key.Key_U, "u"))                  # → abcdef
+    assert handler.handle_key(_key(Qt.Key.Key_R, "r", _CTRL_MOD)) is True
+    assert editor.toPlainText() == "bcdef"

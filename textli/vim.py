@@ -9,6 +9,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
 
+from textli.constants import _CTRL_MOD
+
 
 class VimMode(enum.Enum):
     NORMAL = "NORMAL"
@@ -91,6 +93,7 @@ class VimKeyHandler:
         key = event.key()
         mods = event.modifiers()
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        ctrl = bool(mods & _CTRL_MOD)
 
         # Handle pending multi-key sequences
         if self._pending:
@@ -157,6 +160,17 @@ class VimKeyHandler:
         # x — delete char under cursor
         if key == Qt.Key.Key_X and not shift:
             self._delete_chars()
+            return True
+
+        # u / Ctrl-r — undo / redo, riding the editor's native undo stack
+        # (Qt restores the caret to the change site, the way vim leaves you
+        # there). So a NORMAL-mode edit is reversible without dropping to
+        # INSERT for the platform ⌘Z.
+        if key == Qt.Key.Key_U and not shift and not ctrl:
+            self._editor.undo()
+            return True
+        if key == Qt.Key.Key_R and ctrl:
+            self._editor.redo()
             return True
 
         # ── Enter insert mode ──

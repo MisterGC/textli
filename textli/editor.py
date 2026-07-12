@@ -486,6 +486,7 @@ def editor_help_html() -> str:
         ("i a · I A · o O", "Enter INSERT: before/after · line start/end · new line below/above"),
         ("Esc", "Back to NORMAL mode"),
         ("x · dd · dw", "Delete char · line · to next word"),
+        ("u · ⌃r", "Undo · redo the last change"),
         ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there (NORMAL mode)"),
         ("go", "Open another file — history is fuzzy-matched, paths complete per segment"),
     ])}</table>

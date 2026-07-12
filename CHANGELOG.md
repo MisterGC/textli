@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Undo / redo in NORMAL mode** — `u` undoes and `⌃r` redoes the last change
+  in the write view (and `InlineVimEditor`), riding the editor's native undo
+  stack, so a NORMAL-mode edit is reversible without dropping to INSERT for
+  `⌘Z`.
+
 ### Fixed
 
 - Embedded editors now render comments in the bundled Caveat handwriting face:

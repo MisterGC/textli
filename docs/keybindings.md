@@ -28,6 +28,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
 | `Esc` | Back to NORMAL mode |
 | `x` · `dd` · `dw` | Delete char · line · to next word |
+| `u` · `⌃r` | Undo · redo the last change |
 | `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
 

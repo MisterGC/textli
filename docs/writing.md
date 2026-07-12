@@ -15,6 +15,7 @@ The essentials work the way your fingers expect:
 - **Entering INSERT** — `i a` (before/after the caret), `I A` (line
   start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
 - **Edits** — `x` (char), `dd` (line), `dw` (to next word).
+- **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
 - **VISUAL** — `v` starts a selection that the motions extend.
 
 In NORMAL mode `Esc` saves and closes the editor; `⇧Esc` cancels and
