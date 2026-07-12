@@ -92,6 +92,22 @@ def rank(hits: list[Hit]) -> list[Hit]:
     return sorted(hits, key=lambda h: (-h.score, h.line_no))
 
 
+def find_literal(text: str, query: str) -> list[tuple[int, int]]:
+    """Every case-insensitive literal occurrence of ``query`` as absolute,
+    non-overlapping ``(start, end)`` offsets — what replace acts on. Distinct
+    from :func:`find_hits`: replace targets the exact substring the reader
+    typed, never the fuzzy, word-bounded hits (replacing a fuzzy match would be
+    surprising). Case-insensitive to mirror the phrase search."""
+    if not query:
+        return []
+    low, ql = text.lower(), query.lower()
+    out, i = [], low.find(ql)
+    while i != -1:
+        out.append((i, i + len(query)))
+        i = low.find(ql, i + len(query))
+    return out
+
+
 def next_hit(hits: list[Hit], pos: int, direction: int) -> Hit | None:
     """The hit ``n``/``N`` lands on from ``pos``: the nearest hit strictly
     after (``direction=+1``) or before (``-1``), wrapping around the document

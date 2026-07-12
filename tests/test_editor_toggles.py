@@ -112,15 +112,18 @@ def test_comment_commit_keeps_scroll_range_settled():
         for i in range(400))
     ed = ZenMarkdownEditor(parent, big, title="t")
     ed._parent = parent
+    ed._read_focus = ed._typewriter = False   # isolate from any leaked prefs
     ed._toggle_rendered()
     sb = ed._rendered.verticalScrollBar()
     sb.setValue(sb.maximum() // 2)          # reading somewhere mid-document
-    pos = sb.value()
-    # Author a comment near the reading position, through the real path.
+    # Author a comment through the real path. Selecting the span scrolls the
+    # view to it (expected) — how far depends on font metrics, so capture the
+    # scroll *after* authoring: the regression is about what the commit does.
     rendered = ed._rendered.document().toPlainText()
     r0 = rendered.index("target200")
     ed._begin_comment_for_span(r0, r0 + len("target200"))
     assert ed._comment_field is not None
+    scroll_before_commit = sb.value()
     ed._comment_field.setPlainText("check this")
     ed._commit_comment_field()
     assert "{>>check this<<}" in ed._editor.toPlainText()
@@ -130,8 +133,10 @@ def test_comment_commit_keeps_scroll_range_settled():
     doc_h = ed._rendered.document().documentLayout().documentSize().height()
     assert max_after_commit <= doc_h
     assert max_after_commit >= doc_h - ed._rendered.viewport().height() - 50
-    # And the reader's place survived the re-render (no clamp to a stale max).
-    assert abs(sb.value() - pos) <= ed._rendered.viewport().height() // 2
+    # The commit's re-render kept the reader's place — restored against the
+    # real, settled range, not clamped to a stale pre-layout max (the bug).
+    assert (abs(sb.value() - scroll_before_commit)
+            <= ed._rendered.viewport().height() // 2)
 
 
 def test_mode_flash_on_toggle():

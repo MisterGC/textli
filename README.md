@@ -60,7 +60,7 @@ complete key reference, or see the
 | `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
-| `/` | Fuzzy in-document search (`n`/`N` next/previous hit) |
+| `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
 | `F1` | Full help |
 
 ## Embed
@@ -83,6 +83,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled fonts — JetBrains Mono and Caveat —
-are licensed under the SIL Open Font License
-([JetBrains Mono](textli/fonts/OFL.txt), [Caveat](textli/fonts/Caveat-OFL.txt)).
+MIT — see [LICENSE](LICENSE). Bundled fonts — JetBrains Mono, Caveat and
+Literata — are licensed under the SIL Open Font License
+([JetBrains Mono](textli/fonts/OFL.txt), [Caveat](textli/fonts/Caveat-OFL.txt),
+[Literata](textli/fonts/Literata-OFL.txt)).

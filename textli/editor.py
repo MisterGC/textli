@@ -69,6 +69,7 @@ from textli.search_overlay import SearchOverlay
 from textli.constants import (
     COMMENT_FONT_FAMILY,
     FONT_FAMILY,
+    READING_FONT_FAMILY,
     ZEN_MD_COMMENT_INK,
     ZEN_MD_COMMENT_MAX_HEIGHT,
     ZEN_MD_COMMENT_MIN_HEIGHT,
@@ -95,6 +96,7 @@ from textli.constants import (
     ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN,
     ZEN_MD_HEADING_SIZES,
+    ZEN_MD_READING_LINE_HEIGHT,
     ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_CARET,
     ZEN_MD_FOCUS_CORE_LINES,
@@ -113,6 +115,7 @@ from textli.constants import (
     ZEN_TEXT_COLOR,
     _CTRL_MOD,
 )
+from textli.fonts import register_bundled_fonts
 from textli.highlight import MarkdownHighlighter, compute_focus_range
 from textli.jump import WordJumpOverlay
 from textli.suggest import SuggestionAnimator
@@ -484,9 +487,14 @@ def editor_help_html() -> str:
         ("0 / $ · gg / G", "Line start / end · document start / end"),
         ("i a · I A · o O", "Enter INSERT: before/after · line start/end · new line below/above"),
         ("Esc", "Back to NORMAL mode"),
-        ("x · dd · dw", "Delete char · line · to next word"),
+        ("x · dd · dw", "Delete char · line · to next word (into the register)"),
+        ("u · ⌃r", "Undo · redo the last change"),
+        ("v", "VISUAL — extend a selection with the motions, then d / y / c"),
+        ("yy · yw · p / P", "Yank line / word · paste after / before"),
+        ("2j · 3dd", "A leading count repeats the next motion or edit"),
         ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there (NORMAL mode)"),
         ("go", "Open another file — history is fuzzy-matched, paths complete per segment"),
+        ("gh", "Headings overview — an outline of the source (j/k preview, Enter keeps, Esc restores)"),
     ])}</table>
 
     <p style='{hdr}'>Search (/) — both views</p>
@@ -496,6 +504,7 @@ def editor_help_html() -> str:
         ("⌃n / ⌃p · ↓ / ↑", "Move the selection"),
         ("Enter · Esc", "Jump to the hit · cancel back to where you were"),
         ("n / N", "Next / previous hit (wraps; the query survives ⌘R)"),
+        ("⇥ (write view)", "Reveal replace — ↵ replaces this match & advances, ⌃↵ replaces all (literal matches)"),
     ])}</table>
 
     <p style='{hdr}'>Open-file dialog (go)</p>
@@ -568,6 +577,10 @@ class ZenMarkdownEditor(QWidget):
         canvas: QWidget | None = None,
     ):
         super().__init__(parent)
+        # Bundled faces (JetBrains Mono, Caveat) — register on construction so
+        # an embedding host renders identically to the standalone app without
+        # extra wiring; idempotent, so the standalone call stays harmless (#25).
+        register_bundled_fonts()
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         # Translucent so the dim wash painted in paintEvent composites over
         # the parent's content (e.g. a host canvas) instead of obscuring it.
@@ -689,6 +702,9 @@ class ZenMarkdownEditor(QWidget):
         self._overview_sel = 0
         self._overview_title = ""
         self._overview_scroll_top = False
+        # The view the open overview drives — the rendered reader (`gc`/`gh`/`gl`)
+        # or the source editor (`gh` in the write view). Set on each open.
+        self._overview_view = None
         # `gl` follows the picked row (a link); `gc`/`gh` just land on it.
         self._overview_targets = None
         # In-session back-stack of (path, caret, scroll) for link navigation —
@@ -727,7 +743,7 @@ class ZenMarkdownEditor(QWidget):
         # Read-only rendered Markdown view (⌘R toggles editor <-> this).
         self._rendered = _ReadingView()
         self._rendered.setOpenExternalLinks(True)
-        self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+        self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
         self._rendered.setStyleSheet(
             f"QTextBrowser {{"
             f" background: {ZEN_MD_BG.name()}; color: {ZEN_TEXT_COLOR.name()};"
@@ -781,6 +797,7 @@ class ZenMarkdownEditor(QWidget):
             close_save=self._close_save,
             close_cancel=self._close_cancel,
             open_file=self._open_file_dialog,
+            open_headings=self._open_headings_overview,
         )
         # `go` open-file overlay (created on demand, one at a time).
         self._open_overlay: OpenFileOverlay | None = None
@@ -1329,12 +1346,16 @@ class ZenMarkdownEditor(QWidget):
         view = self._active_view()
         self._search_saved = (view.verticalScrollBar().value(),
                               view.textCursor().position())
-        overlay = SearchOverlay(self, view.toPlainText, self._font_size)
+        overlay = SearchOverlay(self, view.toPlainText, self._font_size,
+                                allow_replace=not self._rendered_mode)
         overlay.selection_changed.connect(self._search_preview)
         overlay.accepted.connect(self._search_accept)
         overlay.cancelled.connect(self._search_cancel)
         overlay.cleared.connect(
             lambda: self._active_view().setExtraSelections([]))
+        overlay.replace_opened.connect(self._replace_opened)
+        overlay.replace_one.connect(self._replace_one)
+        overlay.replace_all.connect(self._replace_all)
         self._search_overlay = overlay
         overlay.open()
         self._refresh_status()
@@ -1484,6 +1505,91 @@ class ZenMarkdownEditor(QWidget):
             sb = view.verticalScrollBar()
             sb.setValue(max(0, int(y - view.viewport().height() * 0.35)))
 
+    # ── Replace (write view only; targets literal matches) ──
+
+    def _highlight_literal(self, view, query: str, current: int | None = None):
+        """Wash every literal match of ``query``; the one starting at ``current``
+        gets the stronger wash — ExtraSelections only, never touching the text."""
+        sels = []
+        for s, e in md_search.find_literal(view.toPlainText(), query):
+            sel = QTextBrowser.ExtraSelection()
+            cur = QTextCursor(view.document())
+            cur.setPosition(s)
+            cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+            sel.cursor = cur
+            sel.format.setBackground(QBrush(
+                ZEN_SEARCH_CURRENT if s == current else ZEN_SEARCH_HIT))
+            sels.append(sel)
+        view.setExtraSelections(sels)
+
+    def _goto_literal(self, view, query: str, from_pos: int):
+        """Land on the first literal match at/after ``from_pos`` (wrapping),
+        scroll it clear of the search card, and highlight it as current. Returns
+        the match ``(start, end)`` or ``None`` when there are none."""
+        matches = md_search.find_literal(view.toPlainText(), query)
+        if not matches:
+            view.setExtraSelections([])
+            return None
+        m = next(((s, e) for s, e in matches if s >= from_pos), matches[0])
+        self._center_view_on(view, m[0])
+        self._highlight_literal(view, query, current=m[0])
+        if self._search_overlay is not None:
+            self._ensure_hit_visible(view, self._search_overlay)
+        return m
+
+    def _replace_opened(self):
+        """Tab revealed the replace field — switch the preview from the fuzzy
+        hits to the literal matches replace acts on, landing on the first at or
+        after the caret."""
+        ov = self._search_overlay
+        if ov is None:
+            return
+        self._goto_literal(self._active_view(), ov.query,
+                           self._active_view().textCursor().position())
+
+    def _replace_one(self, query: str, replacement: str):
+        """↵ in the replace field — replace the current literal match (the one at
+        the caret, else the next), one undoable step, then advance to the next."""
+        if not query:
+            return
+        view = self._active_view()
+        matches = md_search.find_literal(view.toPlainText(), query)
+        if not matches:
+            return
+        caret = view.textCursor().position()
+        s, e = next(((s, e) for s, e in matches if s >= caret), matches[0])
+        cur = view.textCursor()
+        cur.setPosition(s)
+        cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+        cur.insertText(replacement)                 # undoable
+        self._search_query = query
+        self._search_saved = None                   # a replace happened — Esc stays put
+        self._goto_literal(view, query, s + len(replacement))
+        if self._search_overlay is not None:
+            self._search_overlay.refresh_hits()
+
+    def _replace_all(self, query: str, replacement: str):
+        """⌃↵ — replace every literal match in one undoable step (right-to-left,
+        so earlier offsets stay valid as the text shifts)."""
+        if not query:
+            return
+        view = self._active_view()
+        matches = md_search.find_literal(view.toPlainText(), query)
+        if not matches:
+            return
+        cur = view.textCursor()
+        cur.beginEditBlock()
+        for s, e in reversed(matches):
+            cur.setPosition(s)
+            cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+            cur.insertText(replacement)
+        cur.endEditBlock()
+        self._search_query = query
+        self._search_saved = None
+        view.setExtraSelections([])                 # nothing left to mark
+        if self._search_overlay is not None:
+            self._search_overlay.refresh_hits()
+
     def _print(self):
         """⌘P — native print dialog. In the reading view it prints the typeset
         page (not the raw source), with the code band baked in as a real block
@@ -1578,7 +1684,7 @@ class ZenMarkdownEditor(QWidget):
             self._preview = False
             src = self._editor.toPlainText()
             src_caret = self._editor.textCursor().position()
-            self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+            self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
             # Show the view *before* rendering: a hidden widget has no layout
             # geometry yet (first ⌘R), and the render settles the document
             # layout against the viewport width — which must be the real one.
@@ -1717,6 +1823,8 @@ class ZenMarkdownEditor(QWidget):
         self._style_code_blocks(doc)
         self._style_headings(doc)
         self._style_inline_code(doc)
+        self._apply_code_font(doc)
+        self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
         self._settle_rendered_layout()
@@ -1755,6 +1863,8 @@ class ZenMarkdownEditor(QWidget):
         self._style_code_blocks(doc)
         self._style_headings(doc)
         self._style_inline_code(doc)
+        self._apply_code_font(doc)
+        self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
         self._rendered.set_strikes([])
@@ -1921,6 +2031,59 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos)
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.mergeCharFormat(fmt)
+
+    def _style_reading_rhythm(self, doc):
+        """Long-form breathing room (#33): a proportional line height on prose
+        (not code, which reads better tight) and a gap between top-level
+        paragraphs, so sustained reading in the proportional face doesn't run
+        together. Scales with the font zoom; read view only. Format-only."""
+        para_gap = round(self._font_size * 0.6)
+        prop = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
+        block = doc.begin()
+        while block.isValid():
+            bf = block.blockFormat()
+            if not bf.hasProperty(QTextFormat.Property.BlockCodeFence):
+                fmt = QTextBlockFormat()
+                fmt.setLineHeight(ZEN_MD_READING_LINE_HEIGHT, prop)
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                nxt = block.next()
+                # Space plain top-level paragraphs — not headings (they carry
+                # their own rhythm), list items, quotes, or table cells, and
+                # not right before a heading (its top margin already separates).
+                plain = (bf.headingLevel() == 0 and bf.indent() == 0
+                         and block.textList() is None
+                         and cur.currentTable() is None
+                         and bool(block.text().strip()))
+                next_heading = (nxt.isValid()
+                                and nxt.blockFormat().headingLevel() > 0)
+                if plain and not next_heading:
+                    fmt.setBottomMargin(para_gap)
+                cur.mergeBlockFormat(fmt)
+            block = block.next()
+
+    def _apply_code_font(self, doc):
+        """Pin code back to the monospace face. Qt flags code fixed-pitch but
+        leaves its family at the document default — now the proportional
+        reading face (#31) — so inline code and fenced blocks would otherwise
+        render in the reading serif. Format-only: shifts no offsets."""
+        mono = QTextCharFormat()
+        mono.setFontFamilies([FONT_FAMILY])
+        block = doc.begin()
+        while block.isValid():
+            is_fence = block.blockFormat().hasProperty(
+                QTextFormat.Property.BlockCodeFence)
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                if is_fence or frag.charFormat().fontFixedPitch():
+                    cur = QTextCursor(doc)
+                    cur.setPosition(frag.position())
+                    cur.setPosition(frag.position() + frag.length(),
+                                    QTextCursor.MoveMode.KeepAnchor)
+                    cur.mergeCharFormat(mono)
+                it += 1
+            block = block.next()
 
     def _style_quotes(self, doc):
         """Blockquotes read as a different voice: hint-gray ink, plus a thin
@@ -2288,6 +2451,28 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         return rows
 
+    def _build_source_headings_list(self):
+        """Every ATX heading (``# …``) in the *source* as ``(start, end, level,
+        text)``, skipping fenced code blocks — the write-view outline. Positions
+        are into the source document so preview/jump land on the ``#`` line."""
+        doc = self._editor.document()
+        rows = []
+        in_fence = False
+        block = doc.begin()
+        while block.isValid():
+            text = block.text()
+            stripped = text.lstrip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_fence = not in_fence
+            elif not in_fence:
+                m = re.match(r"(#{1,6})\s+(.*)", stripped)
+                if m and m.group(2).strip():
+                    start = block.position()
+                    rows.append((start, start + len(text),
+                                 len(m.group(1)), m.group(2).strip()))
+            block = block.next()
+        return rows
+
     def _build_links_list(self):
         """Every link as ``(start, end, href, text)`` in document order —
         contiguous fragments of one anchor merged into a single row."""
@@ -2322,14 +2507,17 @@ class ZenMarkdownEditor(QWidget):
         self._open_overview(rows, f"Changes ({len(rows)})", scroll_top=False)
 
     def _open_headings_overview(self):
-        """gh — jump-list of every heading (an outline). Rebuilt on each invocation
-        from the live document, so accepting a change that moved a heading is
-        reflected next time you open it."""
+        """gh — jump-list of every heading (an outline). Works in both views:
+        the reading view reads headings from the rendered document, the write
+        view parses them from the source. Rebuilt on each invocation, so a
+        heading added or moved since last time is reflected."""
+        build = (self._build_headings_list if self._rendered_mode
+                 else self._build_source_headings_list)
         rows = [
             (s, e, f"{'&nbsp;' * ((level - 1) * 3)}"
                    f"<span style='color:#A2937A'>{'#' * level}</span>"
                    f"&nbsp;{self._esc_html(text)}")
-            for (s, e, level, text) in self._build_headings_list()
+            for (s, e, level, text) in build()
         ]
         self._open_overview(rows, f"Headings ({len(rows)})", scroll_top=True)
 
@@ -2359,14 +2547,19 @@ class ZenMarkdownEditor(QWidget):
         of just landing on it — that's the `gl` links overview."""
         if not rows:
             return
+        # The overview drives whichever view is live — the rendered reader or
+        # the source editor (gh works in both).
+        self._overview_view = (self._rendered if self._rendered_mode
+                               else self._editor)
+        view = self._overview_view
         self._overview_rows = rows
         self._overview_title = title
         self._overview_scroll_top = scroll_top
         self._overview_targets = targets
         # Where the reader came from — Esc promises to put this back exactly.
-        self._overview_origin = (self._rendered.verticalScrollBar().value(),
-                                 self._rendered.textCursor().position())
-        pos = self._rendered.textCursor().position()
+        self._overview_origin = (view.verticalScrollBar().value(),
+                                 view.textCursor().position())
+        pos = view.textCursor().position()
         # Select where the reader *is*: the row whose own span holds the caret,
         # else the row whose section the caret is in (the last row starting at
         # or before it) — so `gh` opens on the current heading, not the first.
@@ -2408,7 +2601,7 @@ class ZenMarkdownEditor(QWidget):
             " background: #FBF7EC; border: 1px solid #C9A227;"
             " border-radius: 8px; padding: 8px; }")
         lbl.adjustSize()
-        vp = self._rendered
+        vp = self._overview_view or self._rendered
         lbl.move(vp.x() + max(16, vp.width() - lbl.width() - 24), vp.y() + 24)
         lbl.show()
         lbl.raise_()
@@ -2443,23 +2636,32 @@ class ZenMarkdownEditor(QWidget):
         return True   # swallow everything else while the overview is up
 
     def _preview_overview_row(self, idx: int):
-        """Bring row ``idx``'s span into the read view without closing the
+        """Bring row ``idx``'s span into the active view without closing the
         overview — the live preview behind j/k. Headings scroll to the top of
         the view (outline jump); changes just scroll into view, leaving the
         caret on the mark so a/x/Enter act on it."""
         if not (0 <= idx < len(self._overview_rows)):
             return
         start, end, _inner = self._overview_rows[idx]
-        cur = self._rendered.textCursor()
+        view = self._overview_view or self._rendered
+        cur = view.textCursor()
         cur.setPosition(start)
         cur.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        self._rendered.setTextCursor(cur)
-        if self._overview_scroll_top:
-            doc = self._rendered.document()
+        view.setTextCursor(cur)
+        if self._overview_scroll_top and view is self._rendered:
+            doc = view.document()
             y = doc.documentLayout().blockBoundingRect(doc.findBlock(start)).y()
-            self._rendered.verticalScrollBar().setValue(int(y))
+            view.verticalScrollBar().setValue(int(y))
+        elif self._overview_scroll_top:
+            # The write view (a QPlainTextEdit) scrolls in line units, not
+            # pixels — bring the heading into view, then nudge its line to the
+            # top so it reads like an outline jump.
+            view.ensureCursorVisible()
+            line_h = max(1, view.fontMetrics().lineSpacing())
+            sb = view.verticalScrollBar()
+            sb.setValue(sb.value() + view.cursorRect().top() // line_h)
         else:
-            self._rendered.ensureCursorVisible()
+            view.ensureCursorVisible()
 
     def _jump_to_overview_row(self, idx: int):
         """Commit row ``idx``: preview it (caret on the span, scrolled per the
@@ -2477,11 +2679,12 @@ class ZenMarkdownEditor(QWidget):
         (caret and scroll), then close."""
         scroll, pos = getattr(self, "_overview_origin",
                               (None, None))
+        view = self._overview_view or self._rendered
         if pos is not None:
-            cur = self._rendered.textCursor()
+            cur = view.textCursor()
             cur.setPosition(pos)
-            self._rendered.setTextCursor(cur)
-            self._rendered.verticalScrollBar().setValue(scroll)
+            view.setTextCursor(cur)
+            view.verticalScrollBar().setValue(scroll)
         self._close_overview()
 
     def _close_overview(self):
@@ -2489,8 +2692,9 @@ class ZenMarkdownEditor(QWidget):
         if getattr(self, "_overview_overlay", None) is not None:
             self._overview_overlay.hide()
             self._overview_overlay = None
-        if getattr(self, "_rendered", None) is not None:
-            self._rendered.setFocus()
+        view = self._overview_view or getattr(self, "_rendered", None)
+        if view is not None:
+            view.setFocus()
         self._refresh_status()
 
     def _format_for_span(self, span, comment_idx: int,
@@ -2904,6 +3108,11 @@ class ZenMarkdownEditor(QWidget):
         # Rendered view: vim-style navigation; Esc saves & closes.
         if self._rendered_mode:
             return self._handle_rendered_key(event)
+
+        # A jump-list overview (gh) can be open over the write view too — it
+        # captures every key while up, same as in the reading view.
+        if self._overview_overlay is not None:
+            return self._handle_overview_key(event)
 
         # Ctrl+J — activate word jump
         if (event.key() == Qt.Key.Key_J
@@ -3608,7 +3817,7 @@ class ZenMarkdownEditor(QWidget):
         # Gutter width is char-based; re-apply after font change.
         self._apply_heading_layout()
         if self._rendered_mode:
-            self._rendered.setFont(QFont(FONT_FAMILY, self._font_size))
+            self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
             pos = self._rendered.textCursor().position()
             src = self._editor.toPlainText()
             if self._preview:

@@ -46,14 +46,20 @@ class SearchOverlay(QWidget):
     accepted = Signal(int, int)
     cancelled = Signal()
     cleared = Signal()      # query emptied / no hits — host drops highlights
+    replace_opened = Signal()        # replace field revealed — host previews literals
+    replace_one = Signal(str, str)   # (query, replacement) — replace current, advance
+    replace_all = Signal(str, str)   # (query, replacement) — replace every literal match
 
     def __init__(self, parent: QWidget, text_provider: Callable[[], str],
-                 font_size: int):
+                 font_size: int, allow_replace: bool = False):
         super().__init__(parent)
         self._text_provider = text_provider
         self._hits: list[search.Hit] = []
         self._sel = 0
         self._font_size = max(ZEN_MD_FONT_SIZE_MIN, font_size - 3)
+        # Replace is offered only where the text is editable — the write view.
+        # The reading view is a read-only render, so `/` stays find-only there.
+        self._allow_replace = allow_replace
 
         # One card: the container itself paints the background/border (a plain
         # QWidget needs WA_StyledBackground for that), and the rule is scoped
@@ -68,21 +74,47 @@ class SearchOverlay(QWidget):
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
 
-        title = QLabel("Search", self)
+        title = QLabel(self)
+        title.setTextFormat(Qt.TextFormat.RichText)
+        hint = (f"&nbsp;&nbsp;<span style='color:{ZEN_HINT_COLOR.name()};"
+                f"font-weight:normal'>⇥ replace</span>" if allow_replace else "")
         title.setStyleSheet(
             f"QLabel {{ color: {ZEN_TEXT_COLOR.name()}; font-weight: bold; }}")
         title.setFont(QFont(FONT_FAMILY, self._font_size))
+        title.setText(f"Search{hint}")
         lay.addWidget(title)
 
-        self._input = QLineEdit(self)
-        self._input.setFont(QFont(FONT_FAMILY, self._font_size))
-        self._input.setStyleSheet(
+        _field_css = (
             f"QLineEdit {{ background: #FFFFFF; color: {ZEN_TEXT_COLOR.name()};"
             f" border: 1px solid {ZEN_HINT_COLOR.name()}; border-radius: 4px;"
             f" padding: 3px 6px; }}")
+
+        self._input = QLineEdit(self)
+        self._input.setFont(QFont(FONT_FAMILY, self._font_size))
+        self._input.setStyleSheet(_field_css)
         self._input.textChanged.connect(self._refresh)
         self._input.installEventFilter(self)
         lay.addWidget(self._input)
+
+        # Replace field + key hint — hidden until Tab reveals them (write view
+        # only). A hidden widget takes no layout space, so plain search is
+        # unchanged until you ask to replace.
+        self._replace = QLineEdit(self)
+        self._replace.setFont(QFont(FONT_FAMILY, self._font_size))
+        self._replace.setPlaceholderText("replace with…")
+        self._replace.setStyleSheet(_field_css)
+        self._replace.installEventFilter(self)
+        self._replace.hide()
+        lay.addWidget(self._replace)
+
+        self._replace_hint = QLabel(
+            "↵ replace · ⌃↵ all · ⇥ back · Esc cancel", self)
+        self._replace_hint.setStyleSheet(
+            f"QLabel {{ color: {ZEN_HINT_COLOR.name()}; }}")
+        self._replace_hint.setFont(QFont(
+            FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 1)))
+        self._replace_hint.hide()
+        lay.addWidget(self._replace_hint)
 
         self._list = QLabel(self)
         self._list.setTextFormat(Qt.TextFormat.RichText)
@@ -98,6 +130,15 @@ class SearchOverlay(QWidget):
     @property
     def hits(self) -> list[search.Hit]:
         return self._hits
+
+    @property
+    def replacement(self) -> str:
+        return self._replace.text()
+
+    def refresh_hits(self):
+        """Re-run the query against the (now edited) text so the list and count
+        reflect what a replace left behind."""
+        self._refresh(self._input.text())
 
     def open(self):
         """Show the card; the best-ranked hit is selected as the query is
@@ -205,8 +246,10 @@ class SearchOverlay(QWidget):
     # ── Keys ──
 
     def eventFilter(self, obj, event):
-        if obj is self._input and event.type() == QEvent.Type.KeyPress:
-            if self._handle_key(event):
+        if event.type() == QEvent.Type.KeyPress:
+            if obj is self._input and self._handle_key(event):
+                return True
+            if obj is self._replace and self._handle_replace_key(event):
                 return True
         return super().eventFilter(obj, event)
 
@@ -222,12 +265,41 @@ class SearchOverlay(QWidget):
         if key == Qt.Key.Key_Up or (ctrl and key == Qt.Key.Key_P):
             self._move_sel(-1)
             return True
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) and self._allow_replace:
+            self._open_replace()
+            return True
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if self._hits:
                 h = self._hits[self._sel]
                 self.accepted.emit(h.start, h.end)
             else:
                 self.cancelled.emit()
+            return True
+        return False
+
+    def _open_replace(self):
+        """Reveal the replace field and move there, keeping the query. The host
+        previews the literal matches replace will act on."""
+        self._replace.show()
+        self._replace_hint.show()
+        self._place()
+        self._replace.setFocus()
+        self.replace_opened.emit()
+
+    def _handle_replace_key(self, event: QKeyEvent) -> bool:
+        key = event.key()
+        ctrl = bool(event.modifiers() & _CTRL_MOD)
+        if key == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            return True
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            self._input.setFocus()               # back to the search field
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if ctrl:
+                self.replace_all.emit(self.query, self.replacement)
+            else:
+                self.replace_one.emit(self.query, self.replacement)
             return True
         return False
 

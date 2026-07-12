@@ -3,7 +3,14 @@ and the n/N wrap-around navigation."""
 
 from __future__ import annotations
 
-from textli.search import Hit, find_hits, line_match, next_hit, rank
+from textli.search import (
+    Hit,
+    find_hits,
+    find_literal,
+    line_match,
+    next_hit,
+    rank,
+)
 
 TEXT = (
     "# Verification plan\n"          # line 0
@@ -82,3 +89,20 @@ def test_next_hit_steps_and_wraps_both_ways():
     assert next_hit(hits, second.start, -1) == first
     assert next_hit(hits, first.start, -1) == second          # wrap backward
     assert next_hit([], 0, +1) is None
+
+
+def test_find_literal_offsets_case_insensitive():
+    text = "The cat. THE end. the"
+    assert find_literal(text, "the") == [(0, 3), (9, 12), (18, 21)]
+
+
+def test_find_literal_is_non_overlapping():
+    assert find_literal("aaaa", "aa") == [(0, 2), (2, 4)]
+
+
+def test_find_literal_ignores_fuzzy_and_word_matches():
+    # "verify" would be a fuzzy hit for "vrfy" in find_hits, but replace only
+    # ever targets the exact substring — so a literal search finds nothing.
+    assert find_literal("please verify this", "vrfy") == []
+    assert find_literal("", "x") == []
+    assert find_literal("abc", "") == []

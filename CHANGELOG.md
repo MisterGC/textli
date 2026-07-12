@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-12
+
+### Added
+
+- **A reading face for the read view** — the rendered page is now set in
+  **Literata** (a warm, book-oriented serif, bundled OFL), so long-form prose
+  reads like a typeset page instead of the monospace source; fenced and inline
+  code stay in JetBrains Mono, and the write view keeps its monospace column.
+- **Reading rhythm in the read view** — rendered prose sits on generous
+  line-height with clear space between paragraphs (code stays tight), scaling
+  with the font zoom, so long-form reading breathes; pairs with the reading face.
+- **Undo / redo in NORMAL mode** — `u` undoes and `⌃r` redoes the last change
+  in the write view (and `InlineVimEditor`), riding the editor's native undo
+  stack, so a NORMAL-mode edit is reversible without dropping to INSERT for
+  `⌘Z`.
+- **Vim counts, VISUAL operators and yank/paste in the write view** — a leading
+  count repeats the next motion or edit (`3j`, `2dd`, `5w`, `4x`); `v` starts a
+  VISUAL selection that the motions extend, with `d` / `y` / `c` to delete, yank
+  or change it; and `yy` / `yw` yank, `p` / `P` paste, sharing one register with
+  the delete commands (so `dd` then `p` moves a line). Text objects, dot-repeat,
+  macros and named registers stay out — the write view keeps to vim essentials.
+- **Headings overview (`gh`) in the write view** — the reading view's outline
+  jump-list now works over the source too: `gh` parses the document's headings
+  (skipping fenced code), `j`/`k` preview each live, `Enter` keeps the spot and
+  `Esc` restores where you were — so a long draft navigates by structure in
+  either view.
+- **Find & replace** — from a `/` search in the write view, `⇥` reveals a
+  replace field: `↵` replaces the current match and advances, `⌃↵` replaces
+  every one (a single undo step). Replace targets the *literal* occurrences of
+  the query (case-insensitive), not the fuzzy hit list — replacing a fuzzy
+  match would be surprising. The reading view stays find-only, since its
+  rendered page is read-only.
+
+### Fixed
+
+- Embedded editors now render comments in the bundled Caveat handwriting face:
+  the public widgets (`ZenMarkdownEditor`, `InlineVimEditor`) register the
+  bundled fonts on construction (idempotently), so a host like grafli no longer
+  falls back to the plain body font the way only the standalone CLI avoided.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added

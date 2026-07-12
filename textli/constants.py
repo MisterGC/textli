@@ -9,6 +9,11 @@ from PySide6.QtGui import QColor
 
 # ── Typography ───────────────────────────────────────────────────
 FONT_FAMILY = "JetBrainsMono Nerd Font"
+# Reading face for the rendered read view (bundled Literata, OFL) — a warm,
+# book-oriented serif so long-form prose reads like a typeset page rather than
+# source code. Only the read view uses it; the write view keeps the monospace
+# column, and code (fenced + inline) is pinned back to FONT_FAMILY.
+READING_FONT_FAMILY = "Literata"
 # Handwriting face for comment annotations (bundled Caveat, OFL) — a comment
 # reads as a margin note, not a form field. The note wears the same tint a
 # commented span gets in the text (ZEN_MD_COMMENT_NOTE_BG, below), inked in a
@@ -68,6 +73,10 @@ ZEN_MD_SYNTAX_COLOR = QColor("#B8B3AB")
 ZEN_MD_FONT_SIZE = 16
 ZEN_MD_FONT_SIZE_MIN = 10
 ZEN_MD_FONT_SIZE_MAX = 32
+# Read-view long-form leading — proportional line height (%) applied to prose
+# (not code, which reads better tight), paired with the proportional reading
+# face so sustained reading breathes.
+ZEN_MD_READING_LINE_HEIGHT = 145
 # Modal card: width hugs the text column, height takes most of the window.
 # Card chrome strips (the area outside the canvas) get the dim wash so a
 # host's canvas itself stays fully saturated.

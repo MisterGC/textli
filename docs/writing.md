@@ -15,7 +15,14 @@ The essentials work the way your fingers expect:
 - **Entering INSERT** — `i a` (before/after the caret), `I A` (line
   start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
 - **Edits** — `x` (char), `dd` (line), `dw` (to next word).
-- **VISUAL** — `v` starts a selection that the motions extend.
+- **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
+- **VISUAL** — `v` starts a selection that the motions extend; `d` / `y` / `c`
+  then delete, yank or change it.
+- **Yank & paste** — `yy` / `yw` yank a line / word, `p` / `P` paste after /
+  before. Deletes (`x`, `dd`, `dw`) fill the same register, so a `dd` then `p`
+  moves a line.
+- **Counts** — a leading number repeats the next motion or edit: `3j`, `5w`,
+  `2dd`, `4x`.
 
 In NORMAL mode `Esc` saves and closes the editor; `⇧Esc` cancels and
 discards pending changes.
@@ -42,14 +49,22 @@ Both preferences persist across sessions:
 
 - `⌘J` opens the **word-jump overlay**: every visible word gets a two-key
   label; type the label to jump the caret there (Easymotion style).
+- `gh` opens the **headings overview** — an outline of the document to jump
+  through: `j`/`k` preview each heading live, ++enter++ keeps the spot,
+  ++esc++ returns where you were. The same outline the
+  [reading view](reading.md) offers, now over the source.
 - `/` (NORMAL mode) opens **search**: a live, ranked list of the lines your
   query matches — exact phrases first, then lines where each query word
   fuzzy-matches *inside a single word* (`vrfy` finds *verify*; fuzzy never
   assembles a match from stray characters across the line). Move the
   selection to preview a hit, ++enter++ to jump, ++esc++ to stay where you
   were. Afterwards `n` / `N` step through the hits *in document order*
-  (wrapping), with every match highlighted. The same search works in the
-  [reading view](reading.md).
+  (wrapping), with every match highlighted. From the search, ++tab++ reveals a
+  **replace** field: ++enter++ replaces the current match and advances,
+  ⌃++enter++ replaces them all — over the *literal* occurrences of your query
+  (not the fuzzy hits), each undoable. The same search works in the
+  [reading view](reading.md), which stays find-only (its rendered page is
+  read-only).
 - ++enter++ (NORMAL mode) **follows the link under the caret** — anywhere
   inside `[text](url)`, an `<autolink>` or a bare URL. Web and mail targets
   open in your default browser; a `#heading-slug` target jumps to that
