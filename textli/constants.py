@@ -73,6 +73,10 @@ ZEN_MD_SYNTAX_COLOR = QColor("#B8B3AB")
 ZEN_MD_FONT_SIZE = 16
 ZEN_MD_FONT_SIZE_MIN = 10
 ZEN_MD_FONT_SIZE_MAX = 32
+# Read-view long-form leading — proportional line height (%) applied to prose
+# (not code, which reads better tight), paired with the proportional reading
+# face so sustained reading breathes.
+ZEN_MD_READING_LINE_HEIGHT = 145
 # Modal card: width hugs the text column, height takes most of the window.
 # Card chrome strips (the area outside the canvas) get the dim wash so a
 # host's canvas itself stays fully saturated.

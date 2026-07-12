@@ -96,6 +96,7 @@ from textli.constants import (
     ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN,
     ZEN_MD_HEADING_SIZES,
+    ZEN_MD_READING_LINE_HEIGHT,
     ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_CARET,
     ZEN_MD_FOCUS_CORE_LINES,
@@ -1823,6 +1824,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._apply_code_font(doc)
+        self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
         self._settle_rendered_layout()
@@ -1862,6 +1864,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._apply_code_font(doc)
+        self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
         self._rendered.set_strikes([])
@@ -2028,6 +2031,36 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos)
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.mergeCharFormat(fmt)
+
+    def _style_reading_rhythm(self, doc):
+        """Long-form breathing room (#33): a proportional line height on prose
+        (not code, which reads better tight) and a gap between top-level
+        paragraphs, so sustained reading in the proportional face doesn't run
+        together. Scales with the font zoom; read view only. Format-only."""
+        para_gap = round(self._font_size * 0.6)
+        prop = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
+        block = doc.begin()
+        while block.isValid():
+            bf = block.blockFormat()
+            if not bf.hasProperty(QTextFormat.Property.BlockCodeFence):
+                fmt = QTextBlockFormat()
+                fmt.setLineHeight(ZEN_MD_READING_LINE_HEIGHT, prop)
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                nxt = block.next()
+                # Space plain top-level paragraphs — not headings (they carry
+                # their own rhythm), list items, quotes, or table cells, and
+                # not right before a heading (its top margin already separates).
+                plain = (bf.headingLevel() == 0 and bf.indent() == 0
+                         and block.textList() is None
+                         and cur.currentTable() is None
+                         and bool(block.text().strip()))
+                next_heading = (nxt.isValid()
+                                and nxt.blockFormat().headingLevel() > 0)
+                if plain and not next_heading:
+                    fmt.setBottomMargin(para_gap)
+                cur.mergeBlockFormat(fmt)
+            block = block.next()
 
     def _apply_code_font(self, doc):
         """Pin code back to the monospace face. Qt flags code fixed-pitch but

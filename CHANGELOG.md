@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Literata** (a warm, book-oriented serif, bundled OFL), so long-form prose
   reads like a typeset page instead of the monospace source; fenced and inline
   code stay in JetBrains Mono, and the write view keeps its monospace column.
+- **Reading rhythm in the read view** — rendered prose sits on generous
+  line-height with clear space between paragraphs (code stays tight), scaling
+  with the font zoom, so long-form reading breathes; pairs with the reading face.
 - **Undo / redo in NORMAL mode** — `u` undoes and `⌃r` redoes the last change
   in the write view (and `InlineVimEditor`), riding the editor's native undo
   stack, so a NORMAL-mode edit is reversible without dropping to INSERT for

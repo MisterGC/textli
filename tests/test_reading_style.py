@@ -6,6 +6,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QTextBlockFormat  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli.constants import (  # noqa: E402
@@ -13,6 +14,7 @@ from textli.constants import (  # noqa: E402
     READING_FONT_FAMILY,
     ZEN_HINT_COLOR,
     ZEN_MD_CODE_BLOCK_BG,
+    ZEN_MD_READING_LINE_HEIGHT,
 )
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 
@@ -94,6 +96,27 @@ def test_code_stays_monospace_under_the_reading_face():
     for block, frag in _fragments(ed._rendered.document()):
         if block.text() == "x = 1":
             assert frag.charFormat().fontFamilies() == [FONT_FAMILY]
+
+
+def test_reading_rhythm_leads_prose_not_code():
+    ed = _editor()
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    prop = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
+    prose_bf = code_bf = None
+    block = doc.begin()
+    while block.isValid():
+        if block.text().strip() == "Plain prose after.":
+            prose_bf = block.blockFormat()
+        if block.text() == "x = 1":
+            code_bf = block.blockFormat()
+        block = block.next()
+    # prose: proportional leading + a paragraph gap below
+    assert prose_bf.lineHeightType() == prop
+    assert prose_bf.lineHeight() == ZEN_MD_READING_LINE_HEIGHT
+    assert prose_bf.bottomMargin() > 0
+    # code stays tight — no proportional leading
+    assert code_bf.lineHeightType() != prop
 
 
 # ── blockquotes ──
