@@ -45,6 +45,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌃n / ⌃p` · `↓ / ↑` | Move the selection |
 | `Enter` · `Esc` | Jump to the hit · cancel back to where you were |
 | `n / N` | Next / previous hit (wraps; the query survives `⌘R`) |
+| `⇥` (write view) | Reveal replace — `↵` replaces this match & advances, `⌃↵` replaces all (literal matches) |
 
 ## Open-file dialog (`go`)
 

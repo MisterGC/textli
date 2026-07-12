@@ -11,7 +11,11 @@ from PySide6.QtCore import QEvent, QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import ZEN_SEARCH_CURRENT, ZEN_SEARCH_HIT  # noqa: E402
+from textli.constants import (  # noqa: E402
+    ZEN_SEARCH_CURRENT,
+    ZEN_SEARCH_HIT,
+    _CTRL_MOD,
+)
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 from textli.vim import VimMode  # noqa: E402
 
@@ -21,9 +25,12 @@ MD = ("# Title\n\n"
       "gamma paragraph mentioning pipeline again.\n")
 
 
-def _ev(key, text="", shift=False):
-    mods = Qt.KeyboardModifier.ShiftModifier if shift \
-        else Qt.KeyboardModifier.NoModifier
+def _ev(key, text="", shift=False, ctrl=False):
+    mods = Qt.KeyboardModifier.NoModifier
+    if shift:
+        mods |= Qt.KeyboardModifier.ShiftModifier
+    if ctrl:
+        mods |= _CTRL_MOD
     return QKeyEvent(QEvent.Type.KeyPress, key, mods, text, False, 1)
 
 
@@ -205,3 +212,78 @@ def test_n_without_query_is_a_noop():
     before = ed._editor.textCursor().position()
     ed._handle_key(_ev(Qt.Key.Key_N, "n"))
     assert ed._editor.textCursor().position() == before
+
+
+# ── replace (write view only, literal matches) ──
+
+def test_tab_reveals_replace_in_write_view():
+    ed = _editor()
+    ed._open_search()
+    ov = ed._search_overlay
+    assert ov._allow_replace is True
+    ov._input.setText("pipeline")
+    ov._handle_key(_ev(Qt.Key.Key_Tab))
+    assert ov._replace.isVisible()
+
+
+def test_tab_is_a_noop_in_the_read_view():
+    ed = _editor()
+    ed._toggle_rendered()
+    ed._open_search()
+    ov = ed._search_overlay
+    assert ov._allow_replace is False
+    ov._input.setText("pipeline")
+    ov._handle_key(_ev(Qt.Key.Key_Tab))
+    assert not ov._replace.isVisible()          # read view stays find-only
+
+
+def test_replace_all_replaces_every_literal_match_in_one_undo():
+    ed = _editor(text="foo x foo\ny foo z\n")
+    ed._open_search()
+    ov = ed._search_overlay
+    ov._input.setText("foo")
+    ov._handle_key(_ev(Qt.Key.Key_Tab))
+    ov._replace.setText("BAR")
+    ov._handle_replace_key(_ev(Qt.Key.Key_Return, ctrl=True))
+    assert ed._editor.toPlainText() == "BAR x BAR\ny BAR z\n"
+    ed._editor.undo()                           # one step restores everything
+    assert ed._editor.toPlainText() == "foo x foo\ny foo z\n"
+
+
+def test_replace_one_advances_and_is_per_match_undo():
+    ed = _editor(text="foo a foo b foo\n")
+    ed._open_search()
+    ov = ed._search_overlay
+    ov._input.setText("foo")
+    ov._handle_key(_ev(Qt.Key.Key_Tab))
+    ov._replace.setText("X")
+    ov._handle_replace_key(_ev(Qt.Key.Key_Return))
+    assert ed._editor.toPlainText() == "X a foo b foo\n"
+    ov._handle_replace_key(_ev(Qt.Key.Key_Return))   # advanced to the next
+    assert ed._editor.toPlainText() == "X a X b foo\n"
+    ed._editor.undo()                           # each replace is its own step
+    assert ed._editor.toPlainText() == "X a foo b foo\n"
+
+
+def test_replace_targets_literal_matches_case_insensitively():
+    ed = _editor(text="The the THE done\n")
+    ed._open_search()
+    ov = ed._search_overlay
+    ov._input.setText("the")
+    ov._handle_key(_ev(Qt.Key.Key_Tab))
+    ov._replace.setText("z")
+    ov._handle_replace_key(_ev(Qt.Key.Key_Return, ctrl=True))
+    assert ed._editor.toPlainText() == "z z z done\n"
+
+
+def test_esc_after_a_replace_stays_put():
+    ed = _editor(text="foo bar foo\n")
+    ed._open_search()
+    ov = ed._search_overlay
+    ov._input.setText("foo")
+    ov._handle_key(_ev(Qt.Key.Key_Tab))
+    ov._replace.setText("X")
+    ov._handle_replace_key(_ev(Qt.Key.Key_Return))
+    ov._handle_replace_key(_ev(Qt.Key.Key_Escape))
+    assert ed._search_overlay is None
+    assert ed._search_saved is None             # a replace happened — no restore

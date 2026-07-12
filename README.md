@@ -60,7 +60,7 @@ complete key reference, or see the
 | `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
-| `/` | Fuzzy in-document search (`n`/`N` next/previous hit) |
+| `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
 | `F1` | Full help |
 
 ## Embed

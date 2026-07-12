@@ -502,6 +502,7 @@ def editor_help_html() -> str:
         ("⌃n / ⌃p · ↓ / ↑", "Move the selection"),
         ("Enter · Esc", "Jump to the hit · cancel back to where you were"),
         ("n / N", "Next / previous hit (wraps; the query survives ⌘R)"),
+        ("⇥ (write view)", "Reveal replace — ↵ replaces this match & advances, ⌃↵ replaces all (literal matches)"),
     ])}</table>
 
     <p style='{hdr}'>Open-file dialog (go)</p>
@@ -1343,12 +1344,16 @@ class ZenMarkdownEditor(QWidget):
         view = self._active_view()
         self._search_saved = (view.verticalScrollBar().value(),
                               view.textCursor().position())
-        overlay = SearchOverlay(self, view.toPlainText, self._font_size)
+        overlay = SearchOverlay(self, view.toPlainText, self._font_size,
+                                allow_replace=not self._rendered_mode)
         overlay.selection_changed.connect(self._search_preview)
         overlay.accepted.connect(self._search_accept)
         overlay.cancelled.connect(self._search_cancel)
         overlay.cleared.connect(
             lambda: self._active_view().setExtraSelections([]))
+        overlay.replace_opened.connect(self._replace_opened)
+        overlay.replace_one.connect(self._replace_one)
+        overlay.replace_all.connect(self._replace_all)
         self._search_overlay = overlay
         overlay.open()
         self._refresh_status()
@@ -1497,6 +1502,91 @@ class ZenMarkdownEditor(QWidget):
             y = doc.documentLayout().blockBoundingRect(doc.findBlock(pos)).y()
             sb = view.verticalScrollBar()
             sb.setValue(max(0, int(y - view.viewport().height() * 0.35)))
+
+    # ── Replace (write view only; targets literal matches) ──
+
+    def _highlight_literal(self, view, query: str, current: int | None = None):
+        """Wash every literal match of ``query``; the one starting at ``current``
+        gets the stronger wash — ExtraSelections only, never touching the text."""
+        sels = []
+        for s, e in md_search.find_literal(view.toPlainText(), query):
+            sel = QTextBrowser.ExtraSelection()
+            cur = QTextCursor(view.document())
+            cur.setPosition(s)
+            cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+            sel.cursor = cur
+            sel.format.setBackground(QBrush(
+                ZEN_SEARCH_CURRENT if s == current else ZEN_SEARCH_HIT))
+            sels.append(sel)
+        view.setExtraSelections(sels)
+
+    def _goto_literal(self, view, query: str, from_pos: int):
+        """Land on the first literal match at/after ``from_pos`` (wrapping),
+        scroll it clear of the search card, and highlight it as current. Returns
+        the match ``(start, end)`` or ``None`` when there are none."""
+        matches = md_search.find_literal(view.toPlainText(), query)
+        if not matches:
+            view.setExtraSelections([])
+            return None
+        m = next(((s, e) for s, e in matches if s >= from_pos), matches[0])
+        self._center_view_on(view, m[0])
+        self._highlight_literal(view, query, current=m[0])
+        if self._search_overlay is not None:
+            self._ensure_hit_visible(view, self._search_overlay)
+        return m
+
+    def _replace_opened(self):
+        """Tab revealed the replace field — switch the preview from the fuzzy
+        hits to the literal matches replace acts on, landing on the first at or
+        after the caret."""
+        ov = self._search_overlay
+        if ov is None:
+            return
+        self._goto_literal(self._active_view(), ov.query,
+                           self._active_view().textCursor().position())
+
+    def _replace_one(self, query: str, replacement: str):
+        """↵ in the replace field — replace the current literal match (the one at
+        the caret, else the next), one undoable step, then advance to the next."""
+        if not query:
+            return
+        view = self._active_view()
+        matches = md_search.find_literal(view.toPlainText(), query)
+        if not matches:
+            return
+        caret = view.textCursor().position()
+        s, e = next(((s, e) for s, e in matches if s >= caret), matches[0])
+        cur = view.textCursor()
+        cur.setPosition(s)
+        cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+        cur.insertText(replacement)                 # undoable
+        self._search_query = query
+        self._search_saved = None                   # a replace happened — Esc stays put
+        self._goto_literal(view, query, s + len(replacement))
+        if self._search_overlay is not None:
+            self._search_overlay.refresh_hits()
+
+    def _replace_all(self, query: str, replacement: str):
+        """⌃↵ — replace every literal match in one undoable step (right-to-left,
+        so earlier offsets stay valid as the text shifts)."""
+        if not query:
+            return
+        view = self._active_view()
+        matches = md_search.find_literal(view.toPlainText(), query)
+        if not matches:
+            return
+        cur = view.textCursor()
+        cur.beginEditBlock()
+        for s, e in reversed(matches):
+            cur.setPosition(s)
+            cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+            cur.insertText(replacement)
+        cur.endEditBlock()
+        self._search_query = query
+        self._search_saved = None
+        view.setExtraSelections([])                 # nothing left to mark
+        if self._search_overlay is not None:
+            self._search_overlay.refresh_hits()
 
     def _print(self):
         """⌘P — native print dialog. In the reading view it prints the typeset

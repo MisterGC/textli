@@ -59,8 +59,12 @@ Both preferences persist across sessions:
   assembles a match from stray characters across the line). Move the
   selection to preview a hit, ++enter++ to jump, ++esc++ to stay where you
   were. Afterwards `n` / `N` step through the hits *in document order*
-  (wrapping), with every match highlighted. The same search works in the
-  [reading view](reading.md).
+  (wrapping), with every match highlighted. From the search, ++tab++ reveals a
+  **replace** field: ++enter++ replaces the current match and advances,
+  ⌃++enter++ replaces them all — over the *literal* occurrences of your query
+  (not the fuzzy hits), each undoable. The same search works in the
+  [reading view](reading.md), which stays find-only (its rendered page is
+  read-only).
 - ++enter++ (NORMAL mode) **follows the link under the caret** — anywhere
   inside `[text](url)`, an `<autolink>` or a bare URL. Web and mail targets
   open in your default browser; a `#heading-slug` target jumps to that

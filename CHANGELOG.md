@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (skipping fenced code), `j`/`k` preview each live, `Enter` keeps the spot and
   `Esc` restores where you were — so a long draft navigates by structure in
   either view.
+- **Find & replace** — from a `/` search in the write view, `⇥` reveals a
+  replace field: `↵` replaces the current match and advances, `⌃↵` replaces
+  every one (a single undo step). Replace targets the *literal* occurrences of
+  the query (case-insensitive), not the fuzzy hit list — replacing a fuzzy
+  match would be surprising. The reading view stays find-only, since its
+  rendered page is read-only.
 
 ### Fixed
 
