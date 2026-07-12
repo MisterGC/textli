@@ -34,6 +34,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `2j` · `3dd` | A leading count repeats the next motion or edit |
 | `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
+| `gh` | Headings overview — an outline of the source (`j`/`k` preview, `Enter` keeps, `Esc` restores) |
 
 ## Search (`/`) — both views
 

@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or change it; and `yy` / `yw` yank, `p` / `P` paste, sharing one register with
   the delete commands (so `dd` then `p` moves a line). Text objects, dot-repeat,
   macros and named registers stay out — the write view keeps to vim essentials.
+- **Headings overview (`gh`) in the write view** — the reading view's outline
+  jump-list now works over the source too: `gh` parses the document's headings
+  (skipping fenced code), `j`/`k` preview each live, `Enter` keeps the spot and
+  `Esc` restores where you were — so a long draft navigates by structure in
+  either view.
 
 ### Fixed
 

@@ -36,14 +36,17 @@ class VimKeyHandler:
         close_cancel: Callable[[], None],
         initial_mode: VimMode = VimMode.NORMAL,
         open_file: Callable[[], None] | None = None,
+        open_headings: Callable[[], None] | None = None,
     ):
         self._editor = editor
         self._mode_changed = mode_changed
         self._close_save = close_save
         self._close_cancel = close_cancel
-        # `go` — hosts with a file concept (the zen editor) open the file
-        # dialog; single-field hosts (InlineVimEditor) leave it unset.
+        # `go` / `gh` — hosts with a document concept (the zen editor) open the
+        # file dialog / headings outline; single-field hosts (InlineVimEditor)
+        # leave them unset, so the sequences are harmless no-ops there.
         self._open_file = open_file
+        self._open_headings = open_headings
         self._mode = initial_mode
         self._pending = ""
         # Numeric count prefix accumulated before a motion/operator (``3j``,
@@ -273,6 +276,9 @@ class VimKeyHandler:
                 return True
             if key == Qt.Key.Key_O and self._open_file is not None:
                 self._open_file()
+                return True
+            if key == Qt.Key.Key_H and self._open_headings is not None:
+                self._open_headings()
                 return True
             return True  # unknown g-sequence, consume
 

@@ -492,6 +492,7 @@ def editor_help_html() -> str:
         ("2j · 3dd", "A leading count repeats the next motion or edit"),
         ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there (NORMAL mode)"),
         ("go", "Open another file — history is fuzzy-matched, paths complete per segment"),
+        ("gh", "Headings overview — an outline of the source (j/k preview, Enter keeps, Esc restores)"),
     ])}</table>
 
     <p style='{hdr}'>Search (/) — both views</p>
@@ -698,6 +699,9 @@ class ZenMarkdownEditor(QWidget):
         self._overview_sel = 0
         self._overview_title = ""
         self._overview_scroll_top = False
+        # The view the open overview drives — the rendered reader (`gc`/`gh`/`gl`)
+        # or the source editor (`gh` in the write view). Set on each open.
+        self._overview_view = None
         # `gl` follows the picked row (a link); `gc`/`gh` just land on it.
         self._overview_targets = None
         # In-session back-stack of (path, caret, scroll) for link navigation —
@@ -790,6 +794,7 @@ class ZenMarkdownEditor(QWidget):
             close_save=self._close_save,
             close_cancel=self._close_cancel,
             open_file=self._open_file_dialog,
+            open_headings=self._open_headings_overview,
         )
         # `go` open-file overlay (created on demand, one at a time).
         self._open_overlay: OpenFileOverlay | None = None
@@ -2297,6 +2302,28 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         return rows
 
+    def _build_source_headings_list(self):
+        """Every ATX heading (``# …``) in the *source* as ``(start, end, level,
+        text)``, skipping fenced code blocks — the write-view outline. Positions
+        are into the source document so preview/jump land on the ``#`` line."""
+        doc = self._editor.document()
+        rows = []
+        in_fence = False
+        block = doc.begin()
+        while block.isValid():
+            text = block.text()
+            stripped = text.lstrip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_fence = not in_fence
+            elif not in_fence:
+                m = re.match(r"(#{1,6})\s+(.*)", stripped)
+                if m and m.group(2).strip():
+                    start = block.position()
+                    rows.append((start, start + len(text),
+                                 len(m.group(1)), m.group(2).strip()))
+            block = block.next()
+        return rows
+
     def _build_links_list(self):
         """Every link as ``(start, end, href, text)`` in document order —
         contiguous fragments of one anchor merged into a single row."""
@@ -2331,14 +2358,17 @@ class ZenMarkdownEditor(QWidget):
         self._open_overview(rows, f"Changes ({len(rows)})", scroll_top=False)
 
     def _open_headings_overview(self):
-        """gh — jump-list of every heading (an outline). Rebuilt on each invocation
-        from the live document, so accepting a change that moved a heading is
-        reflected next time you open it."""
+        """gh — jump-list of every heading (an outline). Works in both views:
+        the reading view reads headings from the rendered document, the write
+        view parses them from the source. Rebuilt on each invocation, so a
+        heading added or moved since last time is reflected."""
+        build = (self._build_headings_list if self._rendered_mode
+                 else self._build_source_headings_list)
         rows = [
             (s, e, f"{'&nbsp;' * ((level - 1) * 3)}"
                    f"<span style='color:#A2937A'>{'#' * level}</span>"
                    f"&nbsp;{self._esc_html(text)}")
-            for (s, e, level, text) in self._build_headings_list()
+            for (s, e, level, text) in build()
         ]
         self._open_overview(rows, f"Headings ({len(rows)})", scroll_top=True)
 
@@ -2368,14 +2398,19 @@ class ZenMarkdownEditor(QWidget):
         of just landing on it — that's the `gl` links overview."""
         if not rows:
             return
+        # The overview drives whichever view is live — the rendered reader or
+        # the source editor (gh works in both).
+        self._overview_view = (self._rendered if self._rendered_mode
+                               else self._editor)
+        view = self._overview_view
         self._overview_rows = rows
         self._overview_title = title
         self._overview_scroll_top = scroll_top
         self._overview_targets = targets
         # Where the reader came from — Esc promises to put this back exactly.
-        self._overview_origin = (self._rendered.verticalScrollBar().value(),
-                                 self._rendered.textCursor().position())
-        pos = self._rendered.textCursor().position()
+        self._overview_origin = (view.verticalScrollBar().value(),
+                                 view.textCursor().position())
+        pos = view.textCursor().position()
         # Select where the reader *is*: the row whose own span holds the caret,
         # else the row whose section the caret is in (the last row starting at
         # or before it) — so `gh` opens on the current heading, not the first.
@@ -2417,7 +2452,7 @@ class ZenMarkdownEditor(QWidget):
             " background: #FBF7EC; border: 1px solid #C9A227;"
             " border-radius: 8px; padding: 8px; }")
         lbl.adjustSize()
-        vp = self._rendered
+        vp = self._overview_view or self._rendered
         lbl.move(vp.x() + max(16, vp.width() - lbl.width() - 24), vp.y() + 24)
         lbl.show()
         lbl.raise_()
@@ -2452,23 +2487,32 @@ class ZenMarkdownEditor(QWidget):
         return True   # swallow everything else while the overview is up
 
     def _preview_overview_row(self, idx: int):
-        """Bring row ``idx``'s span into the read view without closing the
+        """Bring row ``idx``'s span into the active view without closing the
         overview — the live preview behind j/k. Headings scroll to the top of
         the view (outline jump); changes just scroll into view, leaving the
         caret on the mark so a/x/Enter act on it."""
         if not (0 <= idx < len(self._overview_rows)):
             return
         start, end, _inner = self._overview_rows[idx]
-        cur = self._rendered.textCursor()
+        view = self._overview_view or self._rendered
+        cur = view.textCursor()
         cur.setPosition(start)
         cur.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        self._rendered.setTextCursor(cur)
-        if self._overview_scroll_top:
-            doc = self._rendered.document()
+        view.setTextCursor(cur)
+        if self._overview_scroll_top and view is self._rendered:
+            doc = view.document()
             y = doc.documentLayout().blockBoundingRect(doc.findBlock(start)).y()
-            self._rendered.verticalScrollBar().setValue(int(y))
+            view.verticalScrollBar().setValue(int(y))
+        elif self._overview_scroll_top:
+            # The write view (a QPlainTextEdit) scrolls in line units, not
+            # pixels — bring the heading into view, then nudge its line to the
+            # top so it reads like an outline jump.
+            view.ensureCursorVisible()
+            line_h = max(1, view.fontMetrics().lineSpacing())
+            sb = view.verticalScrollBar()
+            sb.setValue(sb.value() + view.cursorRect().top() // line_h)
         else:
-            self._rendered.ensureCursorVisible()
+            view.ensureCursorVisible()
 
     def _jump_to_overview_row(self, idx: int):
         """Commit row ``idx``: preview it (caret on the span, scrolled per the
@@ -2486,11 +2530,12 @@ class ZenMarkdownEditor(QWidget):
         (caret and scroll), then close."""
         scroll, pos = getattr(self, "_overview_origin",
                               (None, None))
+        view = self._overview_view or self._rendered
         if pos is not None:
-            cur = self._rendered.textCursor()
+            cur = view.textCursor()
             cur.setPosition(pos)
-            self._rendered.setTextCursor(cur)
-            self._rendered.verticalScrollBar().setValue(scroll)
+            view.setTextCursor(cur)
+            view.verticalScrollBar().setValue(scroll)
         self._close_overview()
 
     def _close_overview(self):
@@ -2498,8 +2543,9 @@ class ZenMarkdownEditor(QWidget):
         if getattr(self, "_overview_overlay", None) is not None:
             self._overview_overlay.hide()
             self._overview_overlay = None
-        if getattr(self, "_rendered", None) is not None:
-            self._rendered.setFocus()
+        view = self._overview_view or getattr(self, "_rendered", None)
+        if view is not None:
+            view.setFocus()
         self._refresh_status()
 
     def _format_for_span(self, span, comment_idx: int,
@@ -2913,6 +2959,11 @@ class ZenMarkdownEditor(QWidget):
         # Rendered view: vim-style navigation; Esc saves & closes.
         if self._rendered_mode:
             return self._handle_rendered_key(event)
+
+        # A jump-list overview (gh) can be open over the write view too — it
+        # captures every key while up, same as in the reading view.
+        if self._overview_overlay is not None:
+            return self._handle_overview_key(event)
 
         # Ctrl+J — activate word jump
         if (event.key() == Qt.Key.Key_J

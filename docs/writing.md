@@ -49,6 +49,10 @@ Both preferences persist across sessions:
 
 - `⌘J` opens the **word-jump overlay**: every visible word gets a two-key
   label; type the label to jump the caret there (Easymotion style).
+- `gh` opens the **headings overview** — an outline of the document to jump
+  through: `j`/`k` preview each heading live, ++enter++ keeps the spot,
+  ++esc++ returns where you were. The same outline the
+  [reading view](reading.md) offers, now over the source.
 - `/` (NORMAL mode) opens **search**: a live, ranked list of the lines your
   query matches — exact phrases first, then lines where each query word
   fuzzy-matches *inside a single word* (`vrfy` finds *verify*; fuzzy never
