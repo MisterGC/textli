@@ -9,7 +9,10 @@ proof-reading and review — navigate with vim motions, leave inline
 **comments**, and propose **suggestions** (track changes) that the author
 accepts or rejects with a keystroke. All annotations are stored inline as
 [CriticMarkup](http://criticmarkup.com/), so they travel with the file and
-diff cleanly in git — no sidecar files.
+diff cleanly in git — no sidecar files. Pandoc-style **TeX math** — `$…$`
+inline, `$$…$$` display — renders as typeset formulas in the reading view,
+so scientific notes read like the paper they'll become (and convert to one
+via pandoc, untouched).
 
 textli started life as the editor inside [grafli](https://github.com/MisterGC/grafli),
 the keyboard-driven diagram tool, and is now its own package — usable

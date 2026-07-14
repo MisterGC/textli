@@ -101,6 +101,27 @@ source, and carries the code band onto paper. Images referenced by a
 relative path (`![](diagram.png)`) render against the document's own
 folder, so they show wherever you launched textli from.
 
+## Mathematics
+
+Write math the way pandoc reads it — `$E = mc^2$` inline, `$$…$$` for a
+display formula — and the reading view sets it as real typeset
+mathematics: STIX Two Math glyphs in the page's ink, sized to the prose,
+inline math riding the text baseline, display math centered on its own
+line. Because the source is plain pandoc math, the same file converts to
+LaTeX or PDF untouched when a draft grows into a paper. In the write view,
+math spans are tinted so a formula reads as a formula while you type it.
+
+The delimiter rules are pandoc's, deliberately strict so prose never turns
+into math by accident: the opening `$` must hug a non-space, the closing
+`$` must not be followed by a digit — so "costs $5 and $10" stays prose —
+`\$` escapes a literal dollar, and a `$` inside inline code or a fenced
+block is always code. Rendering covers the TeX math subset (fractions,
+integrals, sums, roots, matrices, Greek — no custom macros); a formula
+that doesn't parse falls back to its raw TeX in a code chip, so a typo
+mid-edit never breaks the page. See
+[`examples/math.md`](https://github.com/MisterGC/textli/blob/main/examples/math.md)
+for a tour.
+
 ## Comments
 
 Select a span with `v` + motions, then:

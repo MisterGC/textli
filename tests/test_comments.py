@@ -281,7 +281,7 @@ def test_comment_wrapping_a_fenced_block_parses_and_renders_clean():
     # Regression: commenting a whole code block glues the markers to the fence
     # lines ({==``` … ```⏎==}{>>…<<} — snap_out_of_code places boundaries at the
     # region edges). The glued {== used to hide the opening fence from
-    # _code_ranges, so the *closing* ``` opened a phantom code region that
+    # code_ranges, so the *closing* ``` opened a phantom code region that
     # swallowed the comment's own delimiters — the mark stayed literal and the
     # read view rendered raw markup + a garbled block.
     src = ("Intro prose.\n\n"

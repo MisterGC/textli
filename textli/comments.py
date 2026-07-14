@@ -41,7 +41,7 @@ _RE_COMMENT = re.compile(
     re.DOTALL,
 )
 
-# Opening fence of a code block; closing is matched line-by-line in _code_ranges.
+# Opening fence of a code block; closing is matched line-by-line in code_ranges.
 # A fence line may be *prefixed* by a CriticMarkup opening marker glued to it —
 # commenting a whole code block snaps the boundary to the region edge
 # (``snap_out_of_code``), producing ``{==```` + fence on one line. The prefix is
@@ -64,11 +64,12 @@ class Comment:
     body: str         # the comment text
 
 
-def _code_ranges(source: str) -> list[tuple[int, int]]:
+def code_ranges(source: str) -> list[tuple[int, int]]:
     """Character ranges that are Markdown code — fenced blocks and inline code
-    spans — where CriticMarkup must be left literal (it's documentation, not a
-    real comment). This is what keeps the format's own ``{==…==}`` *examples*
-    from being parsed as comments."""
+    spans — where inline markup must be left literal (it's documentation, not a
+    real annotation). This is what keeps the format's own ``{==…==}`` *examples*
+    from being parsed as comments, and `formulas.py` leans on it for the same
+    reason: a ``$`` in code is code."""
     ranges: list[tuple[int, int]] = []
     # Fenced blocks, line by line.
     pos = 0
@@ -100,7 +101,7 @@ def _matches(source: str) -> list[re.Match]:
     like `` `{==…==}` ``. A genuine comment whose span merely *contains* inline
     code (``{==`assembly` added==}{>>…<<}``) is kept: its markers are outside the
     code, only the span wraps around it."""
-    ranges = _code_ranges(source)
+    ranges = code_ranges(source)
 
     def in_code(pos):
         return any(a <= pos < b for a, b in ranges)
@@ -203,7 +204,7 @@ def snap_out_of_code(source: str, s0: int, s1: int) -> tuple[int, int]:
     `` `code` `` or a fenced block). A wrapped comment's ``{==`` / ``==}`` markers
     must sit outside code — placed inside, they'd be skipped as a literal example
     and the comment wouldn't render. Each boundary snaps to the code edge."""
-    for a, b in _code_ranges(source):
+    for a, b in code_ranges(source):
         if a < s0 < b:
             s0 = a
         if a < s1 < b:
@@ -455,7 +456,7 @@ def parse_marks(source: str) -> list[Mark]:
     """Every CriticMarkup mark — comment + insert/delete/substitute — in document
     order. Markup inside code regions is left literal, exactly as for comments;
     overlapping matches are resolved greedily left-to-right (no nesting in v1)."""
-    ranges = _code_ranges(source)
+    ranges = code_ranges(source)
 
     def in_code(pos):
         return any(a <= pos < b for a, b in ranges)

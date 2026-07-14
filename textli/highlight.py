@@ -7,6 +7,7 @@ import re
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
+from textli import formulas as md_formulas
 from textli.constants import (
     FONT_FAMILY,
     ZEN_HINT_COLOR,
@@ -141,6 +142,19 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             self.setFormat(
                 m.start(1), len(m.group(1)),
                 _fmt(color=self._alpha(ZEN_TEXT_COLOR, focused), italic=True),
+            )
+
+        # Math ($…$ / $$…$$) — the TeX set apart in the zen blue, delimiters
+        # muted. Runs before inline code, so a `$x$` example in a code span
+        # gets repainted as code below.
+        for start, end, display in md_formulas.spans_in_line(text):
+            d = 2 if display else 1
+            marker = _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused))
+            self.setFormat(start, d, marker)
+            self.setFormat(end - d, d, marker)
+            self.setFormat(
+                start + d, end - start - 2 * d,
+                _fmt(color=self._alpha(ZEN_MD_LINK_COLOR, focused), italic=True),
             )
 
         # Inline code

@@ -27,6 +27,7 @@ from PySide6.QtGui import (
     QColor,
     QDesktopServices,
     QFont,
+    QFontInfo,
     QFontMetricsF,
     QGradient,
     QKeyEvent,
@@ -58,7 +59,9 @@ from PySide6.QtWidgets import (
 
 from textli import codeblocks as md_codeblocks
 from textli import comments as md_comments
+from textli import formulas as md_formulas
 from textli import links as md_links
+from textli import mathrender
 from textli import openfile
 from textli import positions as md_positions
 from textli import search as md_search
@@ -147,6 +150,11 @@ _MD_FEATURES = (
     QTextDocument.MarkdownFeature.MarkdownDialectGitHub
     | QTextDocument.MarkdownFeature.MarkdownNoHTML
 )
+
+# URL scheme for rendered math images. Each formula becomes an image ref in
+# the markdown handed to setMarkdown (`![math](textli-math://N)`), resolved
+# from the document's resource cache — never from disk or network.
+_MATH_SCHEME = "textli-math"
 
 
 class _ReadingView(QTextBrowser):
@@ -459,7 +467,10 @@ def editor_help_html() -> str:
     <p style='color:{accent};font-weight:bold;font-size:15px'>textli — the zen Markdown editor</p>
     <p>A focused, distraction-free editor. It opens ready to type (vim NORMAL
     mode); <b>⌘R</b> flips to a rendered <b>reading view</b> for proof-reading,
-    commenting, and suggesting changes. <b>F1</b> shows this help.</p>
+    commenting, and suggesting changes. Pandoc-style TeX math
+    (<span style='font-family:monospace'>$…$</span> inline,
+    <span style='font-family:monospace'>$$…$$</span> display) renders as
+    typeset formulas there. <b>F1</b> shows this help.</p>
     <p>The faint line in the card's corner is the <b>whisper status</b>: while
     writing it shows the vim mode, word count, and this session's delta; while
     reading, the section you're in (or where a link goes when the caret is on
@@ -1799,6 +1810,88 @@ class ZenMarkdownEditor(QWidget):
             doc.setBaseUrl(
                 QUrl.fromLocalFile(str(self._file_path.parent) + "/"))
 
+    def _prepare_math(self, md: str):
+        """Swap each pandoc math span (`formulas.py`) for an image ref and
+        rasterize it (`mathrender.py`) at the read view's current font size,
+        ink color and device pixel ratio. Returns the rewritten markdown plus
+        ``{ref index: (Formula, RenderedFormula)}`` for the post-setMarkdown
+        pass. Identity on documents without math. A formula ziamath can't
+        parse stays in the text as raw TeX — in a code chip when single-line,
+        verbatim otherwise — so a typo never breaks the page."""
+        spans = md_formulas.parse(md)
+        if not spans:
+            return md, {}
+        font = self._rendered.font()
+        px_size = float(QFontInfo(font).pixelSize())
+        descent = QFontMetricsF(font).descent()
+        dpr = self._rendered.devicePixelRatioF()
+        maths: dict[int, tuple] = {}
+
+        def replace(i: int, f: md_formulas.Formula) -> str:
+            rendered = mathrender.render(
+                f.tex, display=f.display, px_size=px_size,
+                color=ZEN_TEXT_COLOR.name(), dpr=dpr, descent=descent)
+            if rendered is None:
+                raw = md[f.start:f.end]
+                return raw if "\n" in raw else md_formulas.code_span(raw)
+            maths[i] = (f, rendered)
+            return f"![math]({_MATH_SCHEME}://{i})"
+
+        return md_formulas.substitute(md, spans, replace), maths
+
+    def _apply_math_images(self, doc, maths: dict):
+        """Attach the rendered formulas to ``doc`` — resources must land
+        *after* setMarkdown (it clears the resource cache) — and pin each
+        image fragment's metrics: explicit logical size, bottom alignment for
+        baseline-exact inline math (the image carries descent padding for
+        precisely this), centered placement for deeper inline formulas, and a
+        centered paragraph for display math standing alone. Format-only —
+        shifts no text offsets, so the sentinel mark pass stays untouched."""
+        if not maths:
+            return
+        for i, (_, rendered) in maths.items():
+            doc.addResource(QTextDocument.ResourceType.ImageResource,
+                            QUrl(f"{_MATH_SCHEME}://{i}"), rendered.image)
+        prefix = f"{_MATH_SCHEME}://"
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    targets.append((frag.position(), frag.length(),
+                                    cf.toImageFormat(), block.position(),
+                                    block.text()))
+                it += 1
+            block = block.next()
+        for pos, length, imf, block_pos, block_text in targets:
+            entry = maths.get(int(imf.name()[len(prefix):]))
+            if entry is None:
+                continue
+            formula, rendered = entry
+            dpr = rendered.image.devicePixelRatio()
+            imf.setWidth(rendered.image.width() / dpr)
+            imf.setHeight(rendered.image.height() / dpr)
+            if not formula.display:
+                imf.setVerticalAlignment(
+                    QTextCharFormat.VerticalAlignment.AlignBottom
+                    if rendered.align_bottom
+                    else QTextCharFormat.VerticalAlignment.AlignMiddle)
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.setCharFormat(imf)
+            # A display formula alone in its paragraph (just the image's
+            # object-replacement character) is centered, LaTeX-style.
+            if formula.display and block_text.strip() == "￼":
+                bf = QTextBlockFormat()
+                bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                cur.setPosition(block_pos)
+                cur.mergeBlockFormat(bf)
+
     def _render_markdown(self, source: str):
         """Render ``source`` into the read view: comment spans are highlighted
         (bodies hidden, revealed on demand), and suggestion marks are styled as
@@ -1811,9 +1904,11 @@ class ZenMarkdownEditor(QWidget):
         estimate (which would clamp the restore and leave the view unable to
         scroll to the real document end)."""
         md, spans = md_comments.to_rendered(source)
+        md, maths = self._prepare_math(md)
         doc = self._rendered.document()
         doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
+        self._apply_math_images(doc, maths)
         self._style_links(doc)
         # Pad lines are *insertions* — they must land before the mark pass
         # records comment/suggestion offsets. The band/token pass below only
@@ -1856,8 +1951,10 @@ class ZenMarkdownEditor(QWidget):
         Settled like :meth:`_render_markdown`, for the same scroll-restore
         correctness."""
         doc = self._rendered.document()
-        doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
+        md, maths = self._prepare_math(md_comments.accepted(source))
+        doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
+        self._apply_math_images(doc, maths)
         self._style_links(doc)
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)

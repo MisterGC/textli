@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-07-12
+## [0.3.0] - 2026-07-14
 
 ### Added
 
+- **TeX math in documents** — pandoc-style `$…$` inline and `$$…$$` display
+  math renders as typeset formulas in the reading view (STIX Two Math via
+  ziamath — pure Python, no LaTeX install), sized and inked to blend with the
+  Literata prose: inline math rides the text baseline, display math stands
+  centered on its own line, and formulas render inside commented spans and
+  print with the page. The write view tints math spans as you type. Delimiter
+  rules are pandoc's and deliberately strict — prose dollars ("costs $5 and
+  $10"), `\$` escapes, and `$` inside code never trigger math — and a formula
+  that doesn't parse falls back to its raw TeX in a code chip, so a typo
+  mid-edit never breaks the page. A cheatsheet of the supported constructs
+  ships as `examples/math.md`.
 - **A reading face for the read view** — the rendered page is now set in
   **Literata** (a warm, book-oriented serif, bundled OFL), so long-form prose
   reads like a typeset page instead of the monospace source; fenced and inline
