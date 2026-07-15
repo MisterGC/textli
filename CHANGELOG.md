@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Paper surface** — the page is material now, not a flat hex: whisper-level
+  procedural grain plus a horizontal light falloff (fully bright across the
+  reading column, a few percent darker in warm ink toward the window edges)
+  painted under the text of both views. Both cues sit below conscious notice —
+  texture felt, not seen — so the zen direction stays intact while the page
+  stops feeling clinically flat. `⌘⇧P` toggles the surface off for the flat
+  page (persists).
+
 ## [0.3.0] - 2026-07-14
 
 ### Added

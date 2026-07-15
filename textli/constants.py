@@ -120,6 +120,17 @@ ZEN_MD_SUGGEST_ADD = QColor("#A83E2E")
 ZEN_SEARCH_HIT = QColor(201, 162, 39, 60)        # every hit — soft wash
 ZEN_SEARCH_CURRENT = QColor(201, 162, 39, 135)   # the current hit — stronger
 
+# ── Paper surface (grain + light) ────────────────────────────────
+# The page is material, not a flat hex: paper.py paints whisper-level grain
+# and a horizontal light falloff under the text of both views — tuned to sit
+# below conscious notice (texture felt, not seen). ⌘⇧P toggles the surface
+# off for the flat page.
+ZEN_MD_PAPER_GRAIN = 3         # max ± luminance step of the grain (of 255)
+ZEN_MD_PAPER_TILE = 144        # grain tile side (logical px)
+ZEN_MD_PAPER_SEED = 0x7311     # fixed — the sheet looks the same every launch
+ZEN_MD_PAPER_EDGE_ALPHA = 16   # falloff ink alpha at the window edges
+ZEN_MD_PAPER_PLATEAU = 0.5     # central width fraction kept fully bright
+
 # ── Modifier helpers ─────────────────────────────────────────────
 # Qt swaps Control/Meta on macOS: MetaModifier is the physical ⌃ key there.
 _CTRL_MOD = (

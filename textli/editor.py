@@ -63,6 +63,7 @@ from textli import formulas as md_formulas
 from textli import links as md_links
 from textli import mathrender
 from textli import openfile
+from textli import paper as md_paper
 from textli import positions as md_positions
 from textli import search as md_search
 from textli import settings as md_settings
@@ -157,6 +158,39 @@ _MD_FEATURES = (
 _MATH_SCHEME = "textli-math"
 
 
+def _paper_light_frame(view) -> tuple[float, float]:
+    """The light-falloff frame for a view's paper: the enclosing editor's
+    card in viewport coordinates, so the gradient spans the whole sheet and
+    meets the chrome's seamlessly at the view edge. A view without an editor
+    parent (bare in tests) falls back to its own viewport."""
+    card_rect = getattr(view.parentWidget(), "_card_rect", None)
+    if card_rect is None:
+        return 0.0, float(view.viewport().width())
+    card = card_rect()
+    off = view.viewport().mapTo(view.parentWidget(), QPoint(0, 0)).x()
+    return float(card.x()) - off, float(card.width())
+
+
+class _WriteView(QPlainTextEdit):
+    """The write view: a stock plain-text editor except for the paper
+    surface (grain + light, see paper.py) painted under the source text."""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self._paper = True
+
+    def set_paper(self, on: bool):
+        """Paper surface on/off; repaint."""
+        if on != self._paper:
+            self._paper = on
+            self.viewport().update()
+
+    def paintEvent(self, event):
+        if self._paper:
+            md_paper.paint(self, event.rect(), *_paper_light_frame(self))
+        super().paintEvent(event)
+
+
 class _ReadingView(QTextBrowser):
     """The rendered read view. Paints a *thick* strike line over removed-text
     ranges itself — Qt derives the built-in strikeout's thickness from the font
@@ -196,6 +230,9 @@ class _ReadingView(QTextBrowser):
         self._focus_reading = False
         self._focus_dim = QColor(ZEN_MD_BG)
         self._focus_dim.setAlpha(ZEN_MD_FOCUS_DIM_MAX)
+        # Paper surface (grain + light, see paper.py) painted under the
+        # rendered text — the same sheet the write view wears.
+        self._paper = True
         # Caret: hide Qt's near-invisible 1px line and paint a soft block over
         # the current glyph instead (vim-style), so it's findable on the warm
         # page while placing comments. Repaint as it moves or focus shifts.
@@ -203,6 +240,12 @@ class _ReadingView(QTextBrowser):
         self._caret_color = QColor(ZEN_MD_CARET)
         self.cursorPositionChanged.connect(self.viewport().update)
         self.selectionChanged.connect(self.viewport().update)
+
+    def set_paper(self, on: bool):
+        """Paper surface on/off; repaint."""
+        if on != self._paper:
+            self._paper = on
+            self.viewport().update()
 
     def set_heading_rules(self, positions: list[int]):
         """Replace the set of block positions to underline; repaint."""
@@ -272,6 +315,8 @@ class _ReadingView(QTextBrowser):
         painter.end()
 
     def paintEvent(self, event):
+        if self._paper:
+            md_paper.paint(self, event.rect(), *_paper_light_frame(self))
         doc = self.document()
         layout = doc.documentLayout()
         off = QPointF(-self.horizontalScrollBar().value(),
@@ -484,6 +529,7 @@ def editor_help_html() -> str:
         ("⌘↵", "Toggle full-window width"),
         ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
+        ("⌘⇧P", "Paper surface — grain &amp; light under the text; off = the flat page (persists)"),
         ("⌘+ / ⌘- / ⌘0", "Font size bigger / smaller / reset (persists)"),
         ("⌘⇧→ / ⌘⇧← / ⌘⇧↓", "Content column wider / narrower / reset (persists)"),
         ("⌘J", "Word-jump overlay (Easymotion-style two-key jump)"),
@@ -637,6 +683,10 @@ class ZenMarkdownEditor(QWidget):
         self._read_focus = settings.value(
             "zen_md/read_focus", False, type=bool
         )
+        # Paper surface (⌘⇧P): grain + light painted under the text of both
+        # views — the page as material rather than a flat hex (paper.py).
+        # Off is the flat page; persists like ⌘T.
+        self._paper = settings.value("zen_md/paper", True, type=bool)
 
         # Load persisted content-column width preference (adjustable like font).
         self._content_width = settings.value(
@@ -732,7 +782,7 @@ class ZenMarkdownEditor(QWidget):
 
         # Pure text — no title, no hint bar, no badges. Discoverability
         # lives in F1 help; the card is just the writing surface.
-        self._editor = QPlainTextEdit(text)
+        self._editor = _WriteView(text)
         self._editor.setFont(QFont(FONT_FAMILY, self._font_size))
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self._editor.setReadOnly(self._read_only)
@@ -778,6 +828,10 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.cursorPositionChanged.connect(self._update_read_focus)
         self._rendered.cursorPositionChanged.connect(self._refresh_status)
         layout.addWidget(self._rendered, stretch=1)
+
+        # Both views wear the same sheet (or, toggled off, the same flat page).
+        self._editor.set_paper(self._paper)
+        self._rendered.set_paper(self._paper)
 
         # Animates accept/reject on the read view (fade what leaves, settle what
         # stays) before the source edit lands.
@@ -1142,6 +1196,16 @@ class ZenMarkdownEditor(QWidget):
             self._typewriter_recenter()
         self._flash_mode(
             "TYPEWRITER" if self._typewriter else "TYPEWRITER OFF")
+
+    def _toggle_paper(self):
+        """⌘⇧P — the paper surface (grain + light) on/off (persists). Off is
+        the flat page; the toggle exists to compare the two live."""
+        self._paper = not self._paper
+        md_settings.app_settings().setValue("zen_md/paper", self._paper)
+        self._editor.set_paper(self._paper)
+        self._rendered.set_paper(self._paper)
+        self.update()   # the card chrome wears the same sheet
+        self._flash_mode("PAPER" if self._paper else "PAPER OFF")
 
     def _typewriter_recenter(self):
         """Keep the caret line at the typewriter height (~40% down the
@@ -3029,6 +3093,11 @@ class ZenMarkdownEditor(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(ZEN_MD_BG))
         p.drawRoundedRect(card, ZEN_MD_CARD_RADIUS, ZEN_MD_CARD_RADIUS)
+        # The paper surface over the base fill — the views inside paint
+        # their patches with this same card as light frame (paper.py).
+        if self._paper:
+            md_paper.paint_card(p, card, ZEN_MD_CARD_RADIUS,
+                                self.devicePixelRatioF())
 
         p.end()
 
@@ -3181,6 +3250,15 @@ class ZenMarkdownEditor(QWidget):
         if (event.key() == Qt.Key.Key_T
                 and event.modifiers() & _CTRL_MOD):
             self._toggle_typewriter()
+            return True
+
+        # Ctrl+Shift+P — paper surface (grain + light) on/off (persists, works
+        # in either view). Must precede plain Ctrl+P: print doesn't exclude
+        # shift, so it would swallow this combo otherwise.
+        if (event.key() == Qt.Key.Key_P
+                and event.modifiers() & _CTRL_MOD
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._toggle_paper()
             return True
 
         # Ctrl+P — print (works in either view)

@@ -57,6 +57,7 @@ complete key reference, or see the
 | `⌘.` | Section focus (dim all but the current paragraph / section) |
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
 | `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
+| `⌘⇧P` | Paper surface — grain & light on the page; off = flat (persists) |
 | `c` / `s` | Comment / suggest a change on the selection (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |
