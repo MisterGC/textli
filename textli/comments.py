@@ -276,30 +276,63 @@ def _word_tokens(s: str) -> list[tuple[str, int, int]]:
 
 
 def map_rendered_span(
-    rendered: str, source: str, r0: int, r1: int
+    rendered: str, source: str, r0: int, r1: int, math=None
 ) -> tuple[int, int] | None:
     """Map a rendered-view selection ``[r0, r1)`` (indices into the rendered
     plain text) to a source slice ``[s0, s1)`` suitable for :func:`wrap`.
 
-    Works by aligning the *word sequences* of the rendered text and the clean
+    Works by aligning the *token sequences* of the rendered text and the clean
     source with :class:`difflib.SequenceMatcher` — robust on real documents
     (tables, links, lists) where a greedy char scan drifts. The selection snaps
-    to whole words it overlaps. Returns ``None`` when it can't be mapped.
-    """
+    to whole tokens it overlaps. Returns ``None`` when it can't be mapped.
+
+    ``math`` optionally carries formula anchors as ``(rendered_pos, src_start,
+    src_end)`` tuples — each a rendered object-replacement char (the image a
+    formula renders to) standing in for a ``$…$`` / ``$$…$$`` span in
+    ``source``. A formula image has no word characters, so without this a
+    selection landing on one has nothing to anchor to; with it, each formula
+    becomes a single alignable token on both sides, so a formula can be
+    commented or suggested on like prose. Passed as data, so this module stays
+    free of the math parser (`formulas.py`)."""
     if r1 <= r0:
         return None
     clean, clean2src = _strip_with_map(source)
     if not clean2src:
         return None
-    rtok = _word_tokens(rendered)
-    ctok = _word_tokens(clean)
-    if not rtok or not ctok:
-        return None
+    src2clean = {si: ci for ci, si in enumerate(clean2src)}
 
-    # First/last rendered word overlapping the selection.
-    start_wi = next((i for i, t in enumerate(rtok) if t[2] > r0), None)
+    # Combined token streams: words plus one synthetic token per formula anchor
+    # (key, start, end, raw) — ``raw`` is the formula's ``(src_start, src_end)``
+    # when the token is a formula, else None. With no anchors these reduce to
+    # the plain word tokens, so the wordwise behavior is unchanged.
+    rcombined = [(t[0], t[1], t[2], None) for t in _word_tokens(rendered)]
+    ccombined: list = []
+    covered: list[tuple[int, int]] = []      # clean ranges owned by a formula
+    for k, (rpos, s0, s1) in enumerate(math or []):
+        cs = src2clean.get(s0)
+        ce = src2clean.get(s1 - 1)
+        if cs is None or ce is None:
+            continue                         # formula absent from clean source
+        key = f"\x00m{k}\x00"                 # unique, can't collide with a word
+        rcombined.append((key, rpos, rpos + 1, None))
+        ccombined.append((key, cs, ce + 1, (s0, s1)))
+        covered.append((cs, ce + 1))
+
+    def in_formula(a: int, b: int) -> bool:
+        return any(not (b <= cs or a >= ce) for cs, ce in covered)
+
+    for t in _word_tokens(clean):            # drop a formula's TeX letters —
+        if not in_formula(t[1], t[2]):       # noise the rendered stream lacks
+            ccombined.append((t[0], t[1], t[2], None))
+    if not rcombined or not ccombined:
+        return None
+    rcombined.sort(key=lambda t: t[1])
+    ccombined.sort(key=lambda t: t[1])
+
+    # First/last rendered token overlapping the selection.
+    start_wi = next((i for i, t in enumerate(rcombined) if t[2] > r0), None)
     end_wi = None
-    for i, t in enumerate(rtok):
+    for i, t in enumerate(rcombined):
         if t[1] < r1:
             end_wi = i
         else:
@@ -307,25 +340,35 @@ def map_rendered_span(
     if start_wi is None or end_wi is None or end_wi < start_wi:
         return None
 
-    # rendered-word-index -> clean-word-index, via matching blocks.
+    # rendered-token-index -> clean-token-index, via matching blocks.
     matcher = difflib.SequenceMatcher(
-        None, [t[0] for t in rtok], [t[0] for t in ctok], autojunk=False
+        None, [t[0] for t in rcombined], [t[0] for t in ccombined],
+        autojunk=False
     )
     r2c: dict[int, int] = {}
     for blk in matcher.get_matching_blocks():
         for k in range(blk.size):
             r2c[blk.a + k] = blk.b + k
 
-    cs = _nearest_mapped(r2c, start_wi, len(rtok), forward=True)
-    ce = _nearest_mapped(r2c, end_wi, len(rtok), forward=False)
+    cs = _nearest_mapped(r2c, start_wi, len(rcombined), forward=True)
+    ce = _nearest_mapped(r2c, end_wi, len(rcombined), forward=False)
     if cs is None or ce is None or ce < cs:
         return None
-    clean_start = ctok[cs][1]
-    clean_end = ctok[ce][2]
-    if clean_start >= len(clean2src) or clean_end - 1 >= len(clean2src):
-        return None
-    s0 = clean2src[clean_start]
-    s1 = clean2src[clean_end - 1] + 1
+    start_tok, end_tok = ccombined[cs], ccombined[ce]
+    # A formula token maps straight to its source span; a word token maps
+    # through the clean→source table.
+    if start_tok[3] is not None:
+        s0 = start_tok[3][0]
+    else:
+        if start_tok[1] >= len(clean2src):
+            return None
+        s0 = clean2src[start_tok[1]]
+    if end_tok[3] is not None:
+        s1 = end_tok[3][1]
+    else:
+        if end_tok[2] - 1 >= len(clean2src):
+            return None
+        s1 = clean2src[end_tok[2] - 1] + 1
     if s1 <= s0:
         return None
     return s0, s1

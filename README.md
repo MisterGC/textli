@@ -58,7 +58,7 @@ complete key reference, or see the
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
 | `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
 | `⌘⇧P` | Paper surface — grain & light on the page; off = flat (persists) |
-| `c` / `s` | Comment / suggest a change on the selection (reading view) |
+| `c` / `s` | Comment / suggest a change on the selection — text or a formula (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |
 | `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |

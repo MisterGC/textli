@@ -79,7 +79,7 @@ See [Opening files](opening.md) for how the matching works.
 | Key | Action |
 | --- | --- |
 | `v` | Visual mode — extend a selection with the motions above |
-| `c` | Comment the selection (or reveal/edit the comment under the caret) |
+| `c` | Comment the selection or the formula under the caret (or reveal/edit the comment there) |
 | `]c / [c` | Step to the next / previous comment |
 | `Enter` · `⇧D` | Reveal-edit · delete the active comment |
 

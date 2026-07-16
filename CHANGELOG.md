@@ -25,8 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   math renders as typeset formulas in the reading view (STIX Two Math via
   ziamath — pure Python, no LaTeX install), sized and inked to blend with the
   Literata prose: inline math rides the text baseline, display math stands
-  centered on its own line, and formulas render inside commented spans and
-  print with the page. The write view tints math spans as you type. Delimiter
+  centered on its own line, and a formula can be commented or suggested on
+  from the reading view like any other span — its image maps back to its
+  `$…$` source, the mark renders over the formula, and it prints with the
+  page. The write view tints math spans as you type. Delimiter
   rules are pandoc's and deliberately strict — prose dollars ("costs $5 and
   $10"), `\$` escapes, and `$` inside code never trigger math — and a formula
   that doesn't parse falls back to its raw TeX in a code chip, so a typo

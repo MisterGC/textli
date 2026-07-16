@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections import namedtuple
+from collections import deque, namedtuple
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -589,7 +589,7 @@ def editor_help_html() -> str:
     <p style='{hdr}'>Reading view — comments</p>
     <table>{rows([
         ("v", "Visual mode — extend a selection with the motions above"),
-        ("c", "Comment the selection (or reveal/edit the comment under the caret)"),
+        ("c", "Comment the selection or the formula under the caret (or reveal/edit the comment there)"),
         ("]c / [c", "Step to the next / previous comment"),
         ("Enter · ⇧D", "Reveal-edit · delete the active comment"),
     ])}</table>
@@ -741,6 +741,10 @@ class ZenMarkdownEditor(QWidget):
         # one ]c / [c stepped onto; _comment_field is the inline reveal editor.
         self._rendered_comments: list = []
         self._rendered_suggestions: list = []
+        # Formula anchors for the current render: (rendered_pos, src_start,
+        # src_end) per math image, so a selection landing on a formula (a
+        # word-less image) maps back to its `$…$` source and can be annotated.
+        self._rendered_math: list = []
         # Play the accept/reject animation (tests turn this off for determinism).
         self._suggest_animate = True
         self._active_comment = -1
@@ -1949,12 +1953,49 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.setCharFormat(imf)
             # A display formula alone in its paragraph (just the image's
-            # object-replacement character) is centered, LaTeX-style.
-            if formula.display and block_text.strip() == "￼":
+            # object-replacement character) is centered, LaTeX-style. A comment
+            # wraps it in sentinels that haven't been cleared yet, so strip
+            # those before the alone-in-paragraph test.
+            core = (block_text.replace(md_comments.SENTINEL_START, "")
+                    .replace(md_comments.SENTINEL_END, "").strip())
+            if formula.display and core == "￼":
                 bf = QTextBlockFormat()
                 bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
                 cur.setPosition(block_pos)
                 cur.mergeBlockFormat(bf)
+
+    def _compute_math_anchors(self, doc, maths: dict, source: str) -> list:
+        """Pair each rendered formula image with its ``$…$`` span in ``source``,
+        as ``(rendered_pos, src_start, src_end)`` — the data
+        :func:`comments.map_rendered_span` needs to let a formula (a word-less
+        image) anchor a comment/suggestion. Formulas are matched to the source
+        by TeX in document order (a per-TeX FIFO), so a formula that failed to
+        render — it stays raw TeX, never an image — simply isn't paired, and
+        repeated formulas still line up left to right."""
+        if not maths:
+            return []
+        raw: dict[str, deque] = {}
+        for f in md_formulas.parse(source):
+            raw.setdefault(f.tex, deque()).append((f.start, f.end))
+        prefix = f"{_MATH_SCHEME}://"
+        anchors: list = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    entry = maths.get(int(cf.toImageFormat().name()[len(prefix):]))
+                    q = raw.get(entry[0].tex) if entry is not None else None
+                    if q:
+                        s0, s1 = q.popleft()
+                        anchors.append((frag.position(), s0, s1))
+                it += 1
+            block = block.next()
+        anchors.sort()
+        return anchors
 
     def _render_markdown(self, source: str):
         """Render ``source`` into the read view: comment spans are highlighted
@@ -1973,6 +2014,7 @@ class ZenMarkdownEditor(QWidget):
         doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
+        self._rendered_math = self._compute_math_anchors(doc, maths, source)
         self._style_links(doc)
         # Pad lines are *insertions* — they must land before the mark pass
         # records comment/suggestion offsets. The band/token pass below only
@@ -2031,6 +2073,9 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
+        # Preview mutates the source (suggestions accepted); its offsets don't
+        # map back to the editable source, so no formula anchors here.
+        self._rendered_math = []
         self._active_comment = -1
         self._settle_rendered_layout()
         self._update_read_focus()
@@ -3539,6 +3584,15 @@ class ZenMarkdownEditor(QWidget):
             self._set_visual(False)
             self._begin_comment_for_span(r0, r1)
             return
+        # No selection: reveal a comment under the caret, or — sitting on a
+        # bare formula — comment that formula (a single-key gesture; the image
+        # is one character, tedious to visual-select).
+        pos = cur.position()
+        if self._comment_at_position(pos) < 0:
+            anchor = self._formula_at_position(pos)
+            if anchor is not None:
+                self._begin_comment_for_span(anchor[0], anchor[0] + 1)
+                return
         self._reveal_active_comment()   # no selection → reveal comment under caret
 
     def _comment_at_position(self, pos: int) -> int:
@@ -3547,6 +3601,14 @@ class ZenMarkdownEditor(QWidget):
             if start <= pos <= end:
                 return i
         return -1
+
+    def _formula_at_position(self, pos: int):
+        """The formula anchor ``(rendered_pos, src_start, src_end)`` whose image
+        the caret sits on, else None."""
+        for anchor in self._rendered_math:
+            if anchor[0] == pos:
+                return anchor
+        return None
 
     # ── Read-view comment interaction ──
 
@@ -3700,7 +3762,8 @@ class ZenMarkdownEditor(QWidget):
         no-op — it never yanks you out of the reading view."""
         rendered = self._rendered.document().toPlainText()
         src = self._editor.toPlainText()
-        mapped = md_comments.map_rendered_span(rendered, src, r0, r1)
+        mapped = md_comments.map_rendered_span(
+            rendered, src, r0, r1, math=self._rendered_math)
         if mapped is None:
             return
         s0, s1 = mapped
@@ -3779,7 +3842,8 @@ class ZenMarkdownEditor(QWidget):
         if r0 == r1:
             s0 = s1 = md_comments.map_position(rendered, src, r0)
         else:
-            mapped = md_comments.map_rendered_span(rendered, src, r0, r1)
+            mapped = md_comments.map_rendered_span(
+                rendered, src, r0, r1, math=self._rendered_math)
             if mapped is None:
                 return
             s0, s1 = md_comments.snap_out_of_code(src, *mapped)
