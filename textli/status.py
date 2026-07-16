@@ -45,6 +45,18 @@ def write_status(mode: str, words: int, session_delta: int) -> str:
 _SECTION_MAX = 48
 
 
+def source_status(label: str, progress: float, lines: int) -> str:
+    """The read-view whisper while a followed source file is on the page:
+    ``textli/editor.py:2455 · 2,041 lines · 42%``.
+
+    Deliberately unlike :func:`read_status` — no reading estimate (code isn't
+    prose read at 220 wpm) and no review counts (a peeked file carries no
+    annotations). ``label`` already includes any ``:line`` anchor."""
+    progress = min(1.0, max(0.0, progress))
+    return SEP.join([_crumb(label), f"{lines:,} lines",
+                     f"{round(progress * 100)}%"])
+
+
 def _crumb(text: str) -> str:
     """Elide a leading breadcrumb (section or link) to keep the whisper from
     crowding out the progress and review counts."""

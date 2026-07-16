@@ -12,12 +12,26 @@ still gets its band, the code simply stays ink.
 from __future__ import annotations
 
 try:
-    from pygments.lexers import get_lexer_by_name
+    from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
     from pygments.token import Comment, Keyword, Number, Operator, String
     from pygments.util import ClassNotFound
     _HAVE_PYGMENTS = True
 except ImportError:                                   # pragma: no cover
     _HAVE_PYGMENTS = False
+
+
+def language_for_filename(name: str) -> str:
+    """The fence tag for a file called ``name`` ('editor.py' → 'python'), or
+    '' when Pygments can't name one — the block then still gets its band and
+    simply stays ink, exactly like an untagged fence."""
+    if not _HAVE_PYGMENTS or not name:
+        return ""
+    try:
+        lexer = get_lexer_for_filename(name)
+    except ClassNotFound:
+        return ""
+    aliases = getattr(lexer, "aliases", None)
+    return aliases[0] if aliases else ""
 
 
 def _classify(ttype) -> str | None:

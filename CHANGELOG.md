@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Follow source references from the reading view** (#37) — notes about code
+  cite it the way everyone writes it, in inline code: `textli/editor.py:2455`,
+  `view.py:80-95`, or just `editor.py`. Those are now followable. `↵` opens the
+  file **in place** as a read-only code page — monospace on the code band,
+  syntax-highlighted, sized and widened for code rather than prose, with the
+  referenced lines lifted out of the band onto the bright page — and `gb`/`⌫`
+  walks back to exactly where you were reading. So a design doc can stay lean
+  and still have its evidence one keystroke away, live, instead of pasted in
+  and going stale. References resolve beside the document first, then up
+  through its parent folders (a doc in `mgc/groundwork/` finds
+  `textli/editor.py` without spelling out `../../`); a bare `editor.py` is
+  looked up in the enclosing repository and, if two files share the name,
+  whispers *not found* rather than guessing. The search never leaves that
+  repository, and an unreadable folder reads as "not there" instead of
+  failing. Prose chips are left alone — a reference needs a file extension or
+  a line anchor, so `--read`, `.md` and `QWidget` stay unfollowable. A link to
+  a text file opens as source too, while a link to something meant to be
+  *seen* (`page.html`, an image) still goes to the system handler. Source
+  pages are peeks, not buffers: no editing, no comments or suggestions
+  (`c`/`s`/`⌘R` whisper), and they never enter the open history.
+
 - **Paper surface** — the page is material now, not a flat hex: whisper-level
   procedural grain plus a horizontal light falloff (fully bright across the
   reading column, a few percent darker in warm ink toward the window edges)

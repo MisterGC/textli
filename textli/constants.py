@@ -120,6 +120,25 @@ ZEN_MD_SUGGEST_ADD = QColor("#A83E2E")
 ZEN_SEARCH_HIT = QColor(201, 162, 39, 60)        # every hit — soft wash
 ZEN_SEARCH_CURRENT = QColor(201, 162, 39, 135)   # the current hit — stronger
 
+# Read-view source pages (#37): a followed `path:line` reference opens the
+# file as one code band, and the referenced lines lift back out of it onto the
+# bright page — the anchor marked by *removing* shade rather than adding a
+# color, so nothing new enters the palette and the page stays calm.
+ZEN_MD_SRC_ANCHOR_BG = ZEN_MD_BG
+# Code is a denser medium than prose, and it needs a different page. Two
+# adjustments, both only while a source page is up:
+#   * the size steps down to what an editor would use (16 → 13) — the reading
+#     size is chosen for a proportional face and leaves code enormous;
+#   * the column grows to fit SRC_COLUMNS of it. The prose measure (700px)
+#     holds ~50 characters of mono at the reading size and ~60 at the code
+#     size, while source is written for ~80: without the wider sheet, wrapping
+#     would be the rule instead of the exception it should be. The card snaps
+#     back the moment `gb` returns to the document.
+# ⌘+/⌘- still ride on top of both, and a column already wider than this keeps
+# its width.
+ZEN_MD_SRC_FONT_SCALE = 0.82
+ZEN_MD_SRC_COLUMNS = 88
+
 # ── Paper surface (grain + light) ────────────────────────────────
 # The page is material, not a flat hex: paper.py paints whisper-level grain
 # and a horizontal light falloff under the text of both views — tuned to sit
