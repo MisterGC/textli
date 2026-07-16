@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stops feeling clinically flat. `⌘⇧P` toggles the surface off for the flat
   page (persists).
 
+### Fixed
+
+- Rendering a large document is no longer slow: the read view's styling passes
+  ran their format merges outside an edit block, so every one settled the whole
+  document layout again — about 1 ms per merge on a 4,500-line file, against
+  1.5 µs batched — and the code-block pass matched each syntax span against
+  every line of its fence rather than just the lines the span covers. Both
+  costs grew faster than the document, so they were invisible on ordinary
+  prose and crippling on anything long: together they took 15 s to render a
+  4,500-line file, now 0.37 s (and well under 0.1 s for an ordinary one).
+
 ## [0.3.0] - 2026-07-14
 
 ### Added

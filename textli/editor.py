@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import bisect
 import os
 import re
 from collections import deque, namedtuple
+from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -156,6 +158,24 @@ _MD_FEATURES = (
 # the markdown handed to setMarkdown (`![math](textli-math://N)`), resolved
 # from the document's resource cache — never from disk or network.
 _MATH_SCHEME = "textli-math"
+
+
+@contextmanager
+def _batched(doc):
+    """Group everything done to ``doc`` inside into one edit block.
+
+    Not about undo (the read view is read-only) but about *cost*: outside an
+    edit block every ``mergeCharFormat`` / ``mergeBlockFormat`` settles the
+    document layout again, so a styling pass is quadratic in the document —
+    measured at ~1 ms per merge on a 4,500-line file (15 s to open one),
+    against ~1.5 µs batched. The render passes each wrap their loop in this.
+    """
+    cur = QTextCursor(doc)
+    cur.beginEditBlock()
+    try:
+        yield
+    finally:
+        cur.endEditBlock()
 
 
 def _paper_light_frame(view) -> tuple[float, float]:
@@ -2188,29 +2208,44 @@ class ZenMarkdownEditor(QWidget):
         inset.setLeftMargin(pad_h)
         inset.setRightMargin(pad_h)
 
-        for lang, lines in runs:
-            for pos, _text in lines:
+        with _batched(doc):
+            for lang, lines in runs:
+                # One merge for the whole run: mergeBlockFormat applies to every
+                # block the selection touches, and a source page's run is the
+                # entire file (#37) — per-block cursors made that a per-line
+                # relayout.
                 cur = QTextCursor(doc)
-                cur.setPosition(pos)
+                cur.setPosition(lines[0][0])
+                cur.setPosition(lines[-1][0], QTextCursor.MoveMode.KeepAnchor)
                 cur.mergeBlockFormat(inset)
-            # Map spans in the joined code back through per-line offsets
-            # (a span can cross lines — split it at each boundary).
-            joined = "\n".join(text for _pos, text in lines)
-            offsets = []                       # (join_start, join_end, doc_pos)
-            at = 0
-            for pos, text in lines:
-                offsets.append((at, at + len(text), pos))
-                at += len(text) + 1            # the joining "\n"
-            for s, e, cls in md_codeblocks.highlight_spans(joined, lang):
-                for js, je, dpos in offsets:
-                    lo, hi = max(s, js), min(e, je)
-                    if lo >= hi:
-                        continue
-                    cur = QTextCursor(doc)
-                    cur.setPosition(dpos + (lo - js))
-                    cur.setPosition(dpos + (hi - js),
-                                    QTextCursor.MoveMode.KeepAnchor)
-                    cur.mergeCharFormat(token_fmts[cls])
+                # Map spans in the joined code back through per-line offsets
+                # (a span can cross lines — split it at each boundary).
+                joined = "\n".join(text for _pos, text in lines)
+                offsets = []                   # (join_start, join_end, doc_pos)
+                starts = []
+                at = 0
+                for pos, text in lines:
+                    offsets.append((at, at + len(text), pos))
+                    starts.append(at)
+                    at += len(text) + 1        # the joining "\n"
+                for s, e, cls in md_codeblocks.highlight_spans(joined, lang):
+                    # Start at the line the span opens on and walk only the
+                    # lines it actually covers (nearly always one). Scanning
+                    # every line per span is quadratic — 21M steps on a
+                    # whole-file fence (#37), 1.7 s of a 2 s open.
+                    i = max(0, bisect.bisect_right(starts, s) - 1)
+                    while i < len(offsets):
+                        js, je, dpos = offsets[i]
+                        if js >= e:
+                            break
+                        lo, hi = max(s, js), min(e, je)
+                        if lo < hi:
+                            cur = QTextCursor(doc)
+                            cur.setPosition(dpos + (lo - js))
+                            cur.setPosition(dpos + (hi - js),
+                                            QTextCursor.MoveMode.KeepAnchor)
+                            cur.mergeCharFormat(token_fmts[cls])
+                        i += 1
         self._rendered.set_code_bands(
             [(lines[0][0], lines[-1][0]) for _lang, lines in runs])
 
@@ -2232,11 +2267,12 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         fmt = QTextCharFormat()
         fmt.setBackground(ZEN_MD_CODE_BLOCK_BG)
-        for pos, length in ranges:
-            cur = QTextCursor(doc)
-            cur.setPosition(pos)
-            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
-            cur.mergeCharFormat(fmt)
+        with _batched(doc):
+            for pos, length in ranges:
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(fmt)
 
     def _style_reading_rhythm(self, doc):
         """Long-form breathing room (#33): a proportional line height on prose
@@ -2275,6 +2311,7 @@ class ZenMarkdownEditor(QWidget):
         render in the reading serif. Format-only: shifts no offsets."""
         mono = QTextCharFormat()
         mono.setFontFamilies([FONT_FAMILY])
+        ranges = []
         block = doc.begin()
         while block.isValid():
             is_fence = block.blockFormat().hasProperty(
@@ -2283,13 +2320,15 @@ class ZenMarkdownEditor(QWidget):
             while not it.atEnd():
                 frag = it.fragment()
                 if is_fence or frag.charFormat().fontFixedPitch():
-                    cur = QTextCursor(doc)
-                    cur.setPosition(frag.position())
-                    cur.setPosition(frag.position() + frag.length(),
-                                    QTextCursor.MoveMode.KeepAnchor)
-                    cur.mergeCharFormat(mono)
+                    ranges.append((frag.position(), frag.length()))
                 it += 1
             block = block.next()
+        with _batched(doc):
+            for pos, length in ranges:
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(mono)
 
     def _style_quotes(self, doc):
         """Blockquotes read as a different voice: hint-gray ink, plus a thin
