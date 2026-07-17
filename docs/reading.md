@@ -28,8 +28,11 @@ number of sessions.
   link says it's not supported yet; a link to a missing file whispers
   *not found* rather than creating one. Links are set in the zen link blue
   so they read as links without shouting; clicking works too.
-- `gb` or ++backspace++ — **back** to the document you followed the last
-  link from, exactly where you left it.
+- ++enter++ on a `` `path:line` `` reference in inline code opens that
+  **source file** read-only at that line — see
+  [Source references](#source-references).
+- `gb` or ++backspace++ — **back** to the document (or source file) you
+  followed the last link or reference from, exactly where you left it.
 - `gl` — **links overview**: the same jump-list popup as `gh`, listing every
   link with where it points; `j`/`k` preview, ++enter++ follows the
   selection.
@@ -101,12 +104,75 @@ source, and carries the code band onto paper. Images referenced by a
 relative path (`![](diagram.png)`) render against the document's own
 folder, so they show wherever you launched textli from.
 
+## Mathematics
+
+Write math the way pandoc reads it — `$E = mc^2$` inline, `$$…$$` for a
+display formula — and the reading view sets it as real typeset
+mathematics: STIX Two Math glyphs in the page's ink, sized to the prose,
+inline math riding the text baseline, display math centered on its own
+line. Because the source is plain pandoc math, the same file converts to
+LaTeX or PDF untouched when a draft grows into a paper. In the write view,
+math spans are tinted so a formula reads as a formula while you type it.
+
+The delimiter rules are pandoc's, deliberately strict so prose never turns
+into math by accident: the opening `$` must hug a non-space, the closing
+`$` must not be followed by a digit — so "costs $5 and $10" stays prose —
+`\$` escapes a literal dollar, and a `$` inside inline code or a fenced
+block is always code. Rendering covers the TeX math subset (fractions,
+integrals, sums, roots, matrices, Greek — no custom macros); a formula
+that doesn't parse falls back to its raw TeX in a code chip, so a typo
+mid-edit never breaks the page. See
+[`examples/math.md`](https://github.com/MisterGC/textli/blob/main/examples/math.md)
+for a tour.
+
+A formula reviews like any other span: select it and `c` comments it, `s`
+suggests a replacement — or just put the caret on it and press `c`. The
+mark renders over the formula itself, and the annotation lands on the
+`$…$` source, so what you're reviewing is the maths, not a picture of it.
+
+## Source references
+
+Notes *about code* cite it the way everyone writes it, in inline code:
+`` `textli/editor.py:2455` ``, `` `view.py:80-95` ``, or just
+`` `editor.py` ``. In the reading view those are followable — ++enter++ on
+one opens the file **in place**, read-only, at that line, and `gb` (or
+++backspace++) brings you back exactly where you were. A design doc can
+stay lean and still have its evidence one keystroke away, live rather than
+pasted in and going stale.
+
+The page you land on is unmistakably code: monospace on the code band,
+syntax-highlighted, sized and widened for code instead of prose, with the
+referenced lines lifted out of the band onto the bright page. `⌘+`/`⌘-`
+zoom it, `/` searches it, vim motions move through it — it simply isn't
+editable. `c`, `s` and `⌘R` whisper instead of acting: textli annotates
+Markdown documents, and a file you're peeking at isn't one. A source page
+is transient, too — it never enters your opening history.
+
+Where it looks:
+
+- **Beside the document first**, then up through its parent folders — so a
+  doc in `mgc/groundwork/` finds `textli/editor.py` without spelling out
+  `../../`.
+- **A bare name** (`editor.py` — the way prose actually names a module) is
+  then looked up in the enclosing repository. If two files share the name,
+  textli whispers *not found* rather than guessing.
+- **Never past that repository** (or your home folder). An unreadable
+  folder reads as "not there" instead of failing.
+
+A reference needs a file extension or a line anchor, so prose chips like
+`--read`, `.md` or `QWidget` are left alone. Links work too:
+`[the module](../textli/editor.py)` opens as source, while a link to
+something meant to be *seen* — `page.html`, an image, a PDF — still goes to
+the system handler.
+
 ## Comments
 
 Select a span with `v` + motions, then:
 
 - `c` — comment the selection (or, with the caret on an existing commented
-  span, reveal and edit that comment).
+  span, reveal and edit that comment). With the caret on a bare
+  [formula](#mathematics), `c` comments that formula — the image is one
+  character, tedious to visual-select.
 - `]c` / `[c` — step to the next / previous comment.
 - ++enter++ — reveal-edit the active comment; `⇧D` deletes it.
 

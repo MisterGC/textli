@@ -7,9 +7,15 @@ paper-toned column of text, vim keybindings, and nothing else on screen.
 `⌘R` flips the source into a rendered **reading view** made for
 proof-reading and review — navigate with vim motions, leave inline
 **comments**, and propose **suggestions** (track changes) that the author
-accepts or rejects with a keystroke. All annotations are stored inline as
+accepts or rejects with a keystroke. Notes *about code* stay connected to it:
+a reference like `textli/editor.py:2455` is followable — `↵` opens the file
+read-only at that line, `gb` comes back — so a design doc reads with its
+evidence one keystroke away. All annotations are stored inline as
 [CriticMarkup](http://criticmarkup.com/), so they travel with the file and
-diff cleanly in git — no sidecar files.
+diff cleanly in git — no sidecar files. Pandoc-style **TeX math** — `$…$`
+inline, `$$…$$` display — renders as typeset formulas in the reading view,
+so scientific notes read like the paper they'll become (and convert to one
+via pandoc, untouched).
 
 textli started life as the editor inside [grafli](https://github.com/MisterGC/grafli),
 the keyboard-driven diagram tool, and is now its own package — usable
@@ -54,10 +60,12 @@ complete key reference, or see the
 | `⌘.` | Section focus (dim all but the current paragraph / section) |
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
 | `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
-| `c` / `s` | Comment / suggest a change on the selection (reading view) |
+| `⌘⇧P` | Paper surface — grain & light on the page; off = flat (persists) |
+| `c` / `s` | Comment / suggest a change on the selection — text or a formula (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |
 | `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |
+| `↵` | Follow the source reference under the caret — `` `editor.py:42` `` opens the file read-only at that line (reading view) |
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |

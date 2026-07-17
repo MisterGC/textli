@@ -14,6 +14,13 @@ proof-reading and review.
   but the paragraph you're in, and an Easymotion-style word-jump overlay.
 - **A real reading view** — the rendered document, navigated with the same
   vim motions, with a headings outline (`gh`) one key away.
+- **Typeset mathematics** — pandoc-style `$…$` and `$$…$$` render as real
+  formulas in the reading view, and review like any other span; the source
+  stays plain pandoc, so a draft converts to LaTeX or PDF untouched.
+- **Notes that reach their code** — a reference like `textli/editor.py:2455`
+  is followable: ++enter++ opens the file read-only at that line, `gb` comes
+  back. A design doc keeps its evidence one keystroke away instead of
+  pasted in and going stale.
 - **Inline review** — leave comments on any span, or propose *suggestions*
   (track changes) that the author steps through and accepts or rejects with
   single keys. A changes overview (`gc`) lists every mark; a clean preview

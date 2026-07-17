@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import bisect
 import os
 import re
-from collections import namedtuple
+from collections import deque, namedtuple
+from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -27,6 +29,7 @@ from PySide6.QtGui import (
     QColor,
     QDesktopServices,
     QFont,
+    QFontInfo,
     QFontMetricsF,
     QGradient,
     QKeyEvent,
@@ -58,11 +61,15 @@ from PySide6.QtWidgets import (
 
 from textli import codeblocks as md_codeblocks
 from textli import comments as md_comments
+from textli import formulas as md_formulas
 from textli import links as md_links
+from textli import mathrender
 from textli import openfile
+from textli import paper as md_paper
 from textli import positions as md_positions
 from textli import search as md_search
 from textli import settings as md_settings
+from textli import srcref as md_srcref
 from textli import status as md_status
 from textli.open_overlay import OpenFileOverlay
 from textli.search_overlay import SearchOverlay
@@ -97,6 +104,9 @@ from textli.constants import (
     ZEN_MD_FONT_SIZE_MIN,
     ZEN_MD_HEADING_SIZES,
     ZEN_MD_READING_LINE_HEIGHT,
+    ZEN_MD_SRC_ANCHOR_BG,
+    ZEN_MD_SRC_COLUMNS,
+    ZEN_MD_SRC_FONT_SCALE,
     ZEN_MD_SYNTAX_COLOR,
     ZEN_MD_CARET,
     ZEN_MD_FOCUS_CORE_LINES,
@@ -132,6 +142,11 @@ _SUGGEST_IDX_PROP = QTextFormat.Property.UserProperty + 8
 # can fade the part that leaves and settle the part that stays.
 _SUGGEST_ROLE_PROP = QTextFormat.Property.UserProperty + 9
 _ROLE_REMOVED, _ROLE_ADDED = 0, 1
+# Block-format property tagging the small empty blocks that pad a fence run
+# (see :meth:`_pad_code_blocks`). They are inserted *inside* the run and
+# inherit its block format, so without a tag they read as code lines — which
+# a source page's line numbering (#37) would then be off by.
+_PAD_BLOCK_PROP = QTextFormat.Property.UserProperty + 10
 
 # A rendered suggestion: its overall [start, end) range, the source ``Mark``, and
 # the rendered sub-ranges of its removed (struck) and added text — either may be
@@ -147,6 +162,62 @@ _MD_FEATURES = (
     QTextDocument.MarkdownFeature.MarkdownDialectGitHub
     | QTextDocument.MarkdownFeature.MarkdownNoHTML
 )
+
+# URL scheme for rendered math images. Each formula becomes an image ref in
+# the markdown handed to setMarkdown (`![math](textli-math://N)`), resolved
+# from the document's resource cache — never from disk or network.
+_MATH_SCHEME = "textli-math"
+
+
+@contextmanager
+def _batched(doc):
+    """Group everything done to ``doc`` inside into one edit block.
+
+    Not about undo (the read view is read-only) but about *cost*: outside an
+    edit block every ``mergeCharFormat`` / ``mergeBlockFormat`` settles the
+    document layout again, so a styling pass is quadratic in the document —
+    measured at ~1 ms per merge on a 4,500-line file (15 s to open one),
+    against ~1.5 µs batched. The render passes each wrap their loop in this.
+    """
+    cur = QTextCursor(doc)
+    cur.beginEditBlock()
+    try:
+        yield
+    finally:
+        cur.endEditBlock()
+
+
+def _paper_light_frame(view) -> tuple[float, float]:
+    """The light-falloff frame for a view's paper: the enclosing editor's
+    card in viewport coordinates, so the gradient spans the whole sheet and
+    meets the chrome's seamlessly at the view edge. A view without an editor
+    parent (bare in tests) falls back to its own viewport."""
+    card_rect = getattr(view.parentWidget(), "_card_rect", None)
+    if card_rect is None:
+        return 0.0, float(view.viewport().width())
+    card = card_rect()
+    off = view.viewport().mapTo(view.parentWidget(), QPoint(0, 0)).x()
+    return float(card.x()) - off, float(card.width())
+
+
+class _WriteView(QPlainTextEdit):
+    """The write view: a stock plain-text editor except for the paper
+    surface (grain + light, see paper.py) painted under the source text."""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self._paper = True
+
+    def set_paper(self, on: bool):
+        """Paper surface on/off; repaint."""
+        if on != self._paper:
+            self._paper = on
+            self.viewport().update()
+
+    def paintEvent(self, event):
+        if self._paper:
+            md_paper.paint(self, event.rect(), *_paper_light_frame(self))
+        super().paintEvent(event)
 
 
 class _ReadingView(QTextBrowser):
@@ -171,6 +242,11 @@ class _ReadingView(QTextBrowser):
         # inset is impossible that way — the view paints the band across
         # the full column and the margins inset only the code.
         self._code_bands: list[tuple[int, int]] = []
+        # Source pages (#37): the block range a followed `path:line` reference
+        # pointed at, lifted back out of the code band onto the bright page.
+        # Painted with the bands, for the same reason — it must span the full
+        # column, which a block background (inset with the code) cannot.
+        self._anchor_band: tuple[int, int] | None = None
         # Blockquote bars, same (first_pos, last_pos) shape per quote run.
         self._quote_bars: list[tuple[int, int]] = []
         self._quote_bar_color = QColor(ZEN_MD_SYNTAX_COLOR)
@@ -188,6 +264,9 @@ class _ReadingView(QTextBrowser):
         self._focus_reading = False
         self._focus_dim = QColor(ZEN_MD_BG)
         self._focus_dim.setAlpha(ZEN_MD_FOCUS_DIM_MAX)
+        # Paper surface (grain + light, see paper.py) painted under the
+        # rendered text — the same sheet the write view wears.
+        self._paper = True
         # Caret: hide Qt's near-invisible 1px line and paint a soft block over
         # the current glyph instead (vim-style), so it's findable on the warm
         # page while placing comments. Repaint as it moves or focus shifts.
@@ -195,6 +274,12 @@ class _ReadingView(QTextBrowser):
         self._caret_color = QColor(ZEN_MD_CARET)
         self.cursorPositionChanged.connect(self.viewport().update)
         self.selectionChanged.connect(self.viewport().update)
+
+    def set_paper(self, on: bool):
+        """Paper surface on/off; repaint."""
+        if on != self._paper:
+            self._paper = on
+            self.viewport().update()
 
     def set_heading_rules(self, positions: list[int]):
         """Replace the set of block positions to underline; repaint."""
@@ -205,6 +290,12 @@ class _ReadingView(QTextBrowser):
         """Replace the set of code-band block ranges; repaint."""
         self._code_bands = list(bands)
         self.viewport().update()
+
+    def set_anchor_band(self, span: tuple[int, int] | None):
+        """Lift the block range ``span`` out of the code band; None clears."""
+        if span != self._anchor_band:
+            self._anchor_band = span
+            self.viewport().update()
 
     def set_quote_bars(self, bars: list[tuple[int, int]]):
         """Replace the set of blockquote bar ranges; repaint."""
@@ -242,33 +333,44 @@ class _ReadingView(QTextBrowser):
         return max(2.0, self.font().pointSizeF() * 0.16)
 
     def _paint_code_bands(self, doc, layout, off):
-        """The deeper-paper band behind each fence run, spanning the full
-        text column. Painted *before* the text so glyphs sit on top."""
+        """The deeper-paper band behind each fence run, spanning the full text
+        column, and — on a source page — the anchored lines lifted back out of
+        it onto the bright page. Painted *before* the text so glyphs sit on
+        top of both."""
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(ZEN_MD_CODE_BLOCK_BG)
         margin = doc.documentMargin()
         x1 = margin + off.x()
         x2 = self.viewport().width() - margin + off.x()
-        for first, last in self._code_bands:
+
+        def plate(first, last, radius):
             b0, b1 = doc.findBlock(first), doc.findBlock(last)
             if not (b0.isValid() and b1.isValid()):
-                continue
+                return
             top = layout.blockBoundingRect(b0).top() + off.y()
             bottom = layout.blockBoundingRect(b1).bottom() + off.y()
             if bottom < 0 or top > self.viewport().height():
-                continue
+                return
             painter.drawRoundedRect(QRectF(x1, top, x2 - x1, bottom - top),
-                                    6.0, 6.0)
+                                    radius, radius)
+
+        painter.setBrush(ZEN_MD_CODE_BLOCK_BG)
+        for first, last in self._code_bands:
+            plate(first, last, 6.0)
+        if self._anchor_band is not None:
+            painter.setBrush(ZEN_MD_SRC_ANCHOR_BG)
+            plate(*self._anchor_band, 3.0)
         painter.end()
 
     def paintEvent(self, event):
+        if self._paper:
+            md_paper.paint(self, event.rect(), *_paper_light_frame(self))
         doc = self.document()
         layout = doc.documentLayout()
         off = QPointF(-self.horizontalScrollBar().value(),
                       -self.verticalScrollBar().value())
-        if self._code_bands:
+        if self._code_bands or self._anchor_band:
             self._paint_code_bands(doc, layout, off)
         super().paintEvent(event)
         if (self._strikes or self._heading_rules or self._quote_bars
@@ -459,7 +561,10 @@ def editor_help_html() -> str:
     <p style='color:{accent};font-weight:bold;font-size:15px'>textli — the zen Markdown editor</p>
     <p>A focused, distraction-free editor. It opens ready to type (vim NORMAL
     mode); <b>⌘R</b> flips to a rendered <b>reading view</b> for proof-reading,
-    commenting, and suggesting changes. <b>F1</b> shows this help.</p>
+    commenting, and suggesting changes. Pandoc-style TeX math
+    (<span style='font-family:monospace'>$…$</span> inline,
+    <span style='font-family:monospace'>$$…$$</span> display) renders as
+    typeset formulas there. <b>F1</b> shows this help.</p>
     <p>The faint line in the card's corner is the <b>whisper status</b>: while
     writing it shows the vim mode, word count, and this session's delta; while
     reading, the section you're in (or where a link goes when the caret is on
@@ -473,6 +578,7 @@ def editor_help_html() -> str:
         ("⌘↵", "Toggle full-window width"),
         ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
+        ("⌘⇧P", "Paper surface — grain &amp; light under the text; off = the flat page (persists)"),
         ("⌘+ / ⌘- / ⌘0", "Font size bigger / smaller / reset (persists)"),
         ("⌘⇧→ / ⌘⇧← / ⌘⇧↓", "Content column wider / narrower / reset (persists)"),
         ("⌘J", "Word-jump overlay (Easymotion-style two-key jump)"),
@@ -525,14 +631,15 @@ def editor_help_html() -> str:
         ("gh", "Headings overview — j/k preview live, Enter keeps, Esc restores your spot"),
         ("gl", "Links overview — same jump-list; Enter follows the picked link"),
         ("↵", "Follow the link under the caret — a <span style='font-family:monospace'>.md</span> opens in place, web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
-        ("gb / ⌫", "Back to the document the last link was followed from"),
+        ("↵", "…or the source reference under it — <span style='font-family:monospace'>editor.py</span>, <span style='font-family:monospace'>textli/editor.py:2455</span>, <span style='font-family:monospace'>view.py:80-95</span> — opens the file read-only at that line"),
+        ("gb / ⌫", "Back to the document (or source file) the last link or reference was followed from"),
         ("go", "Open another file (stays in the reading view)"),
     ])}</table>
 
     <p style='{hdr}'>Reading view — comments</p>
     <table>{rows([
         ("v", "Visual mode — extend a selection with the motions above"),
-        ("c", "Comment the selection (or reveal/edit the comment under the caret)"),
+        ("c", "Comment the selection or the formula under the caret (or reveal/edit the comment there)"),
         ("]c / [c", "Step to the next / previous comment"),
         ("Enter · ⇧D", "Reveal-edit · delete the active comment"),
     ])}</table>
@@ -626,6 +733,10 @@ class ZenMarkdownEditor(QWidget):
         self._read_focus = settings.value(
             "zen_md/read_focus", False, type=bool
         )
+        # Paper surface (⌘⇧P): grain + light painted under the text of both
+        # views — the page as material rather than a flat hex (paper.py).
+        # Off is the flat page; persists like ⌘T.
+        self._paper = settings.value("zen_md/paper", True, type=bool)
 
         # Load persisted content-column width preference (adjustable like font).
         self._content_width = settings.value(
@@ -680,6 +791,10 @@ class ZenMarkdownEditor(QWidget):
         # one ]c / [c stepped onto; _comment_field is the inline reveal editor.
         self._rendered_comments: list = []
         self._rendered_suggestions: list = []
+        # Formula anchors for the current render: (rendered_pos, src_start,
+        # src_end) per math image, so a selection landing on a formula (a
+        # word-less image) maps back to its `$…$` source and can be annotated.
+        self._rendered_math: list = []
         # Play the accept/reject animation (tests turn this off for determinism).
         self._suggest_animate = True
         self._active_comment = -1
@@ -707,9 +822,17 @@ class ZenMarkdownEditor(QWidget):
         self._overview_view = None
         # `gl` follows the picked row (a link); `gc`/`gh` just land on it.
         self._overview_targets = None
-        # In-session back-stack of (path, caret, scroll) for link navigation —
-        # `gb`/Backspace walks it. Not persisted (position memory owns resume).
+        # In-session back-stack of (path, source, caret, scroll) for link
+        # navigation — `gb`/Backspace walks it. Not persisted (position memory
+        # owns resume).
         self._nav_stack = []
+        # A followed source reference (#37) puts a read-only code page on the
+        # read view: `_source_path` is the file it shows, `_file_path` still
+        # names the document we're peeking *from* (and the one being edited).
+        # Transient by design — never in the open history or position memory.
+        self._source_path: Path | None = None
+        self._source_ref: md_srcref.SourceRef | None = None
+        self._source_lines = 0
         # Transient toast for link targets / grafli notice / nav landings.
         self._notice_flash: QLabel | None = None
         self._last_notice = ""            # test seam for the toast text
@@ -721,7 +844,7 @@ class ZenMarkdownEditor(QWidget):
 
         # Pure text — no title, no hint bar, no badges. Discoverability
         # lives in F1 help; the card is just the writing surface.
-        self._editor = QPlainTextEdit(text)
+        self._editor = _WriteView(text)
         self._editor.setFont(QFont(FONT_FAMILY, self._font_size))
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self._editor.setReadOnly(self._read_only)
@@ -767,6 +890,10 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.cursorPositionChanged.connect(self._update_read_focus)
         self._rendered.cursorPositionChanged.connect(self._refresh_status)
         layout.addWidget(self._rendered, stretch=1)
+
+        # Both views wear the same sheet (or, toggled off, the same flat page).
+        self._editor.set_paper(self._paper)
+        self._rendered.set_paper(self._paper)
 
         # Animates accept/reject on the read view (fade what leaves, settle what
         # stays) before the source edit lands.
@@ -864,7 +991,17 @@ class ZenMarkdownEditor(QWidget):
             return
         src = self._editor.toPlainText()
         words = md_status.word_count(src)
-        if self._rendered_mode:
+        if self._rendered_mode and self._source_path is not None:
+            sb = self._rendered.verticalScrollBar()
+            span = sb.maximum() + sb.pageStep()
+            progress = (sb.value() + sb.pageStep()) / span if span else 1.0
+            anchor = ""
+            if self._source_ref is not None and self._source_ref.lines:
+                first, last = self._source_ref.lines
+                anchor = f":{first}" + (f"-{last}" if last != first else "")
+            text = md_status.source_status(
+                f"{self._source_label()}{anchor}", progress, self._source_lines)
+        elif self._rendered_mode:
             sb = self._rendered.verticalScrollBar()
             span = sb.maximum() + sb.pageStep()
             progress = (sb.value() + sb.pageStep()) / span if span else 1.0
@@ -1077,7 +1214,13 @@ class ZenMarkdownEditor(QWidget):
         local edit (which would re-save and echo back through the watcher)."""
         self._reloading = True
         try:
-            if self._rendered_mode:
+            if self._rendered_mode and self._source_path is not None:
+                # A source peek is up: take the new text into the buffer, but
+                # leave the page alone — re-rendering would yank the reader off
+                # the file they're looking at. `gb` renders the fresh document.
+                self._editor.setPlainText(text)
+                self._apply_heading_layout()
+            elif self._rendered_mode:
                 sb = self._rendered.verticalScrollBar()
                 scroll, caret = sb.value(), self._rendered.textCursor().position()
                 self._editor.setPlainText(text)
@@ -1131,6 +1274,16 @@ class ZenMarkdownEditor(QWidget):
             self._typewriter_recenter()
         self._flash_mode(
             "TYPEWRITER" if self._typewriter else "TYPEWRITER OFF")
+
+    def _toggle_paper(self):
+        """⌘⇧P — the paper surface (grain + light) on/off (persists). Off is
+        the flat page; the toggle exists to compare the two live."""
+        self._paper = not self._paper
+        md_settings.app_settings().setValue("zen_md/paper", self._paper)
+        self._editor.set_paper(self._paper)
+        self._rendered.set_paper(self._paper)
+        self.update()   # the card chrome wears the same sheet
+        self._flash_mode("PAPER" if self._paper else "PAPER OFF")
 
     def _typewriter_recenter(self):
         """Keep the caret line at the typewriter height (~40% down the
@@ -1291,7 +1444,14 @@ class ZenMarkdownEditor(QWidget):
         that doesn't exist yet opens empty — created on first save, like the
         CLI. The undo stack starts fresh (undo never crosses files)."""
         if path == self._file_path:
+            self._leave_source_page()    # 'go' back to the doc we're peeking from
             return
+        if self._source_path is not None:    # a new document ends any peek
+            self._source_path = None
+            self._source_ref = None
+            self._source_lines = 0
+            self._rendered.set_anchor_band(None)
+            self._relayout_card()
         self._save_position()   # remember the file being left
         if self._autosave_timer is not None and self._autosave_timer.isActive():
             self._autosave_timer.stop()
@@ -1656,9 +1816,10 @@ class ZenMarkdownEditor(QWidget):
         self._help_dialog = dlg
         dlg.show()
 
-    def _toggle_full_width(self):
-        """⌘↵: expand the card to fill the window (and back to the column)."""
-        self._full_width = not self._full_width
+    def _relayout_card(self):
+        """Re-fit the card and its views to the current card rect — after
+        anything that changes the column: ⌘↵, a width step, or a source page
+        asking for a code-shaped sheet."""
         layout = self.layout()
         if layout:
             self._apply_card_margins(layout)
@@ -1666,9 +1827,16 @@ class ZenMarkdownEditor(QWidget):
         self.update()
         self._refresh_status()
 
+    def _toggle_full_width(self):
+        """⌘↵: expand the card to fill the window (and back to the column)."""
+        self._full_width = not self._full_width
+        self._relayout_card()
+
     def _toggle_rendered(self):
         """⌘R: switch between the source editor and a read-only rendered
         Markdown view — a quick read perspective <-> edit perspective."""
+        if self._on_source_page():
+            return          # a peeked file has no write view to flip to
         self._close_overview()
         # Search highlights address one view's offsets — stale in the other.
         # The query itself survives: n/N re-runs it against the new view.
@@ -1799,6 +1967,125 @@ class ZenMarkdownEditor(QWidget):
             doc.setBaseUrl(
                 QUrl.fromLocalFile(str(self._file_path.parent) + "/"))
 
+    def _prepare_math(self, md: str):
+        """Swap each pandoc math span (`formulas.py`) for an image ref and
+        rasterize it (`mathrender.py`) at the read view's current font size,
+        ink color and device pixel ratio. Returns the rewritten markdown plus
+        ``{ref index: (Formula, RenderedFormula)}`` for the post-setMarkdown
+        pass. Identity on documents without math. A formula ziamath can't
+        parse stays in the text as raw TeX — in a code chip when single-line,
+        verbatim otherwise — so a typo never breaks the page."""
+        spans = md_formulas.parse(md)
+        if not spans:
+            return md, {}
+        font = self._rendered.font()
+        px_size = float(QFontInfo(font).pixelSize())
+        descent = QFontMetricsF(font).descent()
+        dpr = self._rendered.devicePixelRatioF()
+        maths: dict[int, tuple] = {}
+
+        def replace(i: int, f: md_formulas.Formula) -> str:
+            rendered = mathrender.render(
+                f.tex, display=f.display, px_size=px_size,
+                color=ZEN_TEXT_COLOR.name(), dpr=dpr, descent=descent)
+            if rendered is None:
+                raw = md[f.start:f.end]
+                return raw if "\n" in raw else md_formulas.code_span(raw)
+            maths[i] = (f, rendered)
+            return f"![math]({_MATH_SCHEME}://{i})"
+
+        return md_formulas.substitute(md, spans, replace), maths
+
+    def _apply_math_images(self, doc, maths: dict):
+        """Attach the rendered formulas to ``doc`` — resources must land
+        *after* setMarkdown (it clears the resource cache) — and pin each
+        image fragment's metrics: explicit logical size, bottom alignment for
+        baseline-exact inline math (the image carries descent padding for
+        precisely this), centered placement for deeper inline formulas, and a
+        centered paragraph for display math standing alone. Format-only —
+        shifts no text offsets, so the sentinel mark pass stays untouched."""
+        if not maths:
+            return
+        for i, (_, rendered) in maths.items():
+            doc.addResource(QTextDocument.ResourceType.ImageResource,
+                            QUrl(f"{_MATH_SCHEME}://{i}"), rendered.image)
+        prefix = f"{_MATH_SCHEME}://"
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    targets.append((frag.position(), frag.length(),
+                                    cf.toImageFormat(), block.position(),
+                                    block.text()))
+                it += 1
+            block = block.next()
+        for pos, length, imf, block_pos, block_text in targets:
+            entry = maths.get(int(imf.name()[len(prefix):]))
+            if entry is None:
+                continue
+            formula, rendered = entry
+            dpr = rendered.image.devicePixelRatio()
+            imf.setWidth(rendered.image.width() / dpr)
+            imf.setHeight(rendered.image.height() / dpr)
+            if not formula.display:
+                imf.setVerticalAlignment(
+                    QTextCharFormat.VerticalAlignment.AlignBottom
+                    if rendered.align_bottom
+                    else QTextCharFormat.VerticalAlignment.AlignMiddle)
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.setCharFormat(imf)
+            # A display formula alone in its paragraph (just the image's
+            # object-replacement character) is centered, LaTeX-style. A comment
+            # wraps it in sentinels that haven't been cleared yet, so strip
+            # those before the alone-in-paragraph test.
+            core = (block_text.replace(md_comments.SENTINEL_START, "")
+                    .replace(md_comments.SENTINEL_END, "").strip())
+            if formula.display and core == "￼":
+                bf = QTextBlockFormat()
+                bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                cur.setPosition(block_pos)
+                cur.mergeBlockFormat(bf)
+
+    def _compute_math_anchors(self, doc, maths: dict, source: str) -> list:
+        """Pair each rendered formula image with its ``$…$`` span in ``source``,
+        as ``(rendered_pos, src_start, src_end)`` — the data
+        :func:`comments.map_rendered_span` needs to let a formula (a word-less
+        image) anchor a comment/suggestion. Formulas are matched to the source
+        by TeX in document order (a per-TeX FIFO), so a formula that failed to
+        render — it stays raw TeX, never an image — simply isn't paired, and
+        repeated formulas still line up left to right."""
+        if not maths:
+            return []
+        raw: dict[str, deque] = {}
+        for f in md_formulas.parse(source):
+            raw.setdefault(f.tex, deque()).append((f.start, f.end))
+        prefix = f"{_MATH_SCHEME}://"
+        anchors: list = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    entry = maths.get(int(cf.toImageFormat().name()[len(prefix):]))
+                    q = raw.get(entry[0].tex) if entry is not None else None
+                    if q:
+                        s0, s1 = q.popleft()
+                        anchors.append((frag.position(), s0, s1))
+                it += 1
+            block = block.next()
+        anchors.sort()
+        return anchors
+
     def _render_markdown(self, source: str):
         """Render ``source`` into the read view: comment spans are highlighted
         (bodies hidden, revealed on demand), and suggestion marks are styled as
@@ -1810,10 +2097,15 @@ class ZenMarkdownEditor(QWidget):
         park the caret against a *correct* scroll range, never the lazy-layout
         estimate (which would clamp the restore and leave the view unable to
         scroll to the real document end)."""
+        self._apply_read_face()
         md, spans = md_comments.to_rendered(source)
+        md, maths = self._prepare_math(md)
         doc = self._rendered.document()
+        self._rendered.set_anchor_band(None)   # documents carry no anchor
         doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
+        self._apply_math_images(doc, maths)
+        self._rendered_math = self._compute_math_anchors(doc, maths, source)
         self._style_links(doc)
         # Pad lines are *insertions* — they must land before the mark pass
         # records comment/suggestion offsets. The band/token pass below only
@@ -1832,14 +2124,43 @@ class ZenMarkdownEditor(QWidget):
         self._update_read_focus()
         self._refresh_status()   # review counts / progress just changed
 
+    def _apply_read_face(self):
+        """The read view's face follows what's on the page (#37, D3): the
+        monospace face for a source peek — so the page says *code* before a
+        word of it is read — and the Literata reading face for a document.
+
+        A source page also steps down to a code size: the reading size is
+        chosen for prose in a proportional face, and holding code to it would
+        wrap most lines of a file written for ~80 columns."""
+        if self._source_path is None:
+            self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
+            return
+        self._rendered.setFont(QFont(FONT_FAMILY, self._source_font_size()))
+
+    def _source_font_size(self) -> int:
+        """The code size a source page renders at — the reading size stepped
+        down, so ⌘+/⌘- still zoom the peek along with everything else."""
+        return max(ZEN_MD_FONT_SIZE_MIN,
+                   round(self._font_size * ZEN_MD_SRC_FONT_SCALE))
+
+    def _source_column_width(self) -> int:
+        """The column a source page asks for: ``ZEN_MD_SRC_COLUMNS`` of the
+        code face, plus the band's own inset. Measured rather than assumed —
+        it has to follow the font zoom, and the whole point is that the file
+        lands on the page the way it was written."""
+        fm = QFontMetricsF(QFont(FONT_FAMILY, self._source_font_size()))
+        advance = fm.horizontalAdvance("x") or 8.0
+        inset = 2 * max(ZEN_MD_CODE_PAD_H, round(self._font_size * 1.75))
+        return int(advance * ZEN_MD_SRC_COLUMNS) + inset + 16
+
     # ── `p` clean preview: the fully-accepted prose, no markup ──
 
     def _toggle_preview(self):
         """Flip the read view between track-changes and a clean preview of the
         prose with every suggestion accepted and comments unwrapped — a calm
         proof-read of the result, without mutating the source."""
-        if not self._rendered_mode:
-            return
+        if not self._rendered_mode or self._source_path is not None:
+            return                   # a source page has no prose to preview
         self._preview = not self._preview
         sb = self._rendered.verticalScrollBar()
         pos = sb.value()
@@ -1856,8 +2177,10 @@ class ZenMarkdownEditor(QWidget):
         Settled like :meth:`_render_markdown`, for the same scroll-restore
         correctness."""
         doc = self._rendered.document()
-        doc.setMarkdown(md_comments.accepted(source), _MD_FEATURES)
+        md, maths = self._prepare_math(md_comments.accepted(source))
+        doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
+        self._apply_math_images(doc, maths)
         self._style_links(doc)
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
@@ -1870,10 +2193,239 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.set_strikes([])
         self._rendered_comments = []
         self._rendered_suggestions = []
+        # Preview mutates the source (suggestions accepted); its offsets don't
+        # map back to the editable source, so no formula anchors here.
+        self._rendered_math = []
         self._active_comment = -1
         self._settle_rendered_layout()
         self._update_read_focus()
         self._refresh_status()
+
+    # ── Source pages (#37): a followed `path:line` reference, read-only ──
+
+    def _render_source(self, path: Path) -> bool:
+        """Put ``path`` on the read view as one read-only code page — the file
+        wrapped in a single fence and run through the *clean* render path.
+
+        Never the annotation path: a source file's ``{==`` or ``$…$`` is code,
+        not CriticMarkup or math, so the comment/suggestion/formula passes are
+        skipped outright rather than fed text they'd misparse. Returns False
+        when the file can't be read (the caller keeps the reader where it is).
+        """
+        try:
+            code = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        code = code.rstrip("\n")
+        self._source_lines = code.count("\n") + 1 if code else 0
+        self._apply_read_face()
+        self._relayout_card()      # the code page asks for a wider column
+        doc = self._rendered.document()
+        doc.setMarkdown(
+            md_srcref.fence(code, md_codeblocks.language_for_filename(path.name)),
+            _MD_FEATURES)
+        # One edit block around every pass: a source page is one huge fence,
+        # so each pass that settled separately cost a full-document layout.
+        with _batched(doc):
+            self._pad_code_blocks(doc)
+            self._style_code_blocks(doc)
+            self._apply_source_font(doc)
+            self._wrap_source_lines(doc)
+        # Nothing annotatable is on the page; clear what the document left.
+        self._rendered.set_strikes([])
+        self._rendered.set_heading_rules([])
+        self._rendered.set_quote_bars([])
+        self._rendered_comments = []
+        self._rendered_suggestions = []
+        self._rendered_math = []
+        self._active_comment = -1
+        self._settle_rendered_layout()
+        self._update_read_focus()
+        self._refresh_status()
+        return True
+
+    def _apply_source_font(self, doc):
+        """Pin a source page to the monospace face — the whole page at once.
+
+        :meth:`_apply_code_font` walks fragment by fragment because a document
+        is mostly prose with code sprinkled through it; here *everything* is
+        code, so one merge over the document does the same job (the walk cost
+        5.4 s on a 4,500-line file). Merging only touches the family, so the
+        token colors applied above survive. Qt tags fenced code with the
+        generic family ``monospace``, which is why inheriting the document's
+        default font isn't enough."""
+        mono = QTextCharFormat()
+        mono.setFontFamilies([FONT_FAMILY])
+        with _batched(doc):
+            cur = QTextCursor(doc)
+            cur.select(QTextCursor.SelectionType.Document)
+            cur.mergeCharFormat(mono)
+
+    def _wrap_source_lines(self, doc):
+        """Let a source page's long lines wrap. Qt marks fenced code
+        non-breakable, so a line past the column would hide its tail behind a
+        horizontal scrollbar — fine for a document's short, authored-to-fit
+        sample, wrong for a file nobody wrote for a 65-character measure and
+        which can't be edited from here. Wrapping keeps every character on the
+        page (and the scrollbar off it); the few lines long enough to wrap are
+        the ones you'd otherwise never see the end of."""
+        blocks = self._source_blocks()
+        if not blocks:
+            return
+        wrap = QTextBlockFormat()
+        wrap.setNonBreakableLines(False)
+        with _batched(doc):
+            cur = QTextCursor(doc)
+            cur.setPosition(blocks[0].position())
+            cur.setPosition(blocks[-1].position(),
+                            QTextCursor.MoveMode.KeepAnchor)
+            cur.mergeBlockFormat(wrap)
+
+    def _source_blocks(self) -> list:
+        """The code blocks of a source page, one per line of the file, so this
+        indexes straight by line number. The band's padding blocks wear the
+        fence's own block format — they'd read as lines 1 and last — and are
+        excluded by their tag."""
+        doc = self._rendered.document()
+        out = []
+        block = doc.begin()
+        while block.isValid():
+            bf = block.blockFormat()
+            if (bf.hasProperty(QTextFormat.Property.BlockCodeFence)
+                    and not bf.hasProperty(_PAD_BLOCK_PROP)):
+                out.append(block)
+            block = block.next()
+        return out
+
+    def _goto_source_anchor(self, ref: md_srcref.SourceRef | None):
+        """Land on the referenced line and lift its range out of the band. No
+        anchor (a bare path) parks at the top, like opening any document."""
+        blocks = self._source_blocks()
+        span = ref.lines if ref is not None else None
+        if not blocks or span is None:
+            self._rendered.set_anchor_band(None)
+            cur = self._rendered.textCursor()
+            cur.movePosition(QTextCursor.MoveOperation.Start)
+            self._rendered.setTextCursor(cur)
+            self._rendered.verticalScrollBar().setValue(0)
+            return
+        first = min(max(span[0], 1), len(blocks)) - 1
+        last = min(max(span[1], 1), len(blocks)) - 1
+        self._rendered.set_anchor_band(
+            (blocks[first].position(), blocks[last].position()))
+        cur = self._rendered.textCursor()
+        cur.setPosition(blocks[first].position())
+        self._rendered.setTextCursor(cur)
+        # Centre the anchor rather than merely scrolling it into view: the
+        # point is to read *around* the line the document pointed at.
+        self._rendered.ensureCursorVisible()
+        sb = self._rendered.verticalScrollBar()
+        top = self._rendered.document().documentLayout().blockBoundingRect(
+            blocks[first]).top()
+        sb.setValue(int(min(max(0.0, top - self._rendered.viewport().height() / 2),
+                            sb.maximum())))
+
+    def _source_label(self, path: Path | None = None) -> str:
+        """How the whisper names a source page — repo-relative when we can."""
+        path = path or self._source_path
+        if path is None:
+            return ""
+        doc_dir = str(self._file_path.parent) if self._file_path else os.getcwd()
+        return md_srcref.display_path(str(path), doc_dir)
+
+    def _open_source(self, path: Path, ref=None) -> bool:
+        """Show ``path`` as a source page, remembering where we were so ``gb``
+        walks back. Read-view only — following a reference is a reading act."""
+        if not self._rendered_mode:
+            return False
+        where = self._nav_location()
+        self._source_path = path
+        self._source_ref = ref
+        if not self._render_source(path):
+            self._source_path, self._source_ref = where[1], None
+            self._flash_notice(f"cannot read: {path.name}")
+            return True
+        self._nav_stack.append(where)
+        self._goto_source_anchor(ref)
+        anchor = ""
+        if ref is not None and ref.lines:
+            first, last = ref.lines
+            anchor = f":{first}" + (f"-{last}" if last != first else "")
+        self._flash_notice(f"→ {self._source_label()}{anchor}")
+        return True
+
+    def _leave_source_page(self):
+        """Drop the peek and put the document back on the read view."""
+        if self._source_path is None:
+            return
+        self._source_path = None
+        self._source_ref = None
+        self._source_lines = 0
+        self._rendered.set_anchor_band(None)
+        self._relayout_card()      # the prose column comes back
+        if self._rendered_mode:
+            self._render_markdown(self._editor.toPlainText())
+
+    def _chip_text_at(self, pos: int) -> str:
+        """The inline-code chip covering read-view position ``pos`` ('' if the
+        caret isn't on one). Qt marks inline code fixed-pitch, so the chip is
+        the fixed-pitch run around the caret, within its block. Fenced blocks
+        are excluded — there every char is code, and none of it is a chip."""
+        doc = self._rendered.document()
+        block = doc.findBlock(pos)
+        if not block.isValid() or block.blockFormat().hasProperty(
+                QTextFormat.Property.BlockCodeFence):
+            return ""
+        start = block.position()
+        end = start + block.length() - 1        # excl. the block separator
+
+        def fixed(i: int) -> bool:
+            if not (start <= i < end):
+                return False
+            cur = QTextCursor(doc)
+            cur.setPosition(i + 1)              # charFormat is the char *before*
+            return cur.charFormat().fontFixedPitch()
+
+        # The block caret sits on the char to its right; fall back to the left
+        # one so a caret parked at a chip's end still reads it.
+        anchor = pos if fixed(pos) else (pos - 1 if fixed(pos - 1) else None)
+        if anchor is None:
+            return ""
+        i = j = anchor
+        while fixed(i - 1):
+            i -= 1
+        while fixed(j + 1):
+            j += 1
+        return block.text()[i - start:j - start + 1]
+
+    def _srcref_at_caret(self) -> md_srcref.SourceRef | None:
+        """The source reference under the read-view caret, if the chip there
+        is one. Pure string work — the filesystem is only touched on Enter."""
+        return md_srcref.parse_ref(
+            self._chip_text_at(self._rendered.textCursor().position()))
+
+    def _resolve_srcref(self, ref: md_srcref.SourceRef) -> Path | None:
+        """Where ``ref`` points, read from the current document's folder."""
+        doc_dir = str(self._file_path.parent) if self._file_path else os.getcwd()
+        found = md_srcref.resolve(ref.path, doc_dir)
+        return Path(found) if found else None
+
+    def _follow_source_ref_at_caret(self) -> bool:
+        """Enter on a `path:line` chip — open it as a source page. Returns
+        False when the caret isn't on a reference, so Enter keeps its other
+        meanings; a reference that resolves to nothing whispers, like a dead
+        link, rather than falling through to them."""
+        ref = self._srcref_at_caret()
+        if ref is None:
+            return False
+        target = self._resolve_srcref(ref)
+        if target is None:
+            self._flash_notice(f"not found: {ref.path}")
+            return True
+        if not md_srcref.is_texty(str(target)):
+            self._open_external(QUrl.fromLocalFile(str(target)))
+            return True
+        return self._open_source(target, ref)
 
     # ── Links: zen-styled in the read view, Enter follows in either view ──
 
@@ -1924,16 +2476,23 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         pad = QTextCharFormat()
         pad.setFontPointSize(max(4.0, self._font_size * 0.45))
+        # Tagged so passes that count code *lines* (a source page's anchor,
+        # #37) can tell breathing room from content — the inherited fence
+        # format makes them indistinguishable otherwise.
+        pad_block = QTextBlockFormat()
+        pad_block.setProperty(_PAD_BLOCK_PROP, True)
         for first, last, last_len in reversed(runs):
             cur = QTextCursor(doc)
             cur.setPosition(last + last_len)
             cur.insertBlock()             # empty block below, format kept
             cur.setBlockCharFormat(pad)
+            cur.mergeBlockFormat(pad_block)
             cur = QTextCursor(doc)
             cur.setPosition(first)
             cur.insertBlock()             # splits: the empty half stays above
             cur.movePosition(QTextCursor.MoveOperation.PreviousBlock)
             cur.setBlockCharFormat(pad)
+            cur.mergeBlockFormat(pad_block)
 
     def _style_code_blocks(self, doc):
         """Make code blocks land as code: every fenced block sits on a
@@ -1982,29 +2541,44 @@ class ZenMarkdownEditor(QWidget):
         inset.setLeftMargin(pad_h)
         inset.setRightMargin(pad_h)
 
-        for lang, lines in runs:
-            for pos, _text in lines:
+        with _batched(doc):
+            for lang, lines in runs:
+                # One merge for the whole run: mergeBlockFormat applies to every
+                # block the selection touches, and a source page's run is the
+                # entire file (#37) — per-block cursors made that a per-line
+                # relayout.
                 cur = QTextCursor(doc)
-                cur.setPosition(pos)
+                cur.setPosition(lines[0][0])
+                cur.setPosition(lines[-1][0], QTextCursor.MoveMode.KeepAnchor)
                 cur.mergeBlockFormat(inset)
-            # Map spans in the joined code back through per-line offsets
-            # (a span can cross lines — split it at each boundary).
-            joined = "\n".join(text for _pos, text in lines)
-            offsets = []                       # (join_start, join_end, doc_pos)
-            at = 0
-            for pos, text in lines:
-                offsets.append((at, at + len(text), pos))
-                at += len(text) + 1            # the joining "\n"
-            for s, e, cls in md_codeblocks.highlight_spans(joined, lang):
-                for js, je, dpos in offsets:
-                    lo, hi = max(s, js), min(e, je)
-                    if lo >= hi:
-                        continue
-                    cur = QTextCursor(doc)
-                    cur.setPosition(dpos + (lo - js))
-                    cur.setPosition(dpos + (hi - js),
-                                    QTextCursor.MoveMode.KeepAnchor)
-                    cur.mergeCharFormat(token_fmts[cls])
+                # Map spans in the joined code back through per-line offsets
+                # (a span can cross lines — split it at each boundary).
+                joined = "\n".join(text for _pos, text in lines)
+                offsets = []                   # (join_start, join_end, doc_pos)
+                starts = []
+                at = 0
+                for pos, text in lines:
+                    offsets.append((at, at + len(text), pos))
+                    starts.append(at)
+                    at += len(text) + 1        # the joining "\n"
+                for s, e, cls in md_codeblocks.highlight_spans(joined, lang):
+                    # Start at the line the span opens on and walk only the
+                    # lines it actually covers (nearly always one). Scanning
+                    # every line per span is quadratic — 21M steps on a
+                    # whole-file fence (#37), 1.7 s of a 2 s open.
+                    i = max(0, bisect.bisect_right(starts, s) - 1)
+                    while i < len(offsets):
+                        js, je, dpos = offsets[i]
+                        if js >= e:
+                            break
+                        lo, hi = max(s, js), min(e, je)
+                        if lo < hi:
+                            cur = QTextCursor(doc)
+                            cur.setPosition(dpos + (lo - js))
+                            cur.setPosition(dpos + (hi - js),
+                                            QTextCursor.MoveMode.KeepAnchor)
+                            cur.mergeCharFormat(token_fmts[cls])
+                        i += 1
         self._rendered.set_code_bands(
             [(lines[0][0], lines[-1][0]) for _lang, lines in runs])
 
@@ -2026,11 +2600,12 @@ class ZenMarkdownEditor(QWidget):
             block = block.next()
         fmt = QTextCharFormat()
         fmt.setBackground(ZEN_MD_CODE_BLOCK_BG)
-        for pos, length in ranges:
-            cur = QTextCursor(doc)
-            cur.setPosition(pos)
-            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
-            cur.mergeCharFormat(fmt)
+        with _batched(doc):
+            for pos, length in ranges:
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(fmt)
 
     def _style_reading_rhythm(self, doc):
         """Long-form breathing room (#33): a proportional line height on prose
@@ -2069,6 +2644,7 @@ class ZenMarkdownEditor(QWidget):
         render in the reading serif. Format-only: shifts no offsets."""
         mono = QTextCharFormat()
         mono.setFontFamilies([FONT_FAMILY])
+        ranges = []
         block = doc.begin()
         while block.isValid():
             is_fence = block.blockFormat().hasProperty(
@@ -2077,13 +2653,15 @@ class ZenMarkdownEditor(QWidget):
             while not it.atEnd():
                 frag = it.fragment()
                 if is_fence or frag.charFormat().fontFixedPitch():
-                    cur = QTextCursor(doc)
-                    cur.setPosition(frag.position())
-                    cur.setPosition(frag.position() + frag.length(),
-                                    QTextCursor.MoveMode.KeepAnchor)
-                    cur.mergeCharFormat(mono)
+                    ranges.append((frag.position(), frag.length()))
                 it += 1
             block = block.next()
+        with _batched(doc):
+            for pos, length in ranges:
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(mono)
 
     def _style_quotes(self, doc):
         """Blockquotes read as a different voice: hint-gray ink, plus a thin
@@ -2313,17 +2891,25 @@ class ZenMarkdownEditor(QWidget):
                 return True
             self._navigate_to_md(target, frag)
             return True
-        # any other resource — hand the local file to the system handler
-        if target.exists():
-            self._open_external(QUrl.fromLocalFile(str(target)))
-        else:
+        if not target.exists():
             self._flash_notice(f"not found: {target.name}")
+            return True
+        # Text opens as a source page (#37) — routed on what the file *is*, so
+        # an extensionless Makefile works and a mislabeled binary doesn't.
+        # Everything else is the system handler's, as before — including the
+        # text formats a link means you to *see* rendered (page.html).
+        if (self._rendered_mode and not md_srcref.prefers_external(str(target))
+                and md_srcref.is_texty(str(target))):
+            return self._open_source(target)
+        self._open_external(QUrl.fromLocalFile(str(target)))
         return True
 
     def _nav_location(self) -> tuple:
         """Where the reader is now — pushed on the back-stack before a link
-        navigates away, so ``gb`` can restore caret and scroll exactly."""
-        return (self._file_path,
+        navigates away, so ``gb`` can restore caret and scroll exactly. Two
+        paths: the document being read, and the source file peeked from it
+        (None when the document itself is on the page)."""
+        return (self._file_path, self._source_path,
                 self._rendered.textCursor().position(),
                 self._rendered.verticalScrollBar().value())
 
@@ -2331,31 +2917,52 @@ class ZenMarkdownEditor(QWidget):
         """Open another Markdown file in the reading view, remembering where we
         were so ``gb`` walks back. A same-file link with a fragment just jumps;
         a ``#fragment`` on another file lands on that heading."""
-        if target == self._file_path:
+        if target == self._file_path and self._source_path is None:
             if fragment:
                 self._jump_to_anchor(fragment)
             return
-        self._nav_stack.append(self._nav_location())
-        self._switch_file(target)
+        where = self._nav_location()
+        # A link followed *from* a source page returns to the document — the
+        # peek ends here, and _switch_file / _leave_source_page renders it.
+        self._leave_source_page()
+        if target != self._file_path:
+            self._switch_file(target)
+        self._nav_stack.append(where)
         if fragment:
             self._jump_to_anchor(fragment)
         self._flash_notice(f"→ {target.name}")
 
     def _navigate_back(self):
-        """gb / Backspace — return to the document a link was followed from,
-        exactly where it was left. A no-op (with a whisper) at the root."""
+        """gb / Backspace — return to the page a link or reference was followed
+        from, exactly where it was left: a document, or a source file peeked
+        from one. A no-op (with a whisper) at the root."""
         if not self._nav_stack:
             self._flash_notice("no page to go back to")
             return
-        path, pos, scroll = self._nav_stack.pop()
+        path, source, pos, scroll = self._nav_stack.pop()
+        was_source = self._source_path is not None
+        rendered = False
         if path is not None and path != self._file_path:
+            self._source_path = None       # let _switch_file render the doc
             self._switch_file(path)
+            rendered = True
+        self._source_path, self._source_ref = source, None
+        if source is not None:
+            self._render_source(source)    # back onto a source page (re-counts)
+        else:
+            self._source_lines = 0
+            if was_source and not rendered:
+                self._rendered.set_anchor_band(None)
+                self._relayout_card()      # the prose column comes back
+                self._render_markdown(self._editor.toPlainText())
         cur = self._rendered.textCursor()
         cur.setPosition(min(pos, self._rendered.document().characterCount() - 1))
         self._rendered.setTextCursor(cur)
         self._rendered.verticalScrollBar().setValue(scroll)
-        if path is not None:
-            self._flash_notice(f"← {path.name}")
+        name = source.name if source is not None else (
+            path.name if path is not None else "")
+        if name:
+            self._flash_notice(f"← {name}")
 
     def _link_hint(self, href: str) -> str:
         """A short 'where Enter goes' for the whisper: a filename for a file
@@ -2855,6 +3462,10 @@ class ZenMarkdownEditor(QWidget):
             h = max(self.height() - 40, 320)
         else:
             content_w = getattr(self, "_content_width", ZEN_MD_MAX_WIDTH)
+            if getattr(self, "_source_path", None) is not None:
+                # Code wants a code-shaped page (never narrower than the
+                # reader's own column), and the window still has the last word.
+                content_w = max(content_w, self._source_column_width())
             desired_w = content_w + 2 * ZEN_MD_CARD_INNER_PAD_H
             w = min(desired_w, max_w)
             h = min(self.height() * ZEN_MD_CARD_H_RATIO, self.height() - 60)
@@ -2932,6 +3543,11 @@ class ZenMarkdownEditor(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(ZEN_MD_BG))
         p.drawRoundedRect(card, ZEN_MD_CARD_RADIUS, ZEN_MD_CARD_RADIUS)
+        # The paper surface over the base fill — the views inside paint
+        # their patches with this same card as light frame (paper.py).
+        if self._paper:
+            md_paper.paint_card(p, card, ZEN_MD_CARD_RADIUS,
+                                self.devicePixelRatioF())
 
         p.end()
 
@@ -3084,6 +3700,15 @@ class ZenMarkdownEditor(QWidget):
         if (event.key() == Qt.Key.Key_T
                 and event.modifiers() & _CTRL_MOD):
             self._toggle_typewriter()
+            return True
+
+        # Ctrl+Shift+P — paper surface (grain + light) on/off (persists, works
+        # in either view). Must precede plain Ctrl+P: print doesn't exclude
+        # shift, so it would swallow this combo otherwise.
+        if (event.key() == Qt.Key.Key_P
+                and event.modifiers() & _CTRL_MOD
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._toggle_paper()
             return True
 
         # Ctrl+P — print (works in either view)
@@ -3264,6 +3889,8 @@ class ZenMarkdownEditor(QWidget):
             href = self._rendered_anchor_at_caret()
             if href and self._follow_rendered_link(href):
                 return True
+            if self._follow_source_ref_at_caret():
+                return True
             self._reveal_active_comment()
             return True
         if key == Qt.Key.Key_D and shift:
@@ -3351,10 +3978,22 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.setTextCursor(cur)
         self._refresh_status()
 
+    def _on_source_page(self) -> bool:
+        """True — with a whisper — when the read view is showing a peeked
+        source file. The gestures that author annotations refuse there:
+        textli annotates Markdown documents, and a source file isn't one
+        (#37). Named as a question so call sites read as a guard."""
+        if self._source_path is None:
+            return False
+        self._flash_notice("source is read-only — gb to go back")
+        return True
+
     def _comment_selection(self):
         """c — comment the visual selection; or, with no selection, reveal/edit
         the comment the caret is sitting on (so you can jump straight to editing
         an existing comment without `]c` or visual mode)."""
+        if self._on_source_page():
+            return
         cur = self._rendered.textCursor()
         if cur.hasSelection():
             if not cur.selectedText().strip():
@@ -3364,6 +4003,15 @@ class ZenMarkdownEditor(QWidget):
             self._set_visual(False)
             self._begin_comment_for_span(r0, r1)
             return
+        # No selection: reveal a comment under the caret, or — sitting on a
+        # bare formula — comment that formula (a single-key gesture; the image
+        # is one character, tedious to visual-select).
+        pos = cur.position()
+        if self._comment_at_position(pos) < 0:
+            anchor = self._formula_at_position(pos)
+            if anchor is not None:
+                self._begin_comment_for_span(anchor[0], anchor[0] + 1)
+                return
         self._reveal_active_comment()   # no selection → reveal comment under caret
 
     def _comment_at_position(self, pos: int) -> int:
@@ -3372,6 +4020,14 @@ class ZenMarkdownEditor(QWidget):
             if start <= pos <= end:
                 return i
         return -1
+
+    def _formula_at_position(self, pos: int):
+        """The formula anchor ``(rendered_pos, src_start, src_end)`` whose image
+        the caret sits on, else None."""
+        for anchor in self._rendered_math:
+            if anchor[0] == pos:
+                return anchor
+        return None
 
     # ── Read-view comment interaction ──
 
@@ -3525,7 +4181,8 @@ class ZenMarkdownEditor(QWidget):
         no-op — it never yanks you out of the reading view."""
         rendered = self._rendered.document().toPlainText()
         src = self._editor.toPlainText()
-        mapped = md_comments.map_rendered_span(rendered, src, r0, r1)
+        mapped = md_comments.map_rendered_span(
+            rendered, src, r0, r1, math=self._rendered_math)
         if mapped is None:
             return
         s0, s1 = mapped
@@ -3581,6 +4238,8 @@ class ZenMarkdownEditor(QWidget):
         """s — propose a change. With a visual selection, open the inline field to
         type its replacement (an empty field commits a deletion); with no
         selection, propose an insertion at the caret."""
+        if self._on_source_page():
+            return
         cur = self._rendered.textCursor()
         if cur.hasSelection():
             if not cur.selectedText().strip():
@@ -3604,7 +4263,8 @@ class ZenMarkdownEditor(QWidget):
         if r0 == r1:
             s0 = s1 = md_comments.map_position(rendered, src, r0)
         else:
-            mapped = md_comments.map_rendered_span(rendered, src, r0, r1)
+            mapped = md_comments.map_rendered_span(
+                rendered, src, r0, r1, math=self._rendered_math)
             if mapped is None:
                 return
             s0, s1 = md_comments.snap_out_of_code(src, *mapped)
@@ -3817,10 +4477,15 @@ class ZenMarkdownEditor(QWidget):
         # Gutter width is char-based; re-apply after font change.
         self._apply_heading_layout()
         if self._rendered_mode:
-            self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
             pos = self._rendered.textCursor().position()
             src = self._editor.toPlainText()
-            if self._preview:
+            if self._source_path is not None:
+                # Re-rendering rebuilds the blocks, so the lift must be
+                # re-placed; the caret restore below then keeps the reader's
+                # spot, exactly as for a document.
+                self._render_source(self._source_path)
+                self._goto_source_anchor(self._source_ref)
+            elif self._preview:
                 self._render_preview(src)
             else:
                 self._render_markdown(src)

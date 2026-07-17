@@ -12,6 +12,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌘↵` | Toggle full-window width |
 | `⌘.` | Section focus — dim all but the current paragraph (writing) / section (reading) |
 | `⌘T` | Typewriter scrolling — hold the caret line steady while writing (persists) |
+| `⌘⇧P` | Paper surface — grain & light under the text; off = the flat page (persists) |
 | `⌘+` / `⌘-` / `⌘0` | Font size bigger / smaller / reset (persists) |
 | `⌘⇧→` / `⌘⇧←` / `⌘⇧↓` | Content column wider / narrower / reset (persists) |
 | `⌘J` | Word-jump overlay (Easymotion-style two-key jump) |
@@ -70,15 +71,37 @@ See [Opening files](opening.md) for how the matching works.
 | `gh` | Headings overview — `j`/`k` preview live, `Enter` keeps, `Esc` restores your spot |
 | `gl` | Links overview — same jump-list; `Enter` follows the picked link |
 | `↵` | Follow the link under the caret — a `.md` opens in place, web/mail in the browser, `#heading` jumps there, anything else via the system handler |
-| `gb` / `⌫` | Back to the document the last link was followed from |
+| `↵` | Follow the **source reference** under the caret — `editor.py`, `textli/editor.py:2455`, `view.py:80-95` — opening the file read-only at that line (see [Source references](#source-references)) |
+| `gb` / `⌫` | Back to the document (or source file) the last link or reference was followed from |
 | `go` | Open another file (stays in the reading view) |
+
+## Source references
+
+Notes about code — a design doc, a review, anything an agent wrote — cite
+files the way everyone writes them: `` `textli/editor.py:2455` ``,
+`` `view.py:80-95` ``, or just `` `editor.py` ``. In the reading view those
+are followable: `↵` opens the file **in place**, read-only, at that line, and
+`gb` (or `⌫`) brings you back exactly where you were — so you can check the
+code a decision rests on without leaving the page you're reading.
+
+| | |
+| --- | --- |
+| What counts | An inline-code span carrying a file extension (`comments.py`) or a line anchor (`Makefile:12`). Prose chips (`--read`, `.md`, `QWidget`) are left alone. |
+| Where it looks | Beside the document first, then up through the parent folders — so a doc in `mgc/groundwork/` finds `textli/editor.py` without spelling out `../../`. A bare name (`editor.py`) is then looked up in the repository; if two files share the name, textli says *not found* rather than guess. |
+| How far it looks | Never past the enclosing repository (or your home folder). Nothing resolves outside it. |
+| What you get | The file in monospace on the code band, syntax-highlighted, sized and widened for code, with the referenced lines lifted onto the bright page. `⌘+`/`⌘-` zoom, `/` searches, vim motions move — the page just isn't editable. |
+| What it won't do | Comment, suggest, or edit — `c`/`s`/`⌘R` whisper instead. textli annotates Markdown; a peeked file isn't yours to mark up. |
+
+A link works too: `[the module](../textli/editor.py)` opens as source, while a
+link to something meant to be *seen* (`page.html`, an image, a PDF) still goes
+to the system handler.
 
 ## Reading view — comments
 
 | Key | Action |
 | --- | --- |
 | `v` | Visual mode — extend a selection with the motions above |
-| `c` | Comment the selection (or reveal/edit the comment under the caret) |
+| `c` | Comment the selection or the formula under the caret (or reveal/edit the comment there) |
 | `]c / [c` | Step to the next / previous comment |
 | `Enter` · `⇧D` | Reveal-edit · delete the active comment |
 
