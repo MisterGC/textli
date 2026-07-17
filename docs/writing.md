@@ -40,10 +40,19 @@ discards pending changes.
 
 ## Layout & type
 
-Both preferences persist across sessions:
+These preferences persist across sessions:
 
 - `⌘+` / `⌘-` / `⌘0` — font size bigger / smaller / reset.
 - `⌘⇧→` / `⌘⇧←` / `⌘⇧↓` — content column wider / narrower / reset.
+- `⌘⇧P` — the **paper surface** on / off.
+
+The page is material rather than a flat colour: a whisper of procedural
+grain, plus a light falloff that keeps the reading column fully bright and
+lets the ink warm a few percent toward the window edges. Both cues are
+tuned to sit below conscious notice — texture you feel rather than see — so
+the page stops reading as clinically flat without anything arriving to
+distract you. It's under both views, it prints as it looks, and `⌘⇧P`
+turns it off if you want the flat page.
 
 ## Getting around
 
