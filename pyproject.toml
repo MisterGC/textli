@@ -62,6 +62,7 @@ packages = ["textli"]
 include = [
     "/textli",
     "/tests",
+    "/examples",
     "/README.md",
     "/CHANGELOG.md",
     "/LICENSE",

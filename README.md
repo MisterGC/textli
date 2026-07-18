@@ -82,6 +82,22 @@ from textli import ZenMarkdownEditor, InlineVimEditor
 piece of text in place. See the
 [embedding guide](https://mistergc.github.io/textli/embedding/).
 
+## AI agents
+
+textli ships an installable **agent skill** that teaches AI tools to author
+Markdown for the reading view and to review through the inline annotation
+layer — comments from the human, track-change suggestions from the agent —
+including genre playbooks (decision doc, learning doc, scientific paper;
+`examples/paper.md` is a worked example studying textli itself):
+
+```sh
+textli skill install     # ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills
+textli skill check       # per-tool status: ok / stale / modified / missing
+textli skill             # print the whole skill to stdout instead
+```
+
+See the [AI agents guide](https://mistergc.github.io/textli/ai/).
+
 ## Develop
 
 ```sh

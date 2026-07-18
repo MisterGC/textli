@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Installable AI skill** (#39) — `textli skill install` puts a bundled agent
+  skill into your AI tools' skill directories (`claude`, `codex`, `opencode`,
+  or `all`), teaching them to author Markdown for the reading view (headings
+  as navigation, pandoc math, followable `path:line` source references) and to
+  collaborate through the annotation layer: the human's `{>>comments<<}` come
+  back as track-change suggestions, never silent rewrites, with a convergence
+  protocol for when to leave the doc and ask directly. Genre playbooks ship as
+  on-demand references — decision doc, learning doc, and a scientific paper
+  guide with a worked example, `examples/paper.md`, whose object of research
+  is textli itself. `textli skill check` reports per-tool status (`ok` /
+  `stale` / `modified` / `missing`) against the version stamped at install
+  time, `textli skill uninstall` removes, and bare `textli skill` prints the
+  whole skill to stdout for tools without a skill directory.
+
 ## [0.4.0] - 2026-07-17
 
 ### Added
