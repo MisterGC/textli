@@ -2144,7 +2144,12 @@ class ZenMarkdownEditor(QWidget):
                     mk.chart, width_px=width, height_px=height, dpr=dpr)
                 if rendered is not None:
                     charts[i] = (mk, rendered)
-                    return f"![chart]({_CHART_SCHEME}://{i})"
+                    ref = f"![chart]({_CHART_SCHEME}://{i})"
+                    # The bare `table` flag keeps the data on the page: the
+                    # chart summarizes, the table follows it verbatim.
+                    if mk.show_table:
+                        return f"{ref}\n\n{mk.fallback}"
+                    return ref
             return mk.fallback
 
         return md_charts.substitute(md, markers, replace), charts

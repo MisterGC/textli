@@ -155,8 +155,11 @@ The marker takes three keys at most. `type` is the word after `chart:`.
 `x=<column>` names the column whose values label the x axis (default: the
 first column). `y=<col,col>` picks a subset of the series columns (default:
 every column but the x one). Series names come from the headers, and a
-header's trailing unit — `speed [m/s]` — lifts to the y-axis label. That's
-the whole vocabulary: no colors, no sizes, no titles.
+header's trailing unit — `speed [m/s]` — lifts to the y-axis label. A bare
+`table` flag keeps the data on the page: the chart renders first and the
+table follows it, for when the reader needs the exact values and not just
+the shape (`<!-- chart: bar x=Quarter table -->`). That's the whole
+vocabulary: no colors, no sizes, no titles.
 
 Anything the marker gets wrong — an unknown type, an `x=` that names no
 column, a non-numeric cell, a marker with no table under it — falls back to

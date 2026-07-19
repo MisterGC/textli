@@ -18,7 +18,9 @@ The spec is three keys at most: ``type`` (the word after ``chart:`` — ``bar`` 
 ``line``), ``x=<column>`` (the column whose values label the x axis; default the
 first), and ``y=<col,col>`` (an optional subset of series columns; default every
 column but the x one). Series names come from the headers; a header's trailing
-``[unit]`` labels the y axis.
+``[unit]`` labels the y axis. A bare ``table`` flag keeps the table on the page
+under the chart — the figure summarizes, the data stays readable — instead of
+the default chart-only rendering.
 
 Robustness mirrors the math pass: anything wrong — an unknown type, an ``x=`` that
 names no column, a non-numeric data cell, a marker with no table under it — means
@@ -85,6 +87,7 @@ class Marker:
     end: int            # offset just past the region the marker governs
     chart: Chart | None
     fallback: str
+    show_table: bool = False    # the bare ``table`` flag: keep the table too
 
 
 def _strip_edges(s: str) -> str:
@@ -132,23 +135,26 @@ def _split_unit(header: str) -> tuple[str, str]:
 
 
 def _parse_spec(spec: str):
-    """``(kind, x_col, y_cols)`` for a marker spec, or ``None`` when it's malformed
-    — an unknown type, an unknown key, or empty. ``x_col``/``y_cols`` are ``None``
-    when the spec leaves them to default."""
+    """``(kind, x_col, y_cols, show_table)`` for a marker spec, or ``None`` when
+    it's malformed — an unknown type, an unknown key, or empty. ``x_col``/``y_cols``
+    are ``None`` when the spec leaves them to default."""
     tokens = spec.split()
     if not tokens or tokens[0] not in _KINDS:
         return None
     kind = tokens[0]
     x_col: str | None = None
     y_cols: list[str] | None = None
+    show_table = False
     for tok in tokens[1:]:
         if tok.startswith("x="):
             x_col = tok[2:] or None
         elif tok.startswith("y="):
             y_cols = [c.strip() for c in tok[2:].split(",") if c.strip()] or None
+        elif tok == "table":
+            show_table = True
         else:
             return None                      # a fourth key is out of spec
-    return kind, x_col, y_cols
+    return kind, x_col, y_cols, show_table
 
 
 def _col_index(headers, name) -> int | None:
@@ -252,17 +258,19 @@ def parse(text: str) -> list[Marker]:
         if spec is None:
             out.append(Marker(open_at, strip_end, None, ""))
             continue
+        kind, x_col, y_cols, show_table = spec
         table_pos = line_end + 1
         parsed = _parse_table(text, table_pos) if table_pos <= len(text) else None
         if parsed is None:
             out.append(Marker(open_at, strip_end, None, ""))
             continue
         headers, rows, table_start, table_end = parsed
-        chart = _build_chart(*spec, headers, rows)
+        chart = _build_chart(kind, x_col, y_cols, headers, rows)
         if chart is None:
             out.append(Marker(open_at, table_end, None, text[table_start:table_end]))
             continue
-        out.append(Marker(open_at, table_end, chart, text[table_start:table_end]))
+        out.append(Marker(open_at, table_end, chart, text[table_start:table_end],
+                          show_table))
     return out
 
 

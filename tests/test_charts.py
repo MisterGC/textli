@@ -76,6 +76,17 @@ def test_y_matches_a_unit_stripped_header():
     assert ch.y_axis_label == "ms"
 
 
+def test_table_flag_is_parsed_and_defaults_off():
+    mk = _only(charts.parse(BAR.replace("x=Quarter", "x=Quarter table")))
+    assert mk.chart is not None and mk.show_table is True
+    assert _only(charts.parse(BAR)).show_table is False
+
+
+def test_table_flag_lookalike_is_still_out_of_spec():
+    mk = _only(charts.parse(BAR.replace("x=Quarter", "x=Quarter tables")))
+    assert mk.chart is None                          # unknown token → no chart
+
+
 def test_line_chart_and_unit_header():
     ch = _only(charts.parse(LINE)).chart
     assert ch.kind == "line"
@@ -199,6 +210,17 @@ def test_chart_marker_becomes_an_image_and_table_text_is_gone():
     assert "| Quarter |" not in text and "chart:" not in text
     assert text.count(OBJ) == 1
     assert not _has_table(ed)                        # replaced, not gridded
+
+
+def test_table_flag_keeps_chart_and_table_together():
+    ed = _editor(f"Intro.\n\n{BAR.replace('x=Quarter', 'x=Quarter table')}\nOutro.\n")
+    ed._toggle_rendered()
+    text = ed._rendered.document().toPlainText()
+    assert any(n.startswith(f"{_CHART_SCHEME}://") for n in _image_names(ed))
+    assert text.count(OBJ) == 1                      # the chart image…
+    assert _has_table(ed)                            # …and the data grid
+    assert "Quarter" in text and "3.2" in text
+    assert "chart:" not in text                      # marker stays invisible
 
 
 def test_malformed_marker_renders_a_plain_table():

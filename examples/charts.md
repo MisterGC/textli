@@ -34,8 +34,21 @@ just `latency`, leaving `throughput` out — and a header's trailing unit
 | v4    | 71           | 1240       |
 
 Leave `y=` off and every non-x column is plotted; leave `x=` off and the
-first column labels the axis. That's the whole vocabulary — three keys,
-no styling.
+first column labels the axis.
+
+## Chart *and* table — the `table` flag
+
+Sometimes the reader needs the exact values, not just the shape. A bare
+`table` flag keeps the data on the page — the chart renders first, the
+table follows:
+
+<!-- chart: bar x=Method table -->
+| Method   | precision | recall |
+| -------- | --------- | ------ |
+| baseline | 0.71      | 0.64   |
+| ours     | 0.83      | 0.79   |
+
+That's the whole vocabulary — three keys and one flag, no styling.
 
 ## When it's just a table
 

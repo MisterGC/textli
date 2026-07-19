@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `x=<column>` (the x-axis labels, default the first column), and `y=<col,col>`
   (a subset of series columns, default all but the x one); series names come
   from the headers and a header's trailing unit (`speed [m/s]`) lifts to the
-  y-axis. Because the marker is a plain HTML comment the source stays portable
+  y-axis. A bare `table` flag keeps the data on the page — chart first, table
+  under it — for when the reader needs the exact values and not just the
+  shape. Because the marker is a plain HTML comment the source stays portable
   pandoc Markdown — GitHub renders the table, pandoc converts it, the comment
   vanishes. Anything malformed — unknown type, an `x=`/`y=` that names no
   column, a non-numeric cell, a marker with no table — falls back to the plain
