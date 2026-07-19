@@ -15,7 +15,9 @@ evidence one keystroke away. All annotations are stored inline as
 diff cleanly in git — no sidecar files. Pandoc-style **TeX math** — `$…$`
 inline, `$$…$$` display — renders as typeset formulas in the reading view,
 so scientific notes read like the paper they'll become (and convert to one
-via pandoc, untouched).
+via pandoc, untouched). A `<!-- chart: bar x=… -->` marker over a pipe table
+turns it into a typeset **chart** on render, while the source stays a plain
+table everywhere else.
 
 textli started life as the editor inside [grafli](https://github.com/MisterGC/grafli),
 the keyboard-driven diagram tool, and is now its own package — usable

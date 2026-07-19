@@ -130,6 +130,43 @@ suggests a replacement — or just put the caret on it and press `c`. The
 mark renders over the formula itself, and the annotation lands on the
 `$…$` source, so what you're reviewing is the maths, not a picture of it.
 
+## Charts
+
+A pipe table with a `<!-- chart: … -->` marker on the line right above it
+renders as a typeset chart instead of a grid:
+
+```
+<!-- chart: bar x=Quarter -->
+| Quarter | 2025 | 2026 |
+| ------- | ---- | ---- |
+| Q1      | 3.2  | 4.1  |
+| Q2      | 5.1  | 4.9  |
+```
+
+The chart *replaces* the table on the page the way `$…$` is replaced by its
+formula — the table itself is one `⌘R` away in the write view. Because
+the marker is an ordinary HTML comment, the source stays plain pandoc
+Markdown: GitHub renders the table, pandoc converts it, the comment
+vanishes. Two chart types for now — `bar` (grouped bars, one per series
+column) and `line` (a polyline per series column) — drawn in the page's own
+palette and Literata labels, no chrome.
+
+The marker takes three keys at most. `type` is the word after `chart:`.
+`x=<column>` names the column whose values label the x axis (default: the
+first column). `y=<col,col>` picks a subset of the series columns (default:
+every column but the x one). Series names come from the headers, and a
+header's trailing unit — `speed [m/s]` — lifts to the y-axis label. That's
+the whole vocabulary: no colors, no sizes, no titles.
+
+Anything the marker gets wrong — an unknown type, an `x=` that names no
+column, a non-numeric cell, a marker with no table under it — falls back to
+the plain table, and the marker stays the invisible comment it is. A chart
+never breaks the page. It reviews like a formula, too: put the caret on it
+and `c` comments or `s` suggests, and the annotation lands on the whole
+table source. See
+[`examples/charts.md`](https://github.com/MisterGC/textli/blob/main/examples/charts.md)
+for a tour.
+
 ## Source references
 
 Notes *about code* cite it the way everyone writes it, in inline code:

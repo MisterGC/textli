@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Charts in the reading view** (#41) — a `<!-- chart: … -->` marker on the
+  line above a pipe table renders it as a typeset chart instead of a grid, the
+  way `$…$` renders as a formula: the chart replaces the table on the page, the
+  table stays one `⌘R` away in the write view. Two types — `bar` (grouped bars,
+  one per series column) and `line` (a polyline per series column) — drawn with
+  a hand-rolled painter in the page's own palette and Literata labels, no chart
+  library and no new dependency. The marker takes three keys at most: `type`,
+  `x=<column>` (the x-axis labels, default the first column), and `y=<col,col>`
+  (a subset of series columns, default all but the x one); series names come
+  from the headers and a header's trailing unit (`speed [m/s]`) lifts to the
+  y-axis. Because the marker is a plain HTML comment the source stays portable
+  pandoc Markdown — GitHub renders the table, pandoc converts it, the comment
+  vanishes. Anything malformed — unknown type, an `x=`/`y=` that names no
+  column, a non-numeric cell, a marker with no table — falls back to the plain
+  table and the marker stays invisible, so a chart never breaks the page. A
+  chart reviews like a formula: caret on it, `c` comments or `s` suggests, and
+  the annotation lands on the whole table source; it prints with the page. See
+  `examples/charts.md`.
+
 - **Installable AI skill** (#39) — `textli skill install` puts a bundled agent
   skill into your AI tools' skill directories (`claude`, `codex`, `opencode`,
   or `all`), teaching them to author Markdown for the reading view (headings
