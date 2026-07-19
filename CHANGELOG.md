@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`.grafli` diagrams in the reading view** (#42) — a Markdown image reference
+  to a `.grafli` file (`![](architecture.grafli)`, resolved against the
+  document's folder like any relative image) renders inline as the diagram
+  [grafli](https://github.com/MisterGC/grafli) draws. textli shells out to
+  grafli's `render` CLI — the one stable contract between the tools, no import
+  and no Python coupling — and shows the produced image, rendered at the reading
+  column's width and the display's pixel ratio so it stays crisp. Renders are
+  cached by source path, mtime and target metrics, so re-renders (zoom, view
+  toggles, file-watch reloads) don't re-invoke the CLI unless the diagram or the
+  metrics actually changed. It degrades quietly: without grafli on `PATH`, or on
+  a failed or timed-out render, the reference falls back to ordinary
+  image-reference behavior — no error, no page break. Image refs only; a plain
+  `[link](d.grafli)` keeps its stay-tuned notice.
+
 - **Charts in the reading view** (#41) — a `<!-- chart: … -->` marker on the
   line above a pipe table renders it as a typeset chart instead of a grid, the
   way `$…$` renders as a formula: the chart replaces the table on the page, the

@@ -167,6 +167,28 @@ table source. See
 [`examples/charts.md`](https://github.com/MisterGC/textli/blob/main/examples/charts.md)
 for a tour.
 
+## Diagrams
+
+A Markdown image reference to a `.grafli` file —
+`![](architecture.grafli)`, resolved against the document's folder like any
+other relative image — renders inline as the diagram itself, drawn by
+[grafli](https://github.com/MisterGC/grafli). textli shells out to grafli's
+`render` CLI (the one stable contract between the two tools) and shows the
+result, rendered crisp for the reading column and your display. The
+diagram *is* the picture: the `.grafli` source stays a plain file beside your
+document, editable in grafli, and the Markdown stays portable — GitHub and
+pandoc see an ordinary image reference.
+
+It degrades quietly. Without grafli on your `PATH`, or when a render fails,
+the reference falls back to what any image reference does when its target
+can't be shown — no error, no interruption. Because textli doesn't watch the
+`.grafli` file itself, a diagram you've changed refreshes on the next render
+of the document: a `⌘R` round-trip, a file reload, or a zoom.
+
+Note the shapes are different: `![](d.grafli)` is an **image** and renders;
+a plain link `[text](d.grafli)` is followed like any other link, and for now
+says diagram-opening isn't supported yet.
+
 ## Source references
 
 Notes *about code* cite it the way everyone writes it, in inline code:

@@ -17,7 +17,10 @@ inline, `$$…$$` display — renders as typeset formulas in the reading view,
 so scientific notes read like the paper they'll become (and convert to one
 via pandoc, untouched). A `<!-- chart: bar x=… -->` marker over a pipe table
 turns it into a typeset **chart** on render, while the source stays a plain
-table everywhere else.
+table everywhere else. And an image reference to a `.grafli` file —
+`![](architecture.grafli)` — renders inline as the **diagram** itself when the
+[grafli](https://github.com/MisterGC/grafli) CLI is installed, degrading
+quietly to nothing when it isn't.
 
 textli started life as the editor inside [grafli](https://github.com/MisterGC/grafli),
 the keyboard-driven diagram tool, and is now its own package — usable

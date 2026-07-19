@@ -64,6 +64,7 @@ from textli import charts as md_charts
 from textli import codeblocks as md_codeblocks
 from textli import comments as md_comments
 from textli import formulas as md_formulas
+from textli import graflirender
 from textli import links as md_links
 from textli import mathrender
 from textli import openfile
@@ -178,6 +179,12 @@ _CHART_SCHEME = "textli-chart"
 # The chart image's aspect ratio (width / height) — a calm, wide frame between
 # ~16:9 and 2:1 that sits in the reading column without towering over the prose.
 _CHART_ASPECT = 1.9
+
+# URL scheme for rendered ``.grafli`` diagrams (#42). An `![](file.grafli)` image
+# ref is swapped for one image ref (`![](textli-grafli://N)`) whose resource is
+# the PNG grafli's render CLI produced — resolved from the cache like math/charts,
+# never re-fetched from disk.
+_GRAFLI_SCHEME = "textli-grafli"
 
 
 @contextmanager
@@ -2210,6 +2217,92 @@ class ZenMarkdownEditor(QWidget):
                    for pos, mk in zip(positions, src_markers)]
         return anchors
 
+    def _prepare_grafli(self, md: str):
+        """Swap each ``![](file.grafli)`` image ref for a rendered-diagram image
+        ref, shelling out to grafli's render CLI (`graflirender.py`) at the
+        reading column's width and the current device pixel ratio. Returns the
+        rewritten markdown plus ``{ref index: RenderedDiagram}`` for the
+        post-setMarkdown pass. Identity when grafli isn't on ``PATH`` or the
+        document has no ``.grafli`` image.
+
+        A ref whose diagram can't render — grafli absent, a failed or timed-out
+        render, a source path that can't be resolved — is left exactly as it was,
+        so the fallback is today's behavior (Qt tries the path as an image and
+        shows nothing). No error, no page break."""
+        if not graflirender.available():
+            return md, {}
+        refs = graflirender.find_image_refs(md, md_comments.code_ranges(md))
+        if not refs:
+            return md, {}
+        width = self._chart_width_px()
+        dpr = self._rendered.devicePixelRatioF()
+        diagrams: dict = {}
+        out = []
+        last = 0
+        for i, (start, end, src) in enumerate(refs):
+            target, _frag = self._resolve_target(src)
+            rendered = (graflirender.render(target, width_px=width * dpr, dpr=dpr)
+                        if target is not None else None)
+            out.append(md[last:start])
+            if rendered is not None:
+                diagrams[i] = rendered
+                out.append(f"![diagram]({_GRAFLI_SCHEME}://{i})")
+            else:
+                out.append(md[start:end])   # untouched → today's behavior
+            last = end
+        out.append(md[last:])
+        return "".join(out), diagrams
+
+    def _apply_grafli_images(self, doc, diagrams: dict):
+        """Attach the rendered diagrams to ``doc`` (resources must land *after*
+        setMarkdown, which clears the cache), pin each image fragment's logical
+        size from its device pixel ratio, and center the block it stands alone
+        in. Format-only past the resource add — shifts no text offsets, so the
+        sentinel mark pass stays untouched. No anchor mapping: a ``.grafli``
+        image is ordinary Markdown, commented/suggested like any other image."""
+        if not diagrams:
+            return
+        for i, rendered in diagrams.items():
+            doc.addResource(QTextDocument.ResourceType.ImageResource,
+                            QUrl(f"{_GRAFLI_SCHEME}://{i}"), rendered.image)
+        prefix = f"{_GRAFLI_SCHEME}://"
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    targets.append((frag.position(), frag.length(),
+                                    cf.toImageFormat(), block.position(),
+                                    block.text()))
+                it += 1
+            block = block.next()
+        for pos, length, imf, block_pos, block_text in targets:
+            rendered = diagrams.get(int(imf.name()[len(prefix):]))
+            if rendered is None:
+                continue
+            image = rendered.image
+            dpr = image.devicePixelRatio()
+            imf.setWidth(image.width() / dpr)
+            imf.setHeight(image.height() / dpr)
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.setCharFormat(imf)
+            # A diagram alone in its paragraph is centered, like a display
+            # formula or a chart. A comment wraps it in sentinels not yet
+            # cleared — strip those before the alone-in-paragraph test.
+            core = (block_text.replace(md_comments.SENTINEL_START, "")
+                    .replace(md_comments.SENTINEL_END, "").strip())
+            if core == "￼":
+                bf = QTextBlockFormat()
+                bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                cur.setPosition(block_pos)
+                cur.mergeBlockFormat(bf)
+
     def _render_markdown(self, source: str):
         """Render ``source`` into the read view: comment spans are highlighted
         (bodies hidden, revealed on demand), and suggestion marks are styled as
@@ -2224,6 +2317,7 @@ class ZenMarkdownEditor(QWidget):
         self._apply_read_face()
         md, spans = md_comments.to_rendered(source)
         md, charts = self._prepare_charts(md)
+        md, diagrams = self._prepare_grafli(md)
         md, maths = self._prepare_math(md)
         doc = self._rendered.document()
         self._rendered.set_anchor_band(None)   # documents carry no anchor
@@ -2231,6 +2325,7 @@ class ZenMarkdownEditor(QWidget):
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
         self._apply_chart_images(doc, charts)
+        self._apply_grafli_images(doc, diagrams)
         self._rendered_math = self._compute_math_anchors(doc, maths, source)
         self._rendered_charts = self._compute_chart_anchors(doc, charts, source)
         self._style_links(doc)
@@ -2305,11 +2400,13 @@ class ZenMarkdownEditor(QWidget):
         correctness."""
         doc = self._rendered.document()
         md, charts = self._prepare_charts(md_comments.accepted(source))
+        md, diagrams = self._prepare_grafli(md)
         md, maths = self._prepare_math(md)
         doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
         self._apply_chart_images(doc, charts)
+        self._apply_grafli_images(doc, diagrams)
         self._style_links(doc)
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
