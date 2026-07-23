@@ -59,9 +59,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from textli import chartrender
+from textli import charts as md_charts
 from textli import codeblocks as md_codeblocks
 from textli import comments as md_comments
 from textli import formulas as md_formulas
+from textli import graflirender
 from textli import links as md_links
 from textli import mathrender
 from textli import openfile
@@ -167,6 +170,21 @@ _MD_FEATURES = (
 # the markdown handed to setMarkdown (`![math](textli-math://N)`), resolved
 # from the document's resource cache — never from disk or network.
 _MATH_SCHEME = "textli-math"
+
+# URL scheme for rendered chart images (#41). A ``<!-- chart: … -->`` marker and
+# its pipe table are swapped for one image ref (`![chart](textli-chart://N)`),
+# resolved from the resource cache exactly like a math image.
+_CHART_SCHEME = "textli-chart"
+
+# The chart image's aspect ratio (width / height) — a calm, wide frame between
+# ~16:9 and 2:1 that sits in the reading column without towering over the prose.
+_CHART_ASPECT = 1.9
+
+# URL scheme for rendered ``.grafli`` diagrams (#42). An `![](file.grafli)` image
+# ref is swapped for one image ref (`![](textli-grafli://N)`) whose resource is
+# the PNG grafli's render CLI produced — resolved from the cache like math/charts,
+# never re-fetched from disk.
+_GRAFLI_SCHEME = "textli-grafli"
 
 
 @contextmanager
@@ -795,6 +813,10 @@ class ZenMarkdownEditor(QWidget):
         # src_end) per math image, so a selection landing on a formula (a
         # word-less image) maps back to its `$…$` source and can be annotated.
         self._rendered_math: list = []
+        # Chart anchors, same shape as the math ones: (rendered_pos, src_start,
+        # src_end) per chart image, so `c` / `s` on a rendered chart land on the
+        # whole marker + table source span (#41).
+        self._rendered_charts: list = []
         # Play the accept/reject animation (tests turn this off for determinism).
         self._suggest_animate = True
         self._active_comment = -1
@@ -2086,6 +2108,206 @@ class ZenMarkdownEditor(QWidget):
         anchors.sort()
         return anchors
 
+    def _chart_width_px(self) -> float:
+        """The logical width a chart is drawn at: the reading view's content
+        column (viewport minus its document margins), falling back to the saved
+        column width before the view is laid out (tests, first render)."""
+        doc = self._rendered.document()
+        vw = self._rendered.viewport().width()
+        inner = vw - 2 * doc.documentMargin()
+        if inner < 120:
+            inner = float(self._content_width)
+        return float(max(120.0, min(inner, ZEN_MD_MAX_WIDTH_MAX)))
+
+    def _prepare_charts(self, md: str):
+        """Swap each ``<!-- chart: … -->`` marker + table (`charts.py`) for a
+        chart image ref and rasterize it (`chartrender.py`) at the reading
+        column's width and the current device pixel ratio. Returns the rewritten
+        markdown plus ``{ref index: (Marker, RenderedChart)}`` for the
+        post-setMarkdown pass. Identity on documents without a chart marker.
+
+        A marker that doesn't govern a valid numeric table is dropped to its
+        fallback — the bare table, or nothing — so it never shows and the page is
+        never broken (the marker is an HTML comment that setMarkdown would
+        otherwise print verbatim under the NoHTML feature)."""
+        markers = md_charts.parse(md)
+        if not markers:
+            return md, {}
+        width = self._chart_width_px()
+        height = width / _CHART_ASPECT
+        dpr = self._rendered.devicePixelRatioF()
+        charts: dict[int, tuple] = {}
+
+        def replace(i: int, mk: md_charts.Marker) -> str:
+            if mk.chart is not None:
+                rendered = chartrender.render(
+                    mk.chart, width_px=width, height_px=height, dpr=dpr)
+                if rendered is not None:
+                    charts[i] = (mk, rendered)
+                    ref = f"![chart]({_CHART_SCHEME}://{i})"
+                    # The bare `table` flag keeps the data on the page: the
+                    # chart summarizes, the table follows it verbatim.
+                    if mk.show_table:
+                        return f"{ref}\n\n{mk.fallback}"
+                    return ref
+            return mk.fallback
+
+        return md_charts.substitute(md, markers, replace), charts
+
+    def _apply_chart_images(self, doc, charts: dict):
+        """Attach the rendered charts to ``doc`` (resources must land *after*
+        setMarkdown, which clears the cache), pin each image fragment's logical
+        size, and center the block it stands in. Format-only past the resource
+        add — shifts no text offsets, so the sentinel mark pass stays untouched."""
+        if not charts:
+            return
+        for i, (_, rendered) in charts.items():
+            doc.addResource(QTextDocument.ResourceType.ImageResource,
+                            QUrl(f"{_CHART_SCHEME}://{i}"), rendered.image)
+        prefix = f"{_CHART_SCHEME}://"
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    targets.append((frag.position(), frag.length(),
+                                    cf.toImageFormat(), block.position()))
+                it += 1
+            block = block.next()
+        for pos, length, imf, block_pos in targets:
+            entry = charts.get(int(imf.name()[len(prefix):]))
+            if entry is None:
+                continue
+            _, rendered = entry
+            dpr = rendered.image.devicePixelRatio()
+            imf.setWidth(rendered.image.width() / dpr)
+            imf.setHeight(rendered.image.height() / dpr)
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.setCharFormat(imf)
+            bf = QTextBlockFormat()
+            bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            cur.setPosition(block_pos)
+            cur.mergeBlockFormat(bf)
+
+    def _compute_chart_anchors(self, doc, charts: dict, source: str) -> list:
+        """Pair each rendered chart image with its marker+table span in
+        ``source``, as ``(rendered_pos, src_start, src_end)`` — the data
+        :func:`comments.map_rendered_span` needs to let a chart (a word-less
+        image) anchor a comment/suggestion on the whole table source. Rendered
+        images are matched to the source's valid chart markers in document order
+        (both parses see the same markers in the same order)."""
+        if not charts:
+            return []
+        src_markers = [mk for mk in md_charts.parse(source) if mk.chart is not None]
+        prefix = f"{_CHART_SCHEME}://"
+        positions: list[int] = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                cf = it.fragment().charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    positions.append(it.fragment().position())
+                it += 1
+            block = block.next()
+        positions.sort()
+        anchors = [(pos, mk.start, mk.end)
+                   for pos, mk in zip(positions, src_markers)]
+        return anchors
+
+    def _prepare_grafli(self, md: str):
+        """Swap each ``![](file.grafli)`` image ref for a rendered-diagram image
+        ref, shelling out to grafli's render CLI (`graflirender.py`) at the
+        reading column's width and the current device pixel ratio. Returns the
+        rewritten markdown plus ``{ref index: RenderedDiagram}`` for the
+        post-setMarkdown pass. Identity when grafli isn't on ``PATH`` or the
+        document has no ``.grafli`` image.
+
+        A ref whose diagram can't render — grafli absent, a failed or timed-out
+        render, a source path that can't be resolved — is left exactly as it was,
+        so the fallback is today's behavior (Qt tries the path as an image and
+        shows nothing). No error, no page break."""
+        if not graflirender.available():
+            return md, {}
+        refs = graflirender.find_image_refs(md, md_comments.code_ranges(md))
+        if not refs:
+            return md, {}
+        width = self._chart_width_px()
+        dpr = self._rendered.devicePixelRatioF()
+        diagrams: dict = {}
+        out = []
+        last = 0
+        for i, (start, end, src) in enumerate(refs):
+            target, _frag = self._resolve_target(src)
+            rendered = (graflirender.render(target, width_px=width * dpr, dpr=dpr)
+                        if target is not None else None)
+            out.append(md[last:start])
+            if rendered is not None:
+                diagrams[i] = rendered
+                out.append(f"![diagram]({_GRAFLI_SCHEME}://{i})")
+            else:
+                out.append(md[start:end])   # untouched → today's behavior
+            last = end
+        out.append(md[last:])
+        return "".join(out), diagrams
+
+    def _apply_grafli_images(self, doc, diagrams: dict):
+        """Attach the rendered diagrams to ``doc`` (resources must land *after*
+        setMarkdown, which clears the cache), pin each image fragment's logical
+        size from its device pixel ratio, and center the block it stands alone
+        in. Format-only past the resource add — shifts no text offsets, so the
+        sentinel mark pass stays untouched. No anchor mapping: a ``.grafli``
+        image is ordinary Markdown, commented/suggested like any other image."""
+        if not diagrams:
+            return
+        for i, rendered in diagrams.items():
+            doc.addResource(QTextDocument.ResourceType.ImageResource,
+                            QUrl(f"{_GRAFLI_SCHEME}://{i}"), rendered.image)
+        prefix = f"{_GRAFLI_SCHEME}://"
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                cf = frag.charFormat()
+                if cf.isImageFormat() and \
+                        cf.toImageFormat().name().startswith(prefix):
+                    targets.append((frag.position(), frag.length(),
+                                    cf.toImageFormat(), block.position(),
+                                    block.text()))
+                it += 1
+            block = block.next()
+        for pos, length, imf, block_pos, block_text in targets:
+            rendered = diagrams.get(int(imf.name()[len(prefix):]))
+            if rendered is None:
+                continue
+            image = rendered.image
+            dpr = image.devicePixelRatio()
+            imf.setWidth(image.width() / dpr)
+            imf.setHeight(image.height() / dpr)
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.setCharFormat(imf)
+            # A diagram alone in its paragraph is centered, like a display
+            # formula or a chart. A comment wraps it in sentinels not yet
+            # cleared — strip those before the alone-in-paragraph test.
+            core = (block_text.replace(md_comments.SENTINEL_START, "")
+                    .replace(md_comments.SENTINEL_END, "").strip())
+            if core == "￼":
+                bf = QTextBlockFormat()
+                bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                cur.setPosition(block_pos)
+                cur.mergeBlockFormat(bf)
+
     def _render_markdown(self, source: str):
         """Render ``source`` into the read view: comment spans are highlighted
         (bodies hidden, revealed on demand), and suggestion marks are styled as
@@ -2099,13 +2321,18 @@ class ZenMarkdownEditor(QWidget):
         scroll to the real document end)."""
         self._apply_read_face()
         md, spans = md_comments.to_rendered(source)
+        md, charts = self._prepare_charts(md)
+        md, diagrams = self._prepare_grafli(md)
         md, maths = self._prepare_math(md)
         doc = self._rendered.document()
         self._rendered.set_anchor_band(None)   # documents carry no anchor
         doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
+        self._apply_chart_images(doc, charts)
+        self._apply_grafli_images(doc, diagrams)
         self._rendered_math = self._compute_math_anchors(doc, maths, source)
+        self._rendered_charts = self._compute_chart_anchors(doc, charts, source)
         self._style_links(doc)
         # Pad lines are *insertions* — they must land before the mark pass
         # records comment/suggestion offsets. The band/token pass below only
@@ -2177,10 +2404,14 @@ class ZenMarkdownEditor(QWidget):
         Settled like :meth:`_render_markdown`, for the same scroll-restore
         correctness."""
         doc = self._rendered.document()
-        md, maths = self._prepare_math(md_comments.accepted(source))
+        md, charts = self._prepare_charts(md_comments.accepted(source))
+        md, diagrams = self._prepare_grafli(md)
+        md, maths = self._prepare_math(md)
         doc.setMarkdown(md, _MD_FEATURES)
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
+        self._apply_chart_images(doc, charts)
+        self._apply_grafli_images(doc, diagrams)
         self._style_links(doc)
         self._pad_code_blocks(doc)
         self._style_code_blocks(doc)
@@ -2194,8 +2425,9 @@ class ZenMarkdownEditor(QWidget):
         self._rendered_comments = []
         self._rendered_suggestions = []
         # Preview mutates the source (suggestions accepted); its offsets don't
-        # map back to the editable source, so no formula anchors here.
+        # map back to the editable source, so no formula/chart anchors here.
         self._rendered_math = []
+        self._rendered_charts = []
         self._active_comment = -1
         self._settle_rendered_layout()
         self._update_read_focus()
@@ -2238,6 +2470,7 @@ class ZenMarkdownEditor(QWidget):
         self._rendered_comments = []
         self._rendered_suggestions = []
         self._rendered_math = []
+        self._rendered_charts = []
         self._active_comment = -1
         self._settle_rendered_layout()
         self._update_read_focus()
@@ -4004,11 +4237,11 @@ class ZenMarkdownEditor(QWidget):
             self._begin_comment_for_span(r0, r1)
             return
         # No selection: reveal a comment under the caret, or — sitting on a
-        # bare formula — comment that formula (a single-key gesture; the image
-        # is one character, tedious to visual-select).
+        # bare formula or chart — comment that image (a single-key gesture; the
+        # image is one character, tedious to visual-select).
         pos = cur.position()
         if self._comment_at_position(pos) < 0:
-            anchor = self._formula_at_position(pos)
+            anchor = self._formula_at_position(pos) or self._chart_at_position(pos)
             if anchor is not None:
                 self._begin_comment_for_span(anchor[0], anchor[0] + 1)
                 return
@@ -4028,6 +4261,20 @@ class ZenMarkdownEditor(QWidget):
             if anchor[0] == pos:
                 return anchor
         return None
+
+    def _chart_at_position(self, pos: int):
+        """The chart anchor ``(rendered_pos, src_start, src_end)`` whose image the
+        caret sits on, else None."""
+        for anchor in self._rendered_charts:
+            if anchor[0] == pos:
+                return anchor
+        return None
+
+    def _annotate_anchors(self) -> list:
+        """Formula and chart anchors together — the word-less image spans a
+        read-view selection can map back to source (`comments.map_rendered_span`
+        takes them as one list)."""
+        return self._rendered_math + self._rendered_charts
 
     # ── Read-view comment interaction ──
 
@@ -4182,7 +4429,7 @@ class ZenMarkdownEditor(QWidget):
         rendered = self._rendered.document().toPlainText()
         src = self._editor.toPlainText()
         mapped = md_comments.map_rendered_span(
-            rendered, src, r0, r1, math=self._rendered_math)
+            rendered, src, r0, r1, math=self._annotate_anchors())
         if mapped is None:
             return
         s0, s1 = mapped
@@ -4250,6 +4497,13 @@ class ZenMarkdownEditor(QWidget):
             self._begin_suggestion_for_span(r0, r1)
             return
         pos = cur.position()
+        # A bare chart is one image char: suggest a replacement for the whole
+        # table source, mirroring the caret `c` gesture, rather than inserting
+        # into the middle of an image.
+        anchor = self._chart_at_position(pos)
+        if anchor is not None:
+            self._begin_suggestion_for_span(anchor[0], anchor[0] + 1)
+            return
         self._begin_suggestion_for_span(pos, pos)   # insertion at the caret
 
     def _begin_suggestion_for_span(self, r0: int, r1: int):
@@ -4264,7 +4518,7 @@ class ZenMarkdownEditor(QWidget):
             s0 = s1 = md_comments.map_position(rendered, src, r0)
         else:
             mapped = md_comments.map_rendered_span(
-                rendered, src, r0, r1, math=self._rendered_math)
+                rendered, src, r0, r1, math=self._annotate_anchors())
             if mapped is None:
                 return
             s0, s1 = md_comments.snap_out_of_code(src, *mapped)

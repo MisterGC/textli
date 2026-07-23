@@ -15,7 +15,12 @@ evidence one keystroke away. All annotations are stored inline as
 diff cleanly in git — no sidecar files. Pandoc-style **TeX math** — `$…$`
 inline, `$$…$$` display — renders as typeset formulas in the reading view,
 so scientific notes read like the paper they'll become (and convert to one
-via pandoc, untouched).
+via pandoc, untouched). A `<!-- chart: bar x=… -->` marker over a pipe table
+turns it into a typeset **chart** on render, while the source stays a plain
+table everywhere else. And an image reference to a `.grafli` file —
+`![](architecture.grafli)` — renders inline as the **diagram** itself when the
+[grafli](https://github.com/MisterGC/grafli) CLI is installed, degrading
+quietly to nothing when it isn't.
 
 textli started life as the editor inside [grafli](https://github.com/MisterGC/grafli),
 the keyboard-driven diagram tool, and is now its own package — usable
@@ -81,6 +86,22 @@ from textli import ZenMarkdownEditor, InlineVimEditor
 `InlineVimEditor` is a small vim-capable `QPlainTextEdit` for editing a single
 piece of text in place. See the
 [embedding guide](https://mistergc.github.io/textli/embedding/).
+
+## AI agents
+
+textli ships an installable **agent skill** that teaches AI tools to author
+Markdown for the reading view and to review through the inline annotation
+layer — comments from the human, track-change suggestions from the agent —
+including genre playbooks (decision doc, learning doc, scientific paper;
+`examples/paper.md` is a worked example studying textli itself):
+
+```sh
+textli skill install     # ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills
+textli skill check       # per-tool status: ok / stale / modified / missing
+textli skill             # print the whole skill to stdout instead
+```
+
+See the [AI agents guide](https://mistergc.github.io/textli/ai/).
 
 ## Develop
 

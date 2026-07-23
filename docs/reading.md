@@ -130,6 +130,68 @@ suggests a replacement — or just put the caret on it and press `c`. The
 mark renders over the formula itself, and the annotation lands on the
 `$…$` source, so what you're reviewing is the maths, not a picture of it.
 
+## Charts
+
+A pipe table with a `<!-- chart: … -->` marker on the line right above it
+renders as a typeset chart instead of a grid:
+
+```
+<!-- chart: bar x=Quarter -->
+| Quarter | 2025 | 2026 |
+| ------- | ---- | ---- |
+| Q1      | 3.2  | 4.1  |
+| Q2      | 5.1  | 4.9  |
+```
+
+The chart *replaces* the table on the page the way `$…$` is replaced by its
+formula — the table itself is one `⌘R` away in the write view. Because
+the marker is an ordinary HTML comment, the source stays plain pandoc
+Markdown: GitHub renders the table, pandoc converts it, the comment
+vanishes. Two chart types for now — `bar` (grouped bars, one per series
+column) and `line` (a polyline per series column) — drawn in the page's own
+palette and Literata labels, no chrome.
+
+The marker takes three keys at most. `type` is the word after `chart:`.
+`x=<column>` names the column whose values label the x axis (default: the
+first column). `y=<col,col>` picks a subset of the series columns (default:
+every column but the x one). Series names come from the headers, and a
+header's trailing unit — `speed [m/s]` — lifts to the y-axis label. A bare
+`table` flag keeps the data on the page: the chart renders first and the
+table follows it, for when the reader needs the exact values and not just
+the shape (`<!-- chart: bar x=Quarter table -->`). That's the whole
+vocabulary: no colors, no sizes, no titles.
+
+Anything the marker gets wrong — an unknown type, an `x=` that names no
+column, a non-numeric cell, a marker with no table under it — falls back to
+the plain table, and the marker stays the invisible comment it is. A chart
+never breaks the page. It reviews like a formula, too: put the caret on it
+and `c` comments or `s` suggests, and the annotation lands on the whole
+table source. See
+[`examples/charts.md`](https://github.com/MisterGC/textli/blob/main/examples/charts.md)
+for a tour.
+
+## Diagrams
+
+A Markdown image reference to a `.grafli` file —
+`![](architecture.grafli)`, resolved against the document's folder like any
+other relative image — renders inline as the diagram itself, drawn by
+[grafli](https://github.com/MisterGC/grafli). textli shells out to grafli's
+`render` CLI (the one stable contract between the two tools) and shows the
+result, rendered crisp for the reading column and your display. The
+diagram *is* the picture: the `.grafli` source stays a plain file beside your
+document, editable in grafli, and the Markdown stays portable — GitHub and
+pandoc see an ordinary image reference.
+
+It degrades quietly. Without grafli on your `PATH`, or when a render fails,
+the reference falls back to what any image reference does when its target
+can't be shown — no error, no interruption. Because textli doesn't watch the
+`.grafli` file itself, a diagram you've changed refreshes on the next render
+of the document: a `⌘R` round-trip, a file reload, or a zoom.
+
+Note the shapes are different: `![](d.grafli)` is an **image** and renders;
+a plain link `[text](d.grafli)` is followed like any other link, and for now
+says diagram-opening isn't supported yet.
+
 ## Source references
 
 Notes *about code* cite it the way everyone writes it, in inline code:

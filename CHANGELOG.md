@@ -5,7 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-07-23
+
+### Added
+
+- **`.grafli` diagrams in the reading view** (#42) — a Markdown image reference
+  to a `.grafli` file (`![](architecture.grafli)`, resolved against the
+  document's folder like any relative image) renders inline as the diagram
+  [grafli](https://github.com/MisterGC/grafli) draws. textli shells out to
+  grafli's `render` CLI — the one stable contract between the tools, no import
+  and no Python coupling — and shows the produced image, rendered at the reading
+  column's width and the display's pixel ratio so it stays crisp. Renders are
+  cached by source path, mtime and target metrics, so re-renders (zoom, view
+  toggles, file-watch reloads) don't re-invoke the CLI unless the diagram or the
+  metrics actually changed. It degrades quietly: without grafli on `PATH`, or on
+  a failed or timed-out render, the reference falls back to ordinary
+  image-reference behavior — no error, no page break. Image refs only; a plain
+  `[link](d.grafli)` keeps its stay-tuned notice.
+
+- **Charts in the reading view** (#41) — a `<!-- chart: … -->` marker on the
+  line above a pipe table renders it as a typeset chart instead of a grid, the
+  way `$…$` renders as a formula: the chart replaces the table on the page, the
+  table stays one `⌘R` away in the write view. Two types — `bar` (grouped bars,
+  one per series column) and `line` (a polyline per series column) — drawn with
+  a hand-rolled painter in the page's own palette and Literata labels, no chart
+  library and no new dependency. The marker takes three keys at most: `type`,
+  `x=<column>` (the x-axis labels, default the first column), and `y=<col,col>`
+  (a subset of series columns, default all but the x one); series names come
+  from the headers and a header's trailing unit (`speed [m/s]`) lifts to the
+  y-axis. A bare `table` flag keeps the data on the page — chart first, table
+  under it — for when the reader needs the exact values and not just the
+  shape. Because the marker is a plain HTML comment the source stays portable
+  pandoc Markdown — GitHub renders the table, pandoc converts it, the comment
+  vanishes. Anything malformed — unknown type, an `x=`/`y=` that names no
+  column, a non-numeric cell, a marker with no table — falls back to the plain
+  table and the marker stays invisible, so a chart never breaks the page. A
+  chart reviews like a formula: caret on it, `c` comments or `s` suggests, and
+  the annotation lands on the whole table source; it prints with the page. See
+  `examples/charts.md`.
+
+- **Installable AI skill** (#39) — `textli skill install` puts a bundled agent
+  skill into your AI tools' skill directories (`claude`, `codex`, `opencode`,
+  or `all`), teaching them to author Markdown for the reading view (headings
+  as navigation, pandoc math, followable `path:line` source references) and to
+  collaborate through the annotation layer: the human's `{>>comments<<}` come
+  back as track-change suggestions, never silent rewrites, with a convergence
+  protocol for when to leave the doc and ask directly. Genre playbooks ship as
+  on-demand references — decision doc, learning doc, and a scientific paper
+  guide with a worked example, `examples/paper.md`, whose object of research
+  is textli itself. `textli skill check` reports per-tool status (`ok` /
+  `stale` / `modified` / `missing`) against the version stamped at install
+  time, `textli skill uninstall` removes, and bare `textli skill` prints the
+  whole skill to stdout for tools without a skill directory.
 
 ## [0.4.0] - 2026-07-17
 

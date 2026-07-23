@@ -74,6 +74,12 @@ class TextliHost(QWidget):
 
 
 def main():
+    # `textli skill …` is a pure-CLI path (print / install / check /
+    # uninstall the bundled AI skill) — dispatch before any Qt setup.
+    if len(sys.argv) > 1 and sys.argv[1] == "skill":
+        from textli.skill_cli import run
+        sys.exit(run(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(
         prog="textli",
         description="Standalone Zen markdown editor.",
@@ -82,7 +88,8 @@ def main():
         "file",
         help="Markdown file to open, optionally with a #heading-slug location "
              "(e.g. notes.md#design-decisions). Created on first save if it "
-             "doesn't exist.",
+             "doesn't exist. Or: `textli skill` to print/install the bundled "
+             "AI skill (see `textli skill --help`).",
     )
     parser.add_argument(
         "-r", "--read",
