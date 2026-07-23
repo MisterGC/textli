@@ -23,7 +23,8 @@ The loop looks like this:
 So that agents hold up their end well, textli ships an installable
 **agent skill** — instructions that teach an AI tool how to author for
 the reading view (headings as navigation, pandoc math, followable
-`path:line` source references), how to use the two annotation layers
+`path:line` source references, value tables rendered as charts and
+`.grafli` diagrams shown inline), how to use the two annotation layers
 without conflating them, and when to stop iterating in the document and
 ask a direct question instead. Genre playbooks come along as on-demand
 references: a decision doc for aligning on sizeable work, a learning doc

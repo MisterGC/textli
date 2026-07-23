@@ -57,6 +57,26 @@ Markdown itself (and in git).
 - **Fenced code, tables, images** all render typeset: tag fences with a
   language for highlighting; image paths resolve relative to the
   document's folder.
+- **A value table becomes a chart** with a `<!-- chart: … -->` marker on
+  the line right above a pipe table — `<!-- chart: bar x=Quarter -->` or
+  `<!-- chart: line x=N table -->`. Types are `bar` and `line`; `x=<col>`
+  names the axis column (default first), `y=<col,col>` picks a subset of
+  series (default: every other column), a bare `table` flag keeps the grid
+  below the chart. Every cell that isn't the x column must be a single
+  number — pack two metrics in a cell (`113 / 6.3`) and it falls back to
+  the plain table, so split them into one chart per metric. A header's
+  trailing unit (`speed [m/s]`) lifts to the y-axis label. The marker is an
+  ordinary HTML comment, so GitHub and pandoc still see a normal table; any
+  error falls back to the grid, never a broken page. Reviewable like a
+  formula — `c`/`s` on it lands the mark on the whole table source.
+- **A `.grafli` diagram renders inline** when referenced as an image —
+  `![](architecture.grafli)`, resolved against the document's folder.
+  textli shells out to grafli's `render` CLI; the `.grafli` source stays a
+  plain editable file beside the document and the Markdown stays portable
+  (GitHub and pandoc see an ordinary image). Use the **image** shape
+  (`![](d.grafli)`) to render; a plain link (`[text](d.grafli)`) is not a
+  diagram. Degrades quietly to a normal missing-image when grafli isn't on
+  `PATH`.
 
 ## The annotation layer — two kinds, never conflated
 
