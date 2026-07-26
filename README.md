@@ -20,7 +20,9 @@ turns it into a typeset **chart** on render, while the source stays a plain
 table everywhere else. And an image reference to a `.grafli` file —
 `![](architecture.grafli)` — renders inline as the **diagram** itself when the
 [grafli](https://github.com/MisterGC/grafli) CLI is installed, degrading
-quietly to nothing when it isn't.
+quietly to nothing when it isn't. The page comes in **two counterpart
+palettes** — warm paper and a low-key dark ground — switched with `⌘⇧D`, or
+driven by an embedding host through `textli.set_theme("dark")`.
 
 textli started life as the editor inside [grafli](https://github.com/MisterGC/grafli),
 the keyboard-driven diagram tool, and is now its own package — usable
@@ -66,6 +68,7 @@ complete key reference, or see the
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
 | `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
 | `⌘⇧P` | Paper surface — grain & light on the page; off = flat (persists) |
+| `⌘⇧D` | Dark / light page — the counterpart palette (persists) |
 | `c` / `s` | Comment / suggest a change on the selection — text or a formula (reading view) |
 | `a` / `x` | Accept / reject the suggestion under the caret |
 | `go` | Open another file — fuzzy history + per-segment path completion |
