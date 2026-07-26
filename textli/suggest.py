@@ -56,6 +56,13 @@ class SuggestionAnimator:
         self._anim: QVariantAnimation | None = None
         self._on_finish = None
 
+    def set_colors(self, *, body_color, del_color, add_color):
+        """Re-ink the tween for a new palette (the animation itself is
+        unchanged — only the colours it converges to)."""
+        self._body_color = QColor(body_color)
+        self._del_color = QColor(del_color)
+        self._add_color = QColor(add_color)
+
     def busy(self) -> bool:
         return self._anim is not None
 

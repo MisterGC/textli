@@ -24,14 +24,9 @@ from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from textli import search
 from textli.constants import (
-    FONT_FAMILY,
-    ZEN_HINT_COLOR,
-    ZEN_MD_COMMENT_HL,
-    ZEN_MD_FONT_SIZE_MIN,
-    ZEN_MD_SUGGEST_ADD,
-    ZEN_TEXT_COLOR,
-    _CTRL_MOD,
+    FONT_FAMILY, ZEN_MD_FONT_SIZE_MIN, _CTRL_MOD,
 )
+from textli import theme
 
 _MAX_VISIBLE = 12       # hit rows shown at once (window slides)
 _LINE_MAX = 72          # longer hit lines are tail-truncated for display
@@ -68,25 +63,27 @@ class SearchOverlay(QWidget):
         self.setObjectName("zenCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "QWidget#zenCard { background: #FBF7EC;"
-            " border: 1px solid #C9A227; border-radius: 8px; }")
+            f"QWidget#zenCard {{ background: {theme.ZEN_CARD_BG.name()};"
+            f" border: 1px solid {theme.ZEN_CARD_BORDER.name()};"
+            " border-radius: 8px; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
 
         title = QLabel(self)
         title.setTextFormat(Qt.TextFormat.RichText)
-        hint = (f"&nbsp;&nbsp;<span style='color:{ZEN_HINT_COLOR.name()};"
+        hint = (f"&nbsp;&nbsp;<span style='color:{theme.ZEN_HINT_COLOR.name()};"
                 f"font-weight:normal'>⇥ replace</span>" if allow_replace else "")
         title.setStyleSheet(
-            f"QLabel {{ color: {ZEN_TEXT_COLOR.name()}; font-weight: bold; }}")
+            f"QLabel {{ color: {theme.ZEN_TEXT_COLOR.name()}; font-weight: bold; }}")
         title.setFont(QFont(FONT_FAMILY, self._font_size))
         title.setText(f"Search{hint}")
         lay.addWidget(title)
 
         _field_css = (
-            f"QLineEdit {{ background: #FFFFFF; color: {ZEN_TEXT_COLOR.name()};"
-            f" border: 1px solid {ZEN_HINT_COLOR.name()}; border-radius: 4px;"
+            f"QLineEdit {{ background: {theme.ZEN_FIELD_BG.name()};"
+            f" color: {theme.ZEN_TEXT_COLOR.name()};"
+            f" border: 1px solid {theme.ZEN_HINT_COLOR.name()}; border-radius: 4px;"
             f" padding: 3px 6px; }}")
 
         self._input = QLineEdit(self)
@@ -110,7 +107,7 @@ class SearchOverlay(QWidget):
         self._replace_hint = QLabel(
             "↵ replace · ⌃↵ all · ⇥ back · Esc cancel", self)
         self._replace_hint.setStyleSheet(
-            f"QLabel {{ color: {ZEN_HINT_COLOR.name()}; }}")
+            f"QLabel {{ color: {theme.ZEN_HINT_COLOR.name()}; }}")
         self._replace_hint.setFont(QFont(
             FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 1)))
         self._replace_hint.hide()
@@ -198,21 +195,21 @@ class SearchOverlay(QWidget):
         q = self._input.text()
         lines = []
         for i, h in enumerate(window, start=start):
-            bg = (f"background:{ZEN_MD_COMMENT_HL.name()};"
+            bg = (f"background:{theme.ZEN_MD_COMMENT_HL.name()};"
                   if i == self._sel else "")
             lines.append(
                 f"<tr><td style='{bg}padding:1px 8px;"
-                f"color:{ZEN_HINT_COLOR.name()}'>{h.line_no + 1}"
-                f"&nbsp;&nbsp;<span style='color:{ZEN_TEXT_COLOR.name()}'>"
+                f"color:{theme.ZEN_HINT_COLOR.name()}'>{h.line_no + 1}"
+                f"&nbsp;&nbsp;<span style='color:{theme.ZEN_TEXT_COLOR.name()}'>"
                 f"{self._hit_html(h)}</span></td></tr>")
         more = ""
         if len(hits) > start + _MAX_VISIBLE:
             more = (f"<div style='padding:1px 8px;"
-                    f"color:{ZEN_HINT_COLOR.name()}'>…</div>")
+                    f"color:{theme.ZEN_HINT_COLOR.name()}'>…</div>")
         empty = ("" if hits or not q.strip() else
-                 f"<div style='padding:1px 8px;color:{ZEN_HINT_COLOR.name()}'>"
+                 f"<div style='padding:1px 8px;color:{theme.ZEN_HINT_COLOR.name()}'>"
                  f"no matches</div>")
-        count = (f"<div style='padding:1px 8px;color:{ZEN_HINT_COLOR.name()}'>"
+        count = (f"<div style='padding:1px 8px;color:{theme.ZEN_HINT_COLOR.name()}'>"
                  f"{len(hits)} hit{'s' if len(hits) != 1 else ''}</div>"
                  if hits else "")
         self._list.setText(
@@ -235,7 +232,7 @@ class SearchOverlay(QWidget):
                 continue
             a = max(a, 0)
             out.append(html.escape(vis[last:a]))
-            out.append(f"<b><span style='color:{ZEN_MD_SUGGEST_ADD.name()}'>"
+            out.append(f"<b><span style='color:{theme.ZEN_MD_SUGGEST_ADD.name()}'>"
                        f"{html.escape(vis[a:b])}</span></b>")
             last = b
         out.append(html.escape(vis[last:]))

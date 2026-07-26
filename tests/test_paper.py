@@ -13,13 +13,9 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli import paper  # noqa: E402
 from textli import settings as md_settings  # noqa: E402
-from textli.constants import (  # noqa: E402
-    _CTRL_MOD,
-    ZEN_MD_BG,
-    ZEN_MD_PAPER_GRAIN,
-    ZEN_MD_PAPER_TILE,
-)
+from textli.constants import _CTRL_MOD, ZEN_MD_PAPER_GRAIN, ZEN_MD_PAPER_TILE  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme
 
 MD = "# Heading\n\nSome prose to paint under.\n"
 
@@ -49,9 +45,9 @@ def test_grain_tile_matches_dpr_and_is_cached():
 
 def test_grain_is_deterministic_noise_within_amplitude():
     QApplication.instance() or QApplication([])
-    img = paper._build_tile(ZEN_MD_BG, 1.0)
-    assert img == paper._build_tile(ZEN_MD_BG, 1.0)   # fixed seed — same sheet
-    base = (ZEN_MD_BG.red(), ZEN_MD_BG.green(), ZEN_MD_BG.blue())
+    img = paper._build_tile(theme.ZEN_MD_BG, 1.0)
+    assert img == paper._build_tile(theme.ZEN_MD_BG, 1.0)   # fixed seed — same sheet
+    base = (theme.ZEN_MD_BG.red(), theme.ZEN_MD_BG.green(), theme.ZEN_MD_BG.blue())
     shades = set()
     for y in range(0, img.height(), 5):
         for x in range(0, img.width(), 5):

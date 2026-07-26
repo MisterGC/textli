@@ -23,6 +23,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont, QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QFrame, QPlainTextEdit
 
+from textli import theme
 from textli.fonts import register_bundled_fonts
 from textli.highlight import MarkdownHighlighter
 from textli.vim import VimKeyHandler, VimMode
@@ -92,6 +93,17 @@ class InlineVimEditor(QPlainTextEdit):
         self.document().documentLayout().documentSizeChanged.connect(
             self._autosize
         )
+
+        # The field takes its chrome from the host, but Markdown highlighting
+        # is inked from the palette — so a switch has to re-run it.
+        theme.changed.connect(self.apply_theme)
+
+    def apply_theme(self):
+        """Re-ink for the active palette. The field itself is chromeless by
+        design (the host paints around it); only the Markdown highlighting
+        carries palette colours."""
+        if self._highlighter is not None:
+            self._highlighter.rehighlight()
 
     # Vertical chrome around the text lines: document margin (4) + the
     # host stylesheet's border (1) + padding (4), top and bottom = 18.

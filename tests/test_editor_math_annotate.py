@@ -12,8 +12,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QTextCursor  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import ZEN_MD_COMMENT_HL  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme  # noqa: E402
 
 OBJ = "￼"   # object-replacement char — how a rendered image reads as text
 
@@ -102,7 +102,7 @@ def test_commented_formula_still_renders_highlighted():
     cur.setPosition(fpos + 1, QTextCursor.MoveMode.KeepAnchor)
     fmt = cur.charFormat()
     assert fmt.isImageFormat()
-    assert fmt.background().color() == ZEN_MD_COMMENT_HL
+    assert fmt.background().color() == theme.ZEN_MD_COMMENT_HL
 
 
 def test_suggest_a_replacement_on_a_formula():

@@ -43,14 +43,10 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QAbstractScrollArea
 
 from textli.constants import (
-    ZEN_MD_BG,
-    ZEN_MD_PAPER_EDGE_ALPHA,
-    ZEN_MD_PAPER_GRAIN,
-    ZEN_MD_PAPER_PLATEAU,
-    ZEN_MD_PAPER_SEED,
-    ZEN_MD_PAPER_TILE,
-    ZEN_TEXT_COLOR,
+    ZEN_MD_PAPER_EDGE_ALPHA, ZEN_MD_PAPER_GRAIN, ZEN_MD_PAPER_PLATEAU,
+    ZEN_MD_PAPER_SEED, ZEN_MD_PAPER_TILE,
 )
+from textli import theme
 
 # One tile per device-pixel-ratio (keyed in hundredths); the page color is a
 # constant, so the ratio is the only thing that varies between views.
@@ -73,12 +69,18 @@ def _build_tile(base: QColor, dpr: float) -> QImage:
     return img.copy()   # detach from `data` before it goes out of scope
 
 
+def invalidate_cache() -> None:
+    """Drop the cached grain tiles — they bake the page colour, so a palette
+    switch has to rebuild them."""
+    _tiles.clear()
+
+
 def grain_tile(dpr: float) -> QPixmap:
     """The grain tile for a device-pixel-ratio, built once and cached."""
     key = round(dpr * 100)
     tile = _tiles.get(key)
     if tile is None:
-        tile = QPixmap.fromImage(_build_tile(ZEN_MD_BG, dpr))
+        tile = QPixmap.fromImage(_build_tile(theme.ZEN_MD_BG, dpr))
         tile.setDevicePixelRatio(dpr)
         _tiles[key] = tile
     return tile
@@ -87,7 +89,7 @@ def grain_tile(dpr: float) -> QPixmap:
 def _paint_light(painter: QPainter, rect, x0: float, w: float) -> None:
     """The falloff: warm ink ramping in from both ends of the light frame
     ``[x0, x0 + w]``, fully clear across the central plateau."""
-    ink = QColor(ZEN_TEXT_COLOR)
+    ink = QColor(theme.ZEN_TEXT_COLOR)
     grad = QLinearGradient(x0, 0.0, x0 + w, 0.0)
     edge = (1.0 - ZEN_MD_PAPER_PLATEAU) / 2.0   # where falloff meets full bright
     for pos, alpha in (

@@ -8,15 +8,13 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 
+from textli import theme
 from textli.constants import FONT_FAMILY
 
 _JUMP_KEYS = "asdfjklghqweruioptyzxcvbnm"
 _RE_WORD = re.compile(r"\b\w")
 
-_BADGE_BG = QColor("#004578")
-_BADGE_FG = QColor("#FFFFFF")
 _BADGE_FONT = QFont(FONT_FAMILY, 10, QFont.Weight.Bold)
-_DIM_COLOR = QColor(245, 242, 237, 200)
 
 
 class WordJumpOverlay(QWidget):
@@ -129,18 +127,21 @@ class WordJumpOverlay(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Dim overlay
-        p.fillRect(self.rect(), _DIM_COLOR)
+        p.fillRect(self.rect(), theme.ZEN_JUMP_DIM)
 
-        # Draw badges
+        # Draw badges — the label ink comes from the badge fill, so it stays
+        # readable when the palette lifts that fill on a dark ground.
         p.setFont(_BADGE_FONT)
+        badge_bg = theme.ZEN_JUMP_BADGE_BG
+        badge_fg = theme.ink_on(badge_bg)
         for label, rect in self._label_rects:
             if self._typed and not label.startswith(self._typed):
                 continue
             display = label[len(self._typed):]
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_BADGE_BG)
+            p.setBrush(badge_bg)
             p.drawRoundedRect(rect, 3, 3)
-            p.setPen(_BADGE_FG)
+            p.setPen(badge_fg)
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, display)
 
         p.end()
