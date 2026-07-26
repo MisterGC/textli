@@ -16,6 +16,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
+from textli import settings as md_settings
+from textli import theme
 from textli.fonts import register_bundled_fonts
 from textli.editor import ZenMarkdownEditor
 
@@ -41,10 +43,14 @@ class TextliHost(QWidget):
         # Solid dark backdrop — the editor's dim wash composites over it
         # cleanly (no host canvas behind it as there is when embedded).
         self.setAutoFillBackground(True)
-        pal = self.palette()
-        pal.setColor(QPalette.ColorRole.Window, QColor("#23272A"))
-        self.setPalette(pal)
+        self._apply_backdrop()
+        theme.changed.connect(self._apply_backdrop)
         self._editor: ZenMarkdownEditor | None = None
+
+    def _apply_backdrop(self):
+        pal = self.palette()
+        pal.setColor(QPalette.ColorRole.Window, theme.ZEN_BACKDROP)
+        self.setPalette(pal)
 
     def open(
         self,
@@ -109,6 +115,11 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("textli")
     register_bundled_fonts()
+    # The standalone app restores its own palette preference. An embedding
+    # host doesn't come through here — it drives the theme via the API — so
+    # this can never override a host's choice.
+    theme.set_theme(
+        md_settings.app_settings().value("zen_md/theme", "light", type=str))
 
     # Let Ctrl+C quit cleanly (a periodic no-op tick lets the signal land).
     signal.signal(signal.SIGINT, lambda *_: app.quit())

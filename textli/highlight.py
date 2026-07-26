@@ -9,17 +9,10 @@ from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
 from textli import formulas as md_formulas
 from textli.constants import (
-    FONT_FAMILY,
-    ZEN_HINT_COLOR,
-    ZEN_MD_CODE_BG,
-    ZEN_MD_FONT_SIZE,
-    ZEN_MD_HEADING_SIZES,
-    ZEN_MD_LINK_COLOR,
+    FONT_FAMILY, ZEN_MD_FONT_SIZE, ZEN_MD_HEADING_SIZES,
     ZEN_MD_MUTED_ALPHA,
-    ZEN_MD_SYNTAX_COLOR,
-    ZEN_TEXT_COLOR,
-    ZEN_TITLE_COLOR,
 )
+from textli import theme
 
 # ── Regex patterns ──
 
@@ -111,37 +104,37 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             # Hash chars — muted
             self.setFormat(
                 m.start(1), len(m.group(1)),
-                _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused), size=size),
+                _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused), size=size),
             )
             # Heading text — same color as body, bold + larger size only.
             self.setFormat(
                 m.start(2), len(m.group(2)),
-                _fmt(color=self._alpha(ZEN_TEXT_COLOR, focused), size=size, bold=True),
+                _fmt(color=self._alpha(theme.ZEN_TEXT_COLOR, focused), size=size, bold=True),
             )
             return
 
         # Apply base text format for the whole line first
-        base = _fmt(color=self._alpha(ZEN_TEXT_COLOR, focused))
+        base = _fmt(color=self._alpha(theme.ZEN_TEXT_COLOR, focused))
         self.setFormat(0, len(text), base)
 
         # Bold
         for m in _RE_BOLD.finditer(text):
             # Asterisks muted
-            self.setFormat(m.start(), 2, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
-            self.setFormat(m.end() - 2, 2, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.start(), 2, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.end() - 2, 2, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
             # Content bold
             self.setFormat(
                 m.start(1), len(m.group(1)),
-                _fmt(color=self._alpha(ZEN_TEXT_COLOR, focused), bold=True),
+                _fmt(color=self._alpha(theme.ZEN_TEXT_COLOR, focused), bold=True),
             )
 
         # Italic
         for m in _RE_ITALIC.finditer(text):
-            self.setFormat(m.start(), 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
-            self.setFormat(m.end() - 1, 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.start(), 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.end() - 1, 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
             self.setFormat(
                 m.start(1), len(m.group(1)),
-                _fmt(color=self._alpha(ZEN_TEXT_COLOR, focused), italic=True),
+                _fmt(color=self._alpha(theme.ZEN_TEXT_COLOR, focused), italic=True),
             )
 
         # Math ($…$ / $$…$$) — the TeX set apart in the zen blue, delimiters
@@ -149,23 +142,23 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         # gets repainted as code below.
         for start, end, display in md_formulas.spans_in_line(text):
             d = 2 if display else 1
-            marker = _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused))
+            marker = _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused))
             self.setFormat(start, d, marker)
             self.setFormat(end - d, d, marker)
             self.setFormat(
                 start + d, end - start - 2 * d,
-                _fmt(color=self._alpha(ZEN_MD_LINK_COLOR, focused), italic=True),
+                _fmt(color=self._alpha(theme.ZEN_MD_LINK_COLOR, focused), italic=True),
             )
 
         # Inline code
         for m in _RE_CODE.finditer(text):
-            self.setFormat(m.start(), 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
-            self.setFormat(m.end() - 1, 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.start(), 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.end() - 1, 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
             self.setFormat(
                 m.start(1), len(m.group(1)),
                 _fmt(
-                    color=self._alpha(ZEN_TEXT_COLOR, focused),
-                    bg=ZEN_MD_CODE_BG,
+                    color=self._alpha(theme.ZEN_TEXT_COLOR, focused),
+                    bg=theme.ZEN_MD_CODE_BG,
                     family=FONT_FAMILY,
                 ),
             )
@@ -173,20 +166,20 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         # Links
         for m in _RE_LINK.finditer(text):
             # Brackets and parens muted
-            self.setFormat(m.start(), 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
-            self.setFormat(m.start() + 1 + len(m.group(1)), 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.start(), 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.start() + 1 + len(m.group(1)), 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
             url_start = m.start() + len(m.group(1)) + 2
-            self.setFormat(url_start, 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
-            self.setFormat(m.end() - 1, 1, _fmt(color=self._alpha(ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(url_start, 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
+            self.setFormat(m.end() - 1, 1, _fmt(color=self._alpha(theme.ZEN_MD_SYNTAX_COLOR, focused)))
             # Link text
             self.setFormat(
                 m.start(1), len(m.group(1)),
-                _fmt(color=self._alpha(ZEN_MD_LINK_COLOR, focused), underline=True),
+                _fmt(color=self._alpha(theme.ZEN_MD_LINK_COLOR, focused), underline=True),
             )
             # URL
             self.setFormat(
                 m.start(2), len(m.group(2)),
-                _fmt(color=self._alpha(ZEN_HINT_COLOR, focused)),
+                _fmt(color=self._alpha(theme.ZEN_HINT_COLOR, focused)),
             )
 
         # List markers
@@ -194,7 +187,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         if m:
             self.setFormat(
                 m.start(1), len(m.group(1)),
-                _fmt(color=self._alpha(ZEN_MD_LINK_COLOR, focused)),
+                _fmt(color=self._alpha(theme.ZEN_MD_LINK_COLOR, focused)),
             )
 
     def _is_focused(self, block_num: int) -> bool:

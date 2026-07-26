@@ -11,13 +11,10 @@ from PySide6.QtCore import QEvent, QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import (  # noqa: E402
-    ZEN_SEARCH_CURRENT,
-    ZEN_SEARCH_HIT,
-    _CTRL_MOD,
-)
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 from textli.vim import VimMode  # noqa: E402
+from textli import theme
+from textli.constants import _CTRL_MOD  # noqa: E402
 
 MD = ("# Title\n\n"
       "alpha paragraph mentioning pipeline here.\n\n"
@@ -96,12 +93,12 @@ def test_enter_jumps_to_the_match_and_highlights_it():
     sels = ed._editor.extraSelections()
     assert len(sels) == 2
     colors = {s.format.background().color().rgba() for s in sels}
-    assert ZEN_SEARCH_CURRENT.rgba() in colors
-    assert ZEN_SEARCH_HIT.rgba() in colors
+    assert theme.ZEN_SEARCH_CURRENT.rgba() in colors
+    assert theme.ZEN_SEARCH_HIT.rgba() in colors
     # the wash covers the match region, not the whole line
     cur_sel = next(s for s in sels
                    if s.format.background().color().rgba()
-                   == ZEN_SEARCH_CURRENT.rgba())
+                   == theme.ZEN_SEARCH_CURRENT.rgba())
     assert cur_sel.cursor.selectionStart() == match_at
     assert cur_sel.cursor.selectionEnd() == match_at + len("pipeline")
 

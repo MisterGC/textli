@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-26
+
+### Added
+
+- **Dark theme, as the counterpart to the warm palette** (#44) — a second
+  palette in the same warm hue family: a low-key ground (`#1E1C19`, shared
+  with [grafli](https://github.com/MisterGC/grafli) so an embedded editor
+  sits on its host's board instead of glowing against it) carrying the light
+  theme's paper colour as its ink. `⌘⇧D` switches and persists it. Two
+  counterpart palettes, not a theme engine: no third theme, no settings
+  surface.
+
+  Colours moved out of `constants.py` into a new `textli/theme.py` — a frozen
+  `Palette` with `LIGHT`/`DARK` counterparts whose module globals are rebound
+  on switch, so every consumer reads the active value with no re-import.
+  Dark values are *derived* from the light theme's measured relationships
+  rather than carried across the inversion: roles readable by luminance
+  reproduce their contrast ratio against the ground they are actually drawn
+  on (syntax tokens against the code band, not the page), while roles
+  readable by hue — the amber number token measures only 1.74:1 on the light
+  band — keep their hue and clear a readability floor instead. Anything drawn
+  on a fill takes its ink from that fill through a single `ink_on()`, so a
+  pinned light ink can't survive the ground changing under it. Tests assert
+  those rules rather than the colours, including a guard that fails if any
+  module re-freezes the palette with a `from theme import …`.
+
+  Along the way the scrollbar stopped being the platform's near-white column
+  — invisible on paper, the brightest thing on the page once the ground goes
+  dark — and became a thin muted handle on a transparent track in both
+  palettes.
+
+- **Theme API for embedding hosts** (#44) — `textli.set_theme("dark")`,
+  `toggle_theme()` and `is_dark()` on the package root, plus a
+  `textli.theme_changed` signal. Open `ZenMarkdownEditor` and
+  `InlineVimEditor` instances listen to it and restyle themselves in place —
+  re-running their stylesheets, syntax highlighting and the read view's
+  render (math and chart images bake their ink) — so a host only makes the
+  one call. `ZenMarkdownEditor(..., theme_name="dark")` opens straight onto
+  the dark ground for a host that is already dark, and `apply_theme()` is
+  there for hosts that change colours without going through `set_theme`.
+  Theme persistence belongs to the standalone app alone, so it can never
+  override a host's choice.
+
 ## [0.5.0] - 2026-07-23
 
 ### Added

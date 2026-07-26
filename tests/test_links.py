@@ -11,9 +11,9 @@ from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import ZEN_MD_LINK_COLOR  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 from textli.links import link_at  # noqa: E402
+from textli import theme  # noqa: E402
 
 MD = ("# Title\n\n"
       "Read the [Qt docs](https://doc.qt.io) for details.\n\n"
@@ -139,7 +139,7 @@ def test_read_view_links_wear_the_zen_color():
         block = block.next()
     assert anchors, "rendered document should contain anchors"
     for fmt in anchors:
-        assert fmt.foreground().color().name() == ZEN_MD_LINK_COLOR.name()
+        assert fmt.foreground().color().name() == theme.ZEN_MD_LINK_COLOR.name()
         assert fmt.fontUnderline()
 
 

@@ -10,8 +10,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli import comments as md_comments  # noqa: E402
-from textli.constants import ZEN_MD_COMMENT_HL  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme  # noqa: E402
 
 MD = (
     "# Notes\n\n"
@@ -51,7 +51,7 @@ def test_span_is_highlighted():
     start, end = cur.selectionStart(), cur.selectionEnd()
     for pos in range(start + 1, end + 1):
         cur.setPosition(pos)
-        assert cur.charFormat().background().color() == ZEN_MD_COMMENT_HL
+        assert cur.charFormat().background().color() == theme.ZEN_MD_COMMENT_HL
 
 
 def test_uncommented_text_is_not_highlighted():
@@ -61,7 +61,7 @@ def test_uncommented_text_is_not_highlighted():
     cur = doc.find("look off here")
     assert not cur.isNull()
     cur.setPosition(cur.selectionStart() + 1)
-    assert cur.charFormat().background().color() != ZEN_MD_COMMENT_HL
+    assert cur.charFormat().background().color() != theme.ZEN_MD_COMMENT_HL
 
 
 def test_plain_markdown_renders_unchanged():

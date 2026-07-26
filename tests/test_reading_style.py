@@ -9,14 +9,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QTextBlockFormat  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import (  # noqa: E402
-    FONT_FAMILY,
-    READING_FONT_FAMILY,
-    ZEN_HINT_COLOR,
-    ZEN_MD_CODE_BLOCK_BG,
-    ZEN_MD_READING_LINE_HEIGHT,
-)
+from textli.constants import FONT_FAMILY, READING_FONT_FAMILY, ZEN_MD_READING_LINE_HEIGHT  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme
 
 MD = ("# One\n\n"
       "Prose with `inline_code` in it.\n\n"
@@ -53,7 +48,7 @@ def test_inline_code_gets_the_chip_wash():
     ed._toggle_rendered()
     frags = {f.text(): f for _b, f in _fragments(ed._rendered.document())}
     chip = frags["inline_code"].charFormat()
-    assert chip.background().color().name() == ZEN_MD_CODE_BLOCK_BG.name()
+    assert chip.background().color().name() == theme.ZEN_MD_CODE_BLOCK_BG.name()
 
 
 def test_fenced_code_keeps_no_char_background():
@@ -73,7 +68,7 @@ def test_chips_survive_the_clean_preview():
     ed._toggle_preview()
     frags = {f.text(): f for _b, f in _fragments(ed._rendered.document())}
     assert (frags["inline_code"].charFormat().background().color().name()
-            == ZEN_MD_CODE_BLOCK_BG.name())
+            == theme.ZEN_MD_CODE_BLOCK_BG.name())
 
 
 # ── reading face (#31) ──
@@ -136,7 +131,7 @@ def test_quotes_wear_hint_ink_and_register_a_bar():
     it = quote_block.begin()
     frag = it.fragment()
     assert (frag.charFormat().foreground().color().name()
-            == ZEN_HINT_COLOR.name())
+            == theme.ZEN_HINT_COLOR.name())
     assert ed._rendered._quote_bars == [
         (quote_block.position(), quote_block.position())]
 
@@ -147,7 +142,7 @@ def test_prose_keeps_body_ink():
     for block, frag in _fragments(ed._rendered.document()):
         if "Plain prose after." in frag.text():
             assert (frag.charFormat().foreground().color().name()
-                    != ZEN_HINT_COLOR.name())
+                    != theme.ZEN_HINT_COLOR.name())
 
 
 # ── read-view section focus ──
@@ -360,9 +355,7 @@ def test_leaving_read_mode_lifts_the_spotlight():
 # ── Comment editor: roomy + handwritten (annotation feel) ──
 
 def test_comment_field_is_a_tinted_handwritten_note():
-    from textli.constants import (
-        COMMENT_FONT_FAMILY, ZEN_MD_COMMENT_INK,
-        ZEN_MD_COMMENT_NOTE_BG, ZEN_MD_COMMENT_WIDTH)
+    from textli.constants import COMMENT_FONT_FAMILY, ZEN_MD_COMMENT_WIDTH
     ed = _editor()
     ed._toggle_rendered()
     v = ed._rendered
@@ -373,21 +366,19 @@ def test_comment_field_is_a_tinted_handwritten_note():
     ss = f.styleSheet()
     assert f.font().family() == COMMENT_FONT_FAMILY      # handwriting face
     assert f.font().pointSize() > ed._font_size          # larger than body ink
-    assert ZEN_MD_COMMENT_INK.name() in ss              # dark red ink
-    assert ZEN_MD_COMMENT_NOTE_BG.name() in ss          # same tint as the mark
+    assert theme.ZEN_MD_COMMENT_INK.name() in ss              # dark red ink
+    assert theme.ZEN_MD_COMMENT_NOTE_BG.name() in ss          # same tint as the mark
     assert f.width() == min(ZEN_MD_COMMENT_WIDTH, v.viewport().width() - 24)
 
 
 def test_comment_note_bg_matches_the_highlight_over_paper():
-    from textli.constants import (
-        _flatten, ZEN_MD_COMMENT_HL, ZEN_MD_BG, ZEN_MD_COMMENT_NOTE_BG)
-    assert ZEN_MD_COMMENT_NOTE_BG.name() == _flatten(
-        ZEN_MD_COMMENT_HL, ZEN_MD_BG).name()
+    from textli.theme import _flatten
+    assert theme.ZEN_MD_COMMENT_NOTE_BG.name() == _flatten(
+        theme.ZEN_MD_COMMENT_HL, theme.ZEN_MD_BG).name()
 
 
 def test_comment_field_grows_with_text_then_caps():
-    from textli.constants import (
-        ZEN_MD_COMMENT_MAX_HEIGHT, ZEN_MD_COMMENT_MIN_HEIGHT)
+    from textli.constants import ZEN_MD_COMMENT_MAX_HEIGHT, ZEN_MD_COMMENT_MIN_HEIGHT
     ed = _editor()
     ed._toggle_rendered()
     v = ed._rendered

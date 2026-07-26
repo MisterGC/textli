@@ -77,55 +77,17 @@ from textli import status as md_status
 from textli.open_overlay import OpenFileOverlay
 from textli.search_overlay import SearchOverlay
 from textli.constants import (
-    COMMENT_FONT_FAMILY,
-    FONT_FAMILY,
-    READING_FONT_FAMILY,
-    ZEN_MD_COMMENT_INK,
-    ZEN_MD_COMMENT_MAX_HEIGHT,
-    ZEN_MD_COMMENT_MIN_HEIGHT,
-    ZEN_MD_COMMENT_NOTE_BG,
-    ZEN_MD_COMMENT_SIZE_BOOST,
-    ZEN_MD_COMMENT_WIDTH,
-    ZEN_CODE_COMMENT,
-    ZEN_CODE_KEYWORD,
-    ZEN_CODE_NUMBER,
-    ZEN_CODE_STRING,
-    ZEN_HINT_COLOR,
-    ZEN_MD_BG,
-    ZEN_MD_CODE_BLOCK_BG,
-    ZEN_MD_CODE_PAD_H,
-    ZEN_MD_CANVAS_DIM_COLOR,
-    ZEN_MD_COMMENT_HL,
-    ZEN_MD_SUGGEST_ADD,
-    ZEN_MD_CARD_H_RATIO,
-    ZEN_MD_CARD_INNER_PAD_H,
-    ZEN_MD_CARD_INNER_PAD_V,
-    ZEN_MD_CARD_RADIUS,
-    ZEN_MD_DIM_COLOR,
-    ZEN_MD_FONT_SIZE,
-    ZEN_MD_FONT_SIZE_MAX,
-    ZEN_MD_FONT_SIZE_MIN,
-    ZEN_MD_HEADING_SIZES,
-    ZEN_MD_READING_LINE_HEIGHT,
-    ZEN_MD_SRC_ANCHOR_BG,
-    ZEN_MD_SRC_COLUMNS,
-    ZEN_MD_SRC_FONT_SCALE,
-    ZEN_MD_SYNTAX_COLOR,
-    ZEN_MD_CARET,
-    ZEN_MD_FOCUS_CORE_LINES,
-    ZEN_MD_FOCUS_DIM_MAX,
-    ZEN_MD_FOCUS_FALLOFF_LINES,
-    ZEN_MD_LINK_COLOR,
-    ZEN_MD_TABLE_BORDER,
-    ZEN_MD_TABLE_HEADER_BG,
-    ZEN_MD_TABLE_PAD,
+    COMMENT_FONT_FAMILY, FONT_FAMILY, READING_FONT_FAMILY,
+    ZEN_MD_COMMENT_MAX_HEIGHT, ZEN_MD_COMMENT_MIN_HEIGHT,
+    ZEN_MD_COMMENT_SIZE_BOOST, ZEN_MD_COMMENT_WIDTH, ZEN_MD_CODE_PAD_H,
+    ZEN_MD_CARD_H_RATIO, ZEN_MD_CARD_INNER_PAD_H, ZEN_MD_CARD_INNER_PAD_V,
+    ZEN_MD_CARD_RADIUS, ZEN_MD_FONT_SIZE, ZEN_MD_FONT_SIZE_MAX,
+    ZEN_MD_FONT_SIZE_MIN, ZEN_MD_HEADING_SIZES,
+    ZEN_MD_READING_LINE_HEIGHT, ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
+    ZEN_MD_FOCUS_CORE_LINES, ZEN_MD_FOCUS_DIM_MAX,
+    ZEN_MD_FOCUS_FALLOFF_LINES, ZEN_MD_MUTED_ALPHA, ZEN_MD_TABLE_PAD,
     ZEN_MD_MAX_WIDTH,
-    ZEN_MD_MAX_WIDTH_MAX,
-    ZEN_MD_MAX_WIDTH_MIN,
-    ZEN_MD_WIDTH_STEP,
-    ZEN_SEARCH_CURRENT,
-    ZEN_SEARCH_HIT,
-    ZEN_TEXT_COLOR,
+    ZEN_MD_MAX_WIDTH_MAX, ZEN_MD_MAX_WIDTH_MIN, ZEN_MD_WIDTH_STEP,
     _CTRL_MOD,
 )
 from textli.fonts import register_bundled_fonts
@@ -133,6 +95,7 @@ from textli.highlight import MarkdownHighlighter, compute_focus_range
 from textli.jump import WordJumpOverlay
 from textli.suggest import SuggestionAnimator
 from textli.vim import VimKeyHandler, VimMode
+from textli import theme
 
 # Custom char-format property tagging a rendered span with its comment index,
 # so the reveal/navigate loop can map a highlighted span back to its source
@@ -248,11 +211,11 @@ class _ReadingView(QTextBrowser):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._strikes: list[list] = []          # [start, end, alpha]
-        self._strike_color = QColor(ZEN_TEXT_COLOR)
+        self._strike_color = QColor(theme.ZEN_TEXT_COLOR)
         # Block positions of h1/h2 headings — each gets a thin muted rule
         # painted under it (GitHub-style; block formats have no borders).
         self._heading_rules: list[int] = []
-        self._rule_color = QColor(ZEN_MD_SYNTAX_COLOR)
+        self._rule_color = QColor(theme.ZEN_MD_SYNTAX_COLOR)
         self._rule_color.setAlpha(150)
         # Code bands, one (first_block_pos, last_block_pos) per fence run.
         # Painted here rather than via block backgrounds: Qt shifts a
@@ -267,20 +230,20 @@ class _ReadingView(QTextBrowser):
         self._anchor_band: tuple[int, int] | None = None
         # Blockquote bars, same (first_pos, last_pos) shape per quote run.
         self._quote_bars: list[tuple[int, int]] = []
-        self._quote_bar_color = QColor(ZEN_MD_SYNTAX_COLOR)
+        self._quote_bar_color = QColor(theme.ZEN_MD_SYNTAX_COLOR)
         self._quote_bar_color.setAlpha(180)
         # Section focus: everything outside (start_pos, end_pos) is dimmed
         # under a translucent paper wash — nothing in the document mutates,
         # so comments, search hits and marks stay intact beneath it.
         self._focus_span: tuple[int, int] | None = None
-        self._focus_wash = QColor(ZEN_MD_BG)
+        self._focus_wash = QColor(theme.ZEN_MD_BG)
         self._focus_wash.setAlpha(175)
         # Focus reading mode (`f`): a spotlight centred on the caret line — a
         # bright band fading to a paper wash by distance, so brightness never
         # snaps at paragraph boundaries. Distinct from the section wash above;
         # only one is ever on.
         self._focus_reading = False
-        self._focus_dim = QColor(ZEN_MD_BG)
+        self._focus_dim = QColor(theme.ZEN_MD_BG)
         self._focus_dim.setAlpha(ZEN_MD_FOCUS_DIM_MAX)
         # Paper surface (grain + light, see paper.py) painted under the
         # rendered text — the same sheet the write view wears.
@@ -289,7 +252,7 @@ class _ReadingView(QTextBrowser):
         # the current glyph instead (vim-style), so it's findable on the warm
         # page while placing comments. Repaint as it moves or focus shifts.
         self.setCursorWidth(0)
-        self._caret_color = QColor(ZEN_MD_CARET)
+        self._caret_color = QColor(theme.ZEN_MD_CARET)
         self.cursorPositionChanged.connect(self.viewport().update)
         self.selectionChanged.connect(self.viewport().update)
 
@@ -373,11 +336,11 @@ class _ReadingView(QTextBrowser):
             painter.drawRoundedRect(QRectF(x1, top, x2 - x1, bottom - top),
                                     radius, radius)
 
-        painter.setBrush(ZEN_MD_CODE_BLOCK_BG)
+        painter.setBrush(theme.ZEN_MD_CODE_BLOCK_BG)
         for first, last in self._code_bands:
             plate(first, last, 6.0)
         if self._anchor_band is not None:
-            painter.setBrush(ZEN_MD_SRC_ANCHOR_BG)
+            painter.setBrush(theme.ZEN_MD_SRC_ANCHOR_BG)
             plate(*self._anchor_band, 3.0)
         painter.end()
 
@@ -563,8 +526,8 @@ def editor_help_html() -> str:
     """The editor's own help (F1). Owned here so it's identical whether the editor
     is embedded in a host app (e.g. grafli) or run standalone via ``textli`` —
     a self-contained contribution the host never has to know the contents of."""
-    accent = ZEN_MD_SUGGEST_ADD.name()
-    ink = ZEN_TEXT_COLOR.name()
+    accent = theme.ZEN_MD_SUGGEST_ADD.name()
+    ink = theme.ZEN_TEXT_COLOR.name()
     hdr = f"color:{accent};font-weight:bold;padding-top:14px;padding-bottom:2px"
     keyc = "font-family:monospace;white-space:nowrap;padding:3px 14px 3px 0;vertical-align:top"
     cell = "padding:3px 0;vertical-align:top"
@@ -597,6 +560,7 @@ def editor_help_html() -> str:
         ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
         ("⌘⇧P", "Paper surface — grain &amp; light under the text; off = the flat page (persists)"),
+        ("⌘⇧D", "Dark / light page — the counterpart palette (persists)"),
         ("⌘+ / ⌘- / ⌘0", "Font size bigger / smaller / reset (persists)"),
         ("⌘⇧→ / ⌘⇧← / ⌘⇧↓", "Content column wider / narrower / reset (persists)"),
         ("⌘J", "Word-jump overlay (Easymotion-style two-key jump)"),
@@ -700,8 +664,13 @@ class ZenMarkdownEditor(QWidget):
         anchor: str = "",
         start_in_read: bool = False,
         canvas: QWidget | None = None,
+        theme_name: str | None = None,
     ):
         super().__init__(parent)
+        # An embedding host that is already dark says so here, so the editor
+        # never paints a light frame first.
+        if theme_name is not None:
+            theme.set_theme(theme_name)
         # Bundled faces (JetBrains Mono, Caveat) — register on construction so
         # an embedding host renders identically to the standalone app without
         # extra wiring; idempotent, so the standalone call stays harmless (#25).
@@ -870,13 +839,7 @@ class ZenMarkdownEditor(QWidget):
         self._editor.setFont(QFont(FONT_FAMILY, self._font_size))
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self._editor.setReadOnly(self._read_only)
-        self._editor.setStyleSheet(
-            f"QPlainTextEdit {{"
-            f" background: {ZEN_MD_BG.name()}; color: {ZEN_TEXT_COLOR.name()};"
-            f" border: none; padding: 0px;"
-            f" selection-background-color: #B8D4E8;"
-            f"}}"
-        )
+        self._apply_view_stylesheet(self._editor, "QPlainTextEdit")
         self._editor.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -889,13 +852,7 @@ class ZenMarkdownEditor(QWidget):
         self._rendered = _ReadingView()
         self._rendered.setOpenExternalLinks(True)
         self._rendered.setFont(QFont(READING_FONT_FAMILY, self._font_size))
-        self._rendered.setStyleSheet(
-            f"QTextBrowser {{"
-            f" background: {ZEN_MD_BG.name()}; color: {ZEN_TEXT_COLOR.name()};"
-            f" border: none; padding: 0px;"
-            f" selection-background-color: #B8D4E8;"
-            f"}}"
-        )
+        self._apply_view_stylesheet(self._rendered, "QTextBrowser")
         # Keyboard-selectable so the read view has a movable caret for vim
         # motions and visual-mode span selection (it stays read-only).
         self._rendered.setTextInteractionFlags(
@@ -921,10 +878,10 @@ class ZenMarkdownEditor(QWidget):
         # stays) before the source edit lands.
         self._suggest_animator = SuggestionAnimator(
             self._rendered,
-            body_color=ZEN_TEXT_COLOR,
+            body_color=theme.ZEN_TEXT_COLOR,
             body_family=FONT_FAMILY,
-            del_color=ZEN_TEXT_COLOR,   # removals are body-ink now (just struck)
-            add_color=ZEN_MD_SUGGEST_ADD,
+            del_color=theme.ZEN_TEXT_COLOR,   # removals are body-ink now (just struck)
+            add_color=theme.ZEN_MD_SUGGEST_ADD,
         )
 
         # Markdown highlighter + paragraph focus (off by default; ⌘. toggles)
@@ -969,9 +926,7 @@ class ZenMarkdownEditor(QWidget):
         self._status_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._status_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._status_label.setStyleSheet(
-            f"color: rgba({ZEN_HINT_COLOR.red()}, {ZEN_HINT_COLOR.green()},"
-            f" {ZEN_HINT_COLOR.blue()}, 175); background: transparent;")
+        self._apply_status_stylesheet()
         self._session_start_words = md_status.word_count(text)
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
@@ -988,6 +943,78 @@ class ZenMarkdownEditor(QWidget):
         self._editor.setTextCursor(cursor)
         self._update_focus()
         self._refresh_status()
+        # A host that switches the palette while this editor is open gets the
+        # restyle for free — no cascade to wire up on its side.
+        theme.changed.connect(self.apply_theme)
+
+    # ── Theme ────────────────────────────────────────────────────
+
+    def _apply_status_stylesheet(self):
+        """The whisper line's ink, at the alpha that keeps it a whisper."""
+        self._status_label.setStyleSheet(
+            f"color: rgba({theme.ZEN_HINT_COLOR.red()},"
+            f" {theme.ZEN_HINT_COLOR.green()},"
+            f" {theme.ZEN_HINT_COLOR.blue()}, 175); background: transparent;")
+
+    def _apply_view_stylesheet(self, view, selector: str):
+        """Paint one view's chrome in the active palette.
+
+        The scrollbar is styled rather than left to the platform: its default
+        is an opaque near-white column, which is invisible on paper but the
+        single brightest thing on the page once the ground goes dark. A thin
+        handle in the muted ink on a transparent track reads the same way in
+        both palettes and keeps the page chrome-free.
+        """
+        handle = QColor(theme.ZEN_HINT_COLOR)
+        handle.setAlpha(ZEN_MD_MUTED_ALPHA)
+        view.setStyleSheet(
+            f"{selector} {{"
+            f" background: {theme.ZEN_MD_BG.name()};"
+            f" color: {theme.ZEN_TEXT_COLOR.name()};"
+            f" border: none; padding: 0px;"
+            f" selection-background-color: {theme.ZEN_SELECTION_BG.name()};"
+            f"}}"
+            f"{selector} QScrollBar:vertical {{"
+            f" background: transparent; width: 8px; margin: 0px;"
+            f"}}"
+            f"{selector} QScrollBar::handle:vertical {{"
+            f" background: rgba({handle.red()}, {handle.green()},"
+            f" {handle.blue()}, {handle.alpha()});"
+            f" border-radius: 4px; min-height: 24px;"
+            f"}}"
+            f"{selector} QScrollBar::add-line:vertical,"
+            f"{selector} QScrollBar::sub-line:vertical {{ height: 0px; }}"
+            f"{selector} QScrollBar::add-page:vertical,"
+            f"{selector} QScrollBar::sub-page:vertical {{"
+            f" background: transparent;"
+            f"}}"
+        )
+
+    def apply_theme(self):
+        """Restyle in place for the active palette.
+
+        Colours reach three kinds of surface and each needs its own nudge: the
+        stylesheets are re-set, the highlighter re-runs over the source, and
+        the read view is re-rendered because its math and chart images bake
+        their ink at render time (their caches key on the colour, so a switch
+        simply misses and redraws). The paper sheet is rebuilt last so grain
+        and falloff sit on the new ground.
+        """
+        self._apply_view_stylesheet(self._editor, "QPlainTextEdit")
+        self._apply_view_stylesheet(self._rendered, "QTextBrowser")
+        self._suggest_animator.set_colors(
+            body_color=theme.ZEN_TEXT_COLOR,
+            del_color=theme.ZEN_TEXT_COLOR,
+            add_color=theme.ZEN_MD_SUGGEST_ADD,
+        )
+        self._apply_status_stylesheet()
+        self._highlighter.rehighlight()
+        md_paper.invalidate_cache()
+        if self._rendered_mode:
+            self._render_markdown(self._editor.toPlainText())
+        self._update_focus()
+        self._refresh_status()
+        self.update()
 
     def _on_mode_changed(self, mode: VimMode):
         # Disable macOS input method in normal mode to prevent IMK
@@ -1306,6 +1333,14 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.set_paper(self._paper)
         self.update()   # the card chrome wears the same sheet
         self._flash_mode("PAPER" if self._paper else "PAPER OFF")
+
+    def _toggle_theme(self):
+        """⌘⇧D — switch to the counterpart palette (persists). The restyle
+        itself rides on ``theme.changed``, which every open editor listens to,
+        so a host's other editors follow along without being told."""
+        name = theme.toggle()
+        md_settings.app_settings().setValue("zen_md/theme", name)
+        self._flash_mode("DARK" if theme.is_dark() else "LIGHT")
 
     def _typewriter_recenter(self):
         """Keep the caret line at the typewriter height (~40% down the
@@ -1662,8 +1697,8 @@ class ZenMarkdownEditor(QWidget):
         the document itself is never touched."""
         sels = []
         for h in hits:
-            color = (ZEN_SEARCH_CURRENT if h.start == current_start
-                     else ZEN_SEARCH_HIT)
+            color = (theme.ZEN_SEARCH_CURRENT if h.start == current_start
+                     else theme.ZEN_SEARCH_HIT)
             for a, b in (h.spans or ((0, h.end - h.start),)):
                 sel = QTextBrowser.ExtraSelection()
                 cur = QTextCursor(view.document())
@@ -1700,7 +1735,7 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
             sel.cursor = cur
             sel.format.setBackground(QBrush(
-                ZEN_SEARCH_CURRENT if s == current else ZEN_SEARCH_HIT))
+                theme.ZEN_SEARCH_CURRENT if s == current else theme.ZEN_SEARCH_HIT))
             sels.append(sel)
         view.setExtraSelections(sels)
 
@@ -1803,7 +1838,7 @@ class ZenMarkdownEditor(QWidget):
         (no document-format equivalent). Cloning keeps the live view intact."""
         doc = self._rendered.document().clone()
         band = QTextBlockFormat()
-        band.setBackground(ZEN_MD_CODE_BLOCK_BG)
+        band.setBackground(theme.ZEN_MD_CODE_BLOCK_BG)
         block = doc.begin()
         while block.isValid():
             if block.blockFormat().hasProperty(
@@ -1827,8 +1862,8 @@ class ZenMarkdownEditor(QWidget):
         browser.setFont(QFont(
             FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 4)))
         browser.setStyleSheet(
-            f"QTextBrowser {{ background: {ZEN_MD_BG.name()};"
-            f" color: {ZEN_TEXT_COLOR.name()}; border: none; padding: 14px; }}")
+            f"QTextBrowser {{ background: {theme.ZEN_MD_BG.name()};"
+            f" color: {theme.ZEN_TEXT_COLOR.name()}; border: none; padding: 14px; }}")
         browser.setHtml(editor_help_html())
         btn = QPushButton("Close", dlg)
         btn.clicked.connect(dlg.accept)
@@ -1955,8 +1990,8 @@ class ZenMarkdownEditor(QWidget):
             font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 10)
             lbl.setFont(font)
             lbl.setStyleSheet(
-                f"color: rgba({ZEN_TEXT_COLOR.red()}, {ZEN_TEXT_COLOR.green()},"
-                f" {ZEN_TEXT_COLOR.blue()}, 200); background: transparent;"
+                f"color: rgba({theme.ZEN_TEXT_COLOR.red()}, {theme.ZEN_TEXT_COLOR.green()},"
+                f" {theme.ZEN_TEXT_COLOR.blue()}, 200); background: transparent;"
             )
             self._mode_flash = lbl
             self._mode_flash_effect = QGraphicsOpacityEffect(lbl)
@@ -2009,7 +2044,7 @@ class ZenMarkdownEditor(QWidget):
         def replace(i: int, f: md_formulas.Formula) -> str:
             rendered = mathrender.render(
                 f.tex, display=f.display, px_size=px_size,
-                color=ZEN_TEXT_COLOR.name(), dpr=dpr, descent=descent)
+                color=theme.ZEN_TEXT_COLOR.name(), dpr=dpr, descent=descent)
             if rendered is None:
                 raw = md[f.start:f.end]
                 return raw if "\n" in raw else md_formulas.code_span(raw)
@@ -2678,7 +2713,7 @@ class ZenMarkdownEditor(QWidget):
                 it += 1
             block = block.next()
         fmt = QTextCharFormat()
-        fmt.setForeground(ZEN_MD_LINK_COLOR)
+        fmt.setForeground(theme.ZEN_MD_LINK_COLOR)
         fmt.setFontUnderline(True)
         for pos, length in ranges:
             cur = QTextCursor(doc)
@@ -2755,10 +2790,10 @@ class ZenMarkdownEditor(QWidget):
 
         token_fmts = {}
         for cls, color, italic in (
-            ("keyword", ZEN_CODE_KEYWORD, False),
-            ("string", ZEN_CODE_STRING, False),
-            ("comment", ZEN_CODE_COMMENT, True),
-            ("number", ZEN_CODE_NUMBER, False),
+            ("keyword", theme.ZEN_CODE_KEYWORD, False),
+            ("string", theme.ZEN_CODE_STRING, False),
+            ("comment", theme.ZEN_CODE_COMMENT, True),
+            ("number", theme.ZEN_CODE_NUMBER, False),
         ):
             f = QTextCharFormat()
             f.setForeground(color)
@@ -2832,7 +2867,7 @@ class ZenMarkdownEditor(QWidget):
                     it += 1
             block = block.next()
         fmt = QTextCharFormat()
-        fmt.setBackground(ZEN_MD_CODE_BLOCK_BG)
+        fmt.setBackground(theme.ZEN_MD_CODE_BLOCK_BG)
         with _batched(doc):
             for pos, length in ranges:
                 cur = QTextCursor(doc)
@@ -2901,7 +2936,7 @@ class ZenMarkdownEditor(QWidget):
         vertical bar at the left painted by the view (Qt only indents
         them). Consecutive quote blocks share one bar."""
         ink = QTextCharFormat()
-        ink.setForeground(ZEN_HINT_COLOR)
+        ink.setForeground(theme.ZEN_HINT_COLOR)
         bars = []
         prev_quoted = False
         block = doc.begin()
@@ -2933,7 +2968,7 @@ class ZenMarkdownEditor(QWidget):
             tf.setBorder(1)
             tf.setBorderStyle(
                 QTextFrameFormat.BorderStyle.BorderStyle_Solid)
-            tf.setBorderBrush(ZEN_MD_TABLE_BORDER)
+            tf.setBorderBrush(theme.ZEN_MD_TABLE_BORDER)
             tf.setBorderCollapse(True)
             tf.setCellPadding(ZEN_MD_TABLE_PAD)
             tf.setCellSpacing(0)
@@ -2945,7 +2980,7 @@ class ZenMarkdownEditor(QWidget):
             for col in range(frame.columns()):
                 cell = frame.cellAt(0, col)
                 cf = cell.format()
-                cf.setBackground(ZEN_MD_TABLE_HEADER_BG)
+                cf.setBackground(theme.ZEN_MD_TABLE_HEADER_BG)
                 cell.setFormat(cf)
                 cur = cell.firstCursorPosition()
                 cur.setPosition(cell.lastCursorPosition().position(),
@@ -3228,8 +3263,9 @@ class ZenMarkdownEditor(QWidget):
         lbl.setFont(QFont(
             FONT_FAMILY, max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 2)))
         lbl.setStyleSheet(
-            f"QLabel {{ color: {ZEN_TEXT_COLOR.name()};"
-            f" background: #FBF7EC; border: 1px solid #C9A227;"
+            f"QLabel {{ color: {theme.ZEN_TEXT_COLOR.name()};"
+            f" background: {theme.ZEN_CARD_BG.name()};"
+            f" border: 1px solid {theme.ZEN_CARD_BORDER.name()};"
             f" border-radius: 8px; padding: 6px 14px; }}")
         lbl.setText(text)
         lbl.adjustSize()
@@ -3340,7 +3376,7 @@ class ZenMarkdownEditor(QWidget):
         """gc — jump-list of every change and comment in the document."""
         marker = {"substitute": "±", "insert": "+", "delete": "−", "comment": "✎"}
         rows = [
-            (s, e, f"<span style='color:{ZEN_MD_SUGGEST_ADD.name()}'>"
+            (s, e, f"<span style='color:{theme.ZEN_MD_SUGGEST_ADD.name()}'>"
                    f"{marker.get(k, '?')}</span>&nbsp;{self._esc_html(label)}")
             for (s, e, k, label) in self._build_changes_list()
         ]
@@ -3355,7 +3391,8 @@ class ZenMarkdownEditor(QWidget):
                  else self._build_source_headings_list)
         rows = [
             (s, e, f"{'&nbsp;' * ((level - 1) * 3)}"
-                   f"<span style='color:#A2937A'>{'#' * level}</span>"
+                   f"<span style='color:{theme.ZEN_MD_OUTLINE_MARK.name()}'>"
+                   f"{'#' * level}</span>"
                    f"&nbsp;{self._esc_html(text)}")
             for (s, e, level, text) in build()
         ]
@@ -3369,9 +3406,9 @@ class ZenMarkdownEditor(QWidget):
         for s, e, href, text in self._build_links_list():
             hint = self._link_hint(href)
             rows.append((s, e,
-                f"<span style='color:{ZEN_MD_LINK_COLOR.name()}'>"
+                f"<span style='color:{theme.ZEN_MD_LINK_COLOR.name()}'>"
                 f"{self._esc_html(text or hint)}</span>&nbsp;"
-                f"<span style='color:{ZEN_HINT_COLOR.name()}'>"
+                f"<span style='color:{theme.ZEN_HINT_COLOR.name()}'>"
                 f"→ {self._esc_html(hint)}</span>"))
             targets.append(href)
         self._open_overview(rows, f"Links ({len(rows)})",
@@ -3425,20 +3462,21 @@ class ZenMarkdownEditor(QWidget):
             return
         lines = []
         for i, (_s, _e, inner) in enumerate(self._overview_rows):
-            bg = (f"background:{ZEN_MD_COMMENT_HL.name()};"
+            bg = (f"background:{theme.ZEN_MD_COMMENT_HL.name()};"
                   if i == self._overview_sel else "")
             lines.append(f"<tr><td style='{bg}padding:2px 10px'>{i + 1}"
                          f"&nbsp;&nbsp;{inner}</td></tr>")
-        header = (f"<div style='padding:2px 10px;color:{ZEN_TEXT_COLOR.name()};"
+        header = (f"<div style='padding:2px 10px;color:{theme.ZEN_TEXT_COLOR.name()};"
                   f"font-weight:bold'>{self._overview_title}</div>")
         html = (f"<div style='font-family:\"{FONT_FAMILY}\";"
                 f"font-size:{max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 3)}pt;"
-                f"color:{ZEN_TEXT_COLOR.name()}'>{header}"
+                f"color:{theme.ZEN_TEXT_COLOR.name()}'>{header}"
                 f"<table cellspacing='0'>{''.join(lines)}</table></div>")
         lbl.setText(html)
         lbl.setStyleSheet(
             "QLabel {"
-            " background: #FBF7EC; border: 1px solid #C9A227;"
+            f" background: {theme.ZEN_CARD_BG.name()};"
+            f" border: 1px solid {theme.ZEN_CARD_BORDER.name()};"
             " border-radius: 8px; padding: 8px; }")
         lbl.adjustSize()
         vp = self._overview_view or self._rendered
@@ -3547,7 +3585,7 @@ class ZenMarkdownEditor(QWidget):
         rewrites. Suggestion spans are tagged with their suggestion index."""
         fmt = QTextCharFormat()
         if span.role == "comment":
-            fmt.setBackground(QBrush(ZEN_MD_COMMENT_HL))
+            fmt.setBackground(QBrush(theme.ZEN_MD_COMMENT_HL))
             fmt.setProperty(_COMMENT_IDX_PROP, comment_idx)
             return fmt
         fmt.setProperty(_SUGGEST_IDX_PROP, suggest_idx)
@@ -3555,7 +3593,7 @@ class ZenMarkdownEditor(QWidget):
             fmt.setProperty(_SUGGEST_ROLE_PROP, _ROLE_REMOVED)   # painted strike
         elif span.role == "added":
             fmt.setProperty(_SUGGEST_ROLE_PROP, _ROLE_ADDED)
-            fmt.setForeground(QBrush(ZEN_MD_SUGGEST_ADD))
+            fmt.setForeground(QBrush(theme.ZEN_MD_SUGGEST_ADD))
         return fmt
 
     def _apply_mark_formats(self, doc, spans):
@@ -3739,7 +3777,7 @@ class ZenMarkdownEditor(QWidget):
         canvas = self._canvas_rect_in_self()
         full = self.rect()
         if canvas is None or not full.intersects(canvas):
-            p.fillRect(full, ZEN_MD_DIM_COLOR)
+            p.fillRect(full, theme.ZEN_MD_DIM_COLOR)
         else:
             clipped = canvas.intersected(full)
             # Four chrome strips — full dim.
@@ -3747,34 +3785,34 @@ class ZenMarkdownEditor(QWidget):
                 p.fillRect(
                     QRect(full.left(), full.top(),
                           full.width(), clipped.top() - full.top()),
-                    ZEN_MD_DIM_COLOR,
+                    theme.ZEN_MD_DIM_COLOR,
                 )
             if clipped.bottom() < full.bottom():
                 p.fillRect(
                     QRect(full.left(), clipped.bottom() + 1,
                           full.width(), full.bottom() - clipped.bottom()),
-                    ZEN_MD_DIM_COLOR,
+                    theme.ZEN_MD_DIM_COLOR,
                 )
             if clipped.left() > full.left():
                 p.fillRect(
                     QRect(full.left(), clipped.top(),
                           clipped.left() - full.left(), clipped.height()),
-                    ZEN_MD_DIM_COLOR,
+                    theme.ZEN_MD_DIM_COLOR,
                 )
             if clipped.right() < full.right():
                 p.fillRect(
                     QRect(clipped.right() + 1, clipped.top(),
                           full.right() - clipped.right(), clipped.height()),
-                    ZEN_MD_DIM_COLOR,
+                    theme.ZEN_MD_DIM_COLOR,
                 )
             # Canvas — gentler dim, animates with the editor's opacity.
-            p.fillRect(clipped, ZEN_MD_CANVAS_DIM_COLOR)
+            p.fillRect(clipped, theme.ZEN_MD_CANVAS_DIM_COLOR)
 
         # Drop shadow, then the solid writing card on top.
         card = self._card_rect()
         self._paint_card_shadow(p, card)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(ZEN_MD_BG))
+        p.setBrush(QBrush(theme.ZEN_MD_BG))
         p.drawRoundedRect(card, ZEN_MD_CARD_RADIUS, ZEN_MD_CARD_RADIUS)
         # The paper surface over the base fill — the views inside paint
         # their patches with this same card as light frame (paper.py).
@@ -3942,6 +3980,16 @@ class ZenMarkdownEditor(QWidget):
                 and event.modifiers() & _CTRL_MOD
                 and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self._toggle_paper()
+            return True
+
+        # Ctrl+Shift+D — the dark/light counterpart palette (persists, works in
+        # either view). Precedes the read view's plain Shift+D (delete comment),
+        # which doesn't exclude the modifier, the same way Ctrl+Shift+P has to
+        # precede plain Ctrl+P above.
+        if (event.key() == Qt.Key.Key_D
+                and event.modifiers() & _CTRL_MOD
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._toggle_theme()
             return True
 
         # Ctrl+P — print (works in either view)
@@ -4334,12 +4382,12 @@ class ZenMarkdownEditor(QWidget):
             COMMENT_FONT_FAMILY, self._font_size + ZEN_MD_COMMENT_SIZE_BOOST))
         field.setStyleSheet(
             f"QPlainTextEdit {{"
-            f" background: {ZEN_MD_COMMENT_NOTE_BG.name()};"
-            f" color: {ZEN_MD_COMMENT_INK.name()};"
-            f" border: 1px solid {ZEN_MD_COMMENT_INK.name()};"
+            f" background: {theme.ZEN_MD_COMMENT_NOTE_BG.name()};"
+            f" color: {theme.ZEN_MD_COMMENT_INK.name()};"
+            f" border: 1px solid {theme.ZEN_MD_COMMENT_INK.name()};"
             f" border-radius: 6px;"
             f" padding: 6px 10px;"
-            f" selection-background-color: #E7C6A0;"
+            f" selection-background-color: {theme.ZEN_MD_COMMENT_SELECTION.name()};"
             f"}}"
         )
         self._comment_anchor_pos = end_pos

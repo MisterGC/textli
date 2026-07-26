@@ -22,14 +22,9 @@ from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from textli import openfile
 from textli.constants import (
-    FONT_FAMILY,
-    ZEN_HINT_COLOR,
-    ZEN_MD_COMMENT_HL,
-    ZEN_MD_FONT_SIZE_MIN,
-    ZEN_TEXT_COLOR,
-    ZEN_TITLE_COLOR,
-    _CTRL_MOD,
+    FONT_FAMILY, ZEN_MD_FONT_SIZE_MIN, _CTRL_MOD,
 )
+from textli import theme
 
 _MAX_VISIBLE = 12       # suggestion rows shown at once (window slides)
 _DISPLAY_MAX = 68       # longer paths are middle-truncated for display
@@ -57,23 +52,25 @@ class OpenFileOverlay(QWidget):
         self.setObjectName("zenCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
-            "QWidget#zenCard { background: #FBF7EC;"
-            " border: 1px solid #C9A227; border-radius: 8px; }")
+            f"QWidget#zenCard {{ background: {theme.ZEN_CARD_BG.name()};"
+            f" border: 1px solid {theme.ZEN_CARD_BORDER.name()};"
+            " border-radius: 8px; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
 
         title = QLabel("Open file", self)
         title.setStyleSheet(
-            f"QLabel {{ color: {ZEN_TEXT_COLOR.name()}; font-weight: bold; }}")
+            f"QLabel {{ color: {theme.ZEN_TEXT_COLOR.name()}; font-weight: bold; }}")
         title.setFont(QFont(FONT_FAMILY, self._font_size))
         lay.addWidget(title)
 
         self._input = QLineEdit(self)
         self._input.setFont(QFont(FONT_FAMILY, self._font_size))
         self._input.setStyleSheet(
-            f"QLineEdit {{ background: #FFFFFF; color: {ZEN_TEXT_COLOR.name()};"
-            f" border: 1px solid {ZEN_HINT_COLOR.name()}; border-radius: 4px;"
+            f"QLineEdit {{ background: {theme.ZEN_FIELD_BG.name()};"
+            f" color: {theme.ZEN_TEXT_COLOR.name()};"
+            f" border: 1px solid {theme.ZEN_HINT_COLOR.name()}; border-radius: 4px;"
             f" padding: 3px 6px; }}")
         self._input.textChanged.connect(self._refresh)
         self._input.installEventFilter(self)
@@ -118,22 +115,22 @@ class OpenFileOverlay(QWidget):
         window = rows[start:start + _MAX_VISIBLE]
         lines = []
         for i, cand in enumerate(window, start=start):
-            bg = (f"background:{ZEN_MD_COMMENT_HL.name()};"
+            bg = (f"background:{theme.ZEN_MD_COMMENT_HL.name()};"
                   if i == self._sel else "")
-            marker = (f"<span style='color:{ZEN_TITLE_COLOR.name()}'>●</span>"
+            marker = (f"<span style='color:{theme.ZEN_TITLE_COLOR.name()}'>●</span>"
                       if cand.from_history else
-                      f"<span style='color:{ZEN_HINT_COLOR.name()}'>○</span>")
+                      f"<span style='color:{theme.ZEN_HINT_COLOR.name()}'>○</span>")
             style = "font-weight:bold;" if cand.is_dir else ""
             lines.append(
                 f"<tr><td style='{bg}padding:1px 8px'>{marker}&nbsp;"
-                f"<span style='{style}color:{ZEN_TEXT_COLOR.name()}'>"
+                f"<span style='{style}color:{theme.ZEN_TEXT_COLOR.name()}'>"
                 f"{self._display(cand.path)}</span></td></tr>")
         more = ""
         if len(rows) > start + _MAX_VISIBLE:
             more = (f"<div style='padding:1px 8px;"
-                    f"color:{ZEN_HINT_COLOR.name()}'>…</div>")
+                    f"color:{theme.ZEN_HINT_COLOR.name()}'>…</div>")
         empty = ("" if rows else
-                 f"<div style='padding:1px 8px;color:{ZEN_HINT_COLOR.name()}'>"
+                 f"<div style='padding:1px 8px;color:{theme.ZEN_HINT_COLOR.name()}'>"
                  f"no matches — Enter opens the typed path as a new file</div>")
         self._list.setText(
             f"<table cellspacing='0'>{''.join(lines)}</table>{more}{empty}")

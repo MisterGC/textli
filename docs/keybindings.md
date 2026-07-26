@@ -13,6 +13,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌘.` | Section focus — dim all but the current paragraph (writing) / section (reading) |
 | `⌘T` | Typewriter scrolling — hold the caret line steady while writing (persists) |
 | `⌘⇧P` | Paper surface — grain & light under the text; off = the flat page (persists) |
+| `⌘⇧D` | Dark / light page — the counterpart palette (persists) |
 | `⌘+` / `⌘-` / `⌘0` | Font size bigger / smaller / reset (persists) |
 | `⌘⇧→` / `⌘⇧←` / `⌘⇧↓` | Content column wider / narrower / reset (persists) |
 | `⌘J` | Word-jump overlay (Easymotion-style two-key jump) |

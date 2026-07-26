@@ -16,12 +16,9 @@ import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import (  # noqa: E402
-    FONT_FAMILY,
-    READING_FONT_FAMILY,
-    ZEN_MD_SRC_ANCHOR_BG,
-)
+from textli.constants import FONT_FAMILY, READING_FONT_FAMILY  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme
 
 CODE = "".join(f"line_{i} = {i}\n" for i in range(1, 41))
 
@@ -408,4 +405,4 @@ def test_the_source_page_paints(repo):
     rect = layout.blockBoundingRect(block)
     y = int(rect.center().y() - ed._rendered.verticalScrollBar().value())
     if 0 <= y < img.height():
-        assert img.pixelColor(4, y).rgb() == ZEN_MD_SRC_ANCHOR_BG.rgb()
+        assert img.pixelColor(4, y).rgb() == theme.ZEN_MD_SRC_ANCHOR_BG.rgb()

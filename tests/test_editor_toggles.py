@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli.constants import _CTRL_MOD  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme
 
 MD = "# Heading\n\nSome **bold** text and a list:\n\n- one\n- two\n"
 
@@ -398,8 +399,7 @@ def test_unsaved_buffer_has_no_base_url():
 
 def test_baked_print_doc_carries_the_code_band():
     from PySide6.QtGui import QTextFormat
-    from textli.constants import ZEN_MD_CODE_BLOCK_BG
-
+    
     md = "text before\n\n```python\nx = 1\n```\n\ntext after\n"
     QApplication.instance() or QApplication([])
     parent = QWidget()
@@ -418,7 +418,7 @@ def test_baked_print_doc_carries_the_code_band():
                 QTextFormat.Property.BlockCodeFence)
             bg = b.blockFormat().background().color()
             out.append((fenced, b.text(),
-                        bg == ZEN_MD_CODE_BLOCK_BG))
+                        bg == theme.ZEN_MD_CODE_BLOCK_BG))
             b = b.next()
         return out
 

@@ -10,14 +10,8 @@ from PySide6.QtGui import QTextFormat  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli.codeblocks import highlight_spans  # noqa: E402
-from textli.constants import (  # noqa: E402
-    ZEN_CODE_COMMENT,
-    ZEN_CODE_KEYWORD,
-    ZEN_CODE_NUMBER,
-    ZEN_CODE_STRING,
-    ZEN_MD_CODE_BLOCK_BG,
-)
 from textli.editor import ZenMarkdownEditor  # noqa: E402
+from textli import theme
 
 CODE_MD = ("# Doc\n\n"
            "Some prose first.\n\n"
@@ -121,18 +115,18 @@ def test_python_fence_wears_the_zen_token_colors():
         # its quotes), so look the text up by containment
         return next(c for t, c in fg.items() if needle in t)
 
-    assert color_of("def") == ZEN_CODE_KEYWORD.name()
-    assert color_of("return") == ZEN_CODE_KEYWORD.name()
-    assert color_of("hi") == ZEN_CODE_STRING.name()
-    assert color_of("# note") == ZEN_CODE_COMMENT.name()
+    assert color_of("def") == theme.ZEN_CODE_KEYWORD.name()
+    assert color_of("return") == theme.ZEN_CODE_KEYWORD.name()
+    assert color_of("hi") == theme.ZEN_CODE_STRING.name()
+    assert color_of("# note") == theme.ZEN_CODE_COMMENT.name()
 
 
 def test_plain_fence_gets_band_but_stays_ink():
     ed = _editor()
     ed._toggle_rendered()
     fg = _fg_by_text(ed._rendered.document())
-    zen = {ZEN_CODE_KEYWORD.name(), ZEN_CODE_STRING.name(),
-           ZEN_CODE_COMMENT.name(), ZEN_CODE_NUMBER.name()}
+    zen = {theme.ZEN_CODE_KEYWORD.name(), theme.ZEN_CODE_STRING.name(),
+           theme.ZEN_CODE_COMMENT.name(), theme.ZEN_CODE_NUMBER.name()}
     for text, color in fg.items():
         if "plain fence" in text:
             assert color not in zen
@@ -143,7 +137,7 @@ def test_clean_preview_styles_code_blocks_too():
     ed._toggle_rendered()
     ed._toggle_preview()
     fg = _fg_by_text(ed._rendered.document())
-    assert fg.get("def") == ZEN_CODE_KEYWORD.name()
+    assert fg.get("def") == theme.ZEN_CODE_KEYWORD.name()
 
 
 def test_adjacent_fences_with_different_languages_stay_separate():
@@ -187,6 +181,6 @@ def test_multiline_string_across_blank_line_stays_one_string():
     ed = _editor(md)
     ed._toggle_rendered()
     fg = _fg_by_text(ed._rendered.document())
-    reds = [t for t, c in fg.items() if c == ZEN_CODE_STRING.name()]
+    reds = [t for t, c in fg.items() if c == theme.ZEN_CODE_STRING.name()]
     joined = " ".join(reds)
     assert "first" in joined and "second" in joined

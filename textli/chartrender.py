@@ -29,25 +29,17 @@ from PySide6.QtGui import (
 )
 
 from .charts import Chart
-from .constants import (
-    READING_FONT_FAMILY,
-    ZEN_CODE_NUMBER,
-    ZEN_CODE_STRING,
-    ZEN_HINT_COLOR,
-    ZEN_MD_COMMENT_INK,
-    ZEN_MD_TABLE_BORDER,
-    ZEN_TEXT_COLOR,
-    ZEN_TITLE_COLOR,
-)
+from .constants import READING_FONT_FAMILY
+from . import theme
 
 # Series accent colors, cycled — the zen blue, warm red, amber, and comment ink.
 # Drawn from the palette so a chart shares the page's few colors and nothing new
 # enters it.
 _SERIES_COLORS = (
-    ZEN_TITLE_COLOR,
-    ZEN_CODE_STRING,
-    ZEN_CODE_NUMBER,
-    ZEN_MD_COMMENT_INK,
+    theme.ZEN_TITLE_COLOR,
+    theme.ZEN_CODE_STRING,
+    theme.ZEN_CODE_NUMBER,
+    theme.ZEN_MD_COMMENT_INK,
 )
 
 
@@ -165,20 +157,20 @@ def _draw(p: QPainter, chart: Chart, w: float, h: float) -> None:
         return plot.bottom() - (val - ymin) / yspan * plot.height()
 
     # Whisper-faint gridlines + right-aligned tick labels.
-    grid = QColor(ZEN_MD_TABLE_BORDER)
+    grid = QColor(theme.ZEN_MD_TABLE_BORDER)
     grid.setAlpha(38)
-    p.setPen(QColor(ZEN_HINT_COLOR))
+    p.setPen(QColor(theme.ZEN_HINT_COLOR))
     for t in ticks:
         y = ypix(t)
         p.setPen(QPen(grid, 1))
         p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
-        p.setPen(QColor(ZEN_HINT_COLOR))
+        p.setPen(QColor(theme.ZEN_HINT_COLOR))
         p.drawText(QRectF(0, y - fm.height() / 2, left - 8, fm.height()),
                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                    _fmt(t))
 
     # Axis lines — a thin warm L, no box.
-    p.setPen(QPen(ZEN_MD_TABLE_BORDER, 1.2))
+    p.setPen(QPen(theme.ZEN_MD_TABLE_BORDER, 1.2))
     p.drawLine(QPointF(plot.left(), plot.top()), QPointF(plot.left(), plot.bottom()))
     p.drawLine(QPointF(plot.left(), ypix(min(ymax, max(ymin, 0.0)))),
                QPointF(plot.right(), ypix(min(ymax, max(ymin, 0.0)))))
@@ -190,7 +182,7 @@ def _draw(p: QPainter, chart: Chart, w: float, h: float) -> None:
         _draw_lines(p, chart, plot, ypix, n)
 
     # X-axis category labels, centered under each slot.
-    p.setPen(QColor(ZEN_TEXT_COLOR))
+    p.setPen(QColor(theme.ZEN_TEXT_COLOR))
     if n:
         slot = plot.width() / n
         for i, label in enumerate(chart.x_values):
@@ -203,7 +195,7 @@ def _draw(p: QPainter, chart: Chart, w: float, h: float) -> None:
         p.save()
         p.translate(fm.height() - 2, plot.center().y())
         p.rotate(-90)
-        p.setPen(QColor(ZEN_HINT_COLOR))
+        p.setPen(QColor(theme.ZEN_HINT_COLOR))
         p.drawText(QRectF(-plot.height() / 2, -fm.height() / 2,
                           plot.height(), fm.height()),
                    int(Qt.AlignmentFlag.AlignCenter), chart.y_axis_label)
@@ -251,7 +243,7 @@ def _draw_lines(p, chart: Chart, plot: QRectF, ypix, n: int) -> None:
 
 
 def _draw_legend(p, chart: Chart, fm: QFontMetricsF, left: float, w: float) -> None:
-    p.setPen(QColor(ZEN_TEXT_COLOR))
+    p.setPen(QColor(theme.ZEN_TEXT_COLOR))
     gap = fm.horizontalAdvance("x")
     swatch = fm.height() * 0.55
     x = left
@@ -260,7 +252,7 @@ def _draw_legend(p, chart: Chart, fm: QFontMetricsF, left: float, w: float) -> N
         color = _SERIES_COLORS[j % len(_SERIES_COLORS)]
         p.fillRect(QRectF(x, y + (fm.height() - swatch) / 2, swatch, swatch), color)
         x += swatch + 4
-        p.setPen(QColor(ZEN_TEXT_COLOR))
+        p.setPen(QColor(theme.ZEN_TEXT_COLOR))
         p.drawText(QPointF(x, y + fm.ascent()), name)
         x += fm.horizontalAdvance(name) + gap
         if x > w - 40:                       # keep the legend on one quiet row
