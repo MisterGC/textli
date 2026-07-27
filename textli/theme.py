@@ -34,6 +34,7 @@ carried across it:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field, fields, replace
 
 from PySide6.QtCore import QObject, Signal
@@ -285,6 +286,26 @@ def toggle() -> str:
     """Switch to the other palette; returns the new theme's name."""
     set_theme("light" if _active.is_dark else "dark")
     return _active.name
+
+
+@contextmanager
+def as_palette(palette: Palette):
+    """Run a block with ``palette`` installed, then restore.
+
+    For rendering to a medium that isn't the screen — paper isn't themed, so
+    printing and PDF export draw on the light palette whatever the reader has
+    active. Deliberately silent: ``changed`` never fires, so open widgets
+    don't restyle themselves around a print they aren't part of.
+    """
+    previous = _active
+    if palette is previous:
+        yield
+        return
+    _install(palette)
+    try:
+        yield
+    finally:
+        _install(previous)
 
 
 def ink_on(fill: QColor) -> QColor:
