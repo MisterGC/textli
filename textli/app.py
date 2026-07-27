@@ -102,6 +102,12 @@ def main():
         action="store_true",
         help="Open in the rendered read view (default: editable write view)",
     )
+    parser.add_argument(
+        "--pdf",
+        nargs="?", const="", metavar="PATH",
+        help="Write the typeset page to PATH as a PDF and exit, without "
+             "opening a window (default: the source name with a .pdf suffix)",
+    )
     args = parser.parse_args()
 
     file_arg, anchor = split_location(args.file)
@@ -120,6 +126,22 @@ def main():
     # this can never override a host's choice.
     theme.set_theme(
         md_settings.app_settings().value("zen_md/theme", "light", type=str))
+
+    if args.pdf is not None:
+        if not path.exists():
+            parser.error(f"nothing to export: {path} does not exist")
+        out = Path(args.pdf).expanduser() if args.pdf \
+            else path.with_suffix(".pdf")
+        if out.parent != Path("") and not out.parent.exists():
+            parser.error(f"directory does not exist: {out.parent}")
+        # A hidden host: the editor needs a real widget to lay the page out,
+        # but the export never shows one, so this works headless.
+        host = TextliHost()
+        host.resize(1000, 1400)
+        host.open(path, text, read=True)
+        host._editor.export_pdf(out)
+        print(f"wrote {out}")
+        sys.exit(0)
 
     # Let Ctrl+C quit cleanly (a periodic no-op tick lets the signal land).
     signal.signal(signal.SIGINT, lambda *_: app.quit())

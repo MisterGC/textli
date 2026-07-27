@@ -44,6 +44,7 @@ existing PyPI name), but everywhere else it's just textli: the command is
 textli notes.md                     # open (created on first save)
 textli notes.md#design-decisions    # jump straight to a heading
 textli -r review.md                 # start in the reading view
+textli notes.md --pdf               # export the typeset page, no window
 ```
 
 The editor opens ready to type (vim NORMAL mode) and autosaves while you

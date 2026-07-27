@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-27
+
+### Added
+
+- **PDF export from the CLI** (#47) — `textli notes.md --pdf` writes
+  `notes.pdf` beside the source and exits without opening a window, so a
+  draft becomes a shareable paper from a script or a Makefile; an explicit
+  path (`--pdf out/paper.pdf`) wins over the default. What lands on the page
+  is the reading view's typeset page — the same document `⌘P` prints, code
+  band baked in — so charts, `.grafli` diagrams, math, tables and the
+  annotation layer all come along as what they already are. Page size follows
+  the system default, matching what the print dialog would have produced.
+  `ZenMarkdownEditor.export_pdf(path)` is the same thing for embedders, and
+  it leaves the reader in whichever view they were in.
+
+### Fixed
+
+- **Printing on the dark theme baked a dark code band into the page** (#46) —
+  body ink comes from the view's stylesheet, which a printed document never
+  carries, so on the dark palette a page came out as black prose on white
+  with a near-black `#272421` fence behind light-blue keywords. Printing and
+  PDF export now always render on the light palette and restore the screen
+  afterwards, scroll position included — paper isn't themed. A regression
+  from #44, which is where the second palette first reached the print path.
+
+- **Long code lines lost their tail on paper** — Qt's Markdown import marks
+  fences non-breakable, which the wide reading column hides; on a page the
+  overflow was *cut off* rather than wrapped, silently dropping the end of
+  any line that didn't fit. Fences now wrap when printed.
+
 ## [0.6.0] - 2026-07-26
 
 ### Added

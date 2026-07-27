@@ -34,9 +34,15 @@ Python 3.12 or newer is required.
 textli notes.md                     # open a file (created on first save)
 textli notes.md#design-decisions    # open and jump to a heading
 textli -r review.md                 # start in the rendered reading view
+textli notes.md --pdf               # write notes.pdf and exit, no window
+textli notes.md --pdf out/paper.pdf # ... or to a path you name
 ```
 
 - The `#fragment` is a Markdown heading slug, exactly as in a Markdown link.
 - File-backed editing **autosaves** while you work; `Esc` closes the session,
   `⇧Esc` discards pending changes.
+- `--pdf` exports the typeset reading page — charts, diagrams and math
+  included — without opening a window, so a draft becomes a shareable paper
+  from a script or a Makefile. Paper is never themed: the page comes out on
+  the light palette whatever theme you read in.
 - Font size and content-column width adjustments persist across sessions.

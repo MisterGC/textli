@@ -1813,23 +1813,76 @@ class ZenMarkdownEditor(QWidget):
         background since the on-screen band is view-painting. In the write view
         it prints the source with section-focus dimming off."""
         write_mode = not self._rendered_mode
-        if write_mode:
-            self._highlighter.set_focus_enabled(False)
         printer = QPrinter()
         dialog = QPrintDialog(printer, self)
-        if dialog.exec() == QPrintDialog.DialogCode.Accepted:
+        if dialog.exec() != QPrintDialog.DialogCode.Accepted:
+            return
+        with self._on_paper():
             if write_mode:
+                self._highlighter.set_focus_enabled(False)
                 self._editor.print_(printer)
+                self._highlighter.set_focus_enabled(self._focus_enabled)
             else:
                 self._print_rendered(printer)
-        if write_mode:
-            self._highlighter.set_focus_enabled(self._focus_enabled)
+
+    @contextmanager
+    def _on_paper(self):
+        """Render on the light palette for the duration of a print or export.
+
+        Paper isn't themed: the body ink comes from the view's stylesheet,
+        which the printed document never carries, so on the dark palette a
+        page would come out as black prose with a near-black code band and
+        light-blue keywords baked into it (#46). Re-inking means re-running
+        the passes that put colour *into the document* — the highlighter for
+        the source, the render for the typeset page — and putting the screen
+        back the way it was afterwards, scroll position included.
+        """
+        if not theme.is_dark():
+            yield
+            return
+        view = self._rendered if self._rendered_mode else self._editor
+        scroll = view.verticalScrollBar().value()
+        with theme.as_palette(theme.LIGHT):
+            self._reink()
+            try:
+                yield
+            finally:
+                pass
+        self._reink()
+        view.verticalScrollBar().setValue(scroll)
+
+    def _reink(self):
+        """Re-run the colour-bearing passes for the active palette."""
+        self._highlighter.rehighlight()
+        if self._rendered_mode:
+            self._render_markdown(self._editor.toPlainText())
 
     def _print_rendered(self, printer):
         """Print the read view's typeset page — via a clone whose code band is
         re-expressed as a real block background, since the on-screen band is
         view-painting. The live document is untouched."""
         self._baked_print_doc().print_(printer)
+
+    def export_pdf(self, path: Path) -> Path:
+        """Write the typeset reading page to ``path`` as a PDF.
+
+        The same document ``⌘P`` prints — code band baked in, charts,
+        diagrams and math along as the images they already are — on the light
+        palette whatever the reader has active. Page size follows the system
+        default, so the output matches what the print dialog would have
+        produced. Returns the path written.
+        """
+        was_rendered = self._rendered_mode
+        if not was_rendered:
+            self._toggle_rendered()
+        printer = QPrinter()
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(str(path))
+        with self._on_paper():
+            self._print_rendered(printer)
+        if not was_rendered:
+            self._toggle_rendered()
+        return path
 
     def _baked_print_doc(self):
         """A clone of the rendered document with the code band baked in as a
@@ -1839,6 +1892,11 @@ class ZenMarkdownEditor(QWidget):
         doc = self._rendered.document().clone()
         band = QTextBlockFormat()
         band.setBackground(theme.ZEN_MD_CODE_BLOCK_BG)
+        # Qt's Markdown import marks fences non-breakable, which the wide
+        # reading column hides: on a page the overflow is *cut off* rather
+        # than wrapped, so a long line silently loses its tail. Paper must
+        # never drop content, and a wrapped code line still reads.
+        band.setNonBreakableLines(False)
         block = doc.begin()
         while block.isValid():
             if block.blockFormat().hasProperty(
