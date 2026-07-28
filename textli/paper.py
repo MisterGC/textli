@@ -48,9 +48,13 @@ from textli.constants import (
 )
 from textli import theme
 
-# One tile per device-pixel-ratio (keyed in hundredths); the page color is a
-# constant, so the ratio is the only thing that varies between views.
-_tiles: dict[int, QPixmap] = {}
+# One tile per (device-pixel-ratio in hundredths, page colour). The colour
+# belongs in the key because the tile *bakes* it into its colour table: keyed
+# on the ratio alone, a tile outlives the palette it was built for and the
+# next view paints the old theme's grain under the new theme's ink (#49).
+# Keying on the value it depends on also means nothing has to remember to
+# invalidate — a switch simply misses, and both palettes stay cached.
+_tiles: dict[tuple[int, str], QPixmap] = {}
 
 
 def _build_tile(base: QColor, dpr: float) -> QImage:
@@ -70,17 +74,23 @@ def _build_tile(base: QColor, dpr: float) -> QImage:
 
 
 def invalidate_cache() -> None:
-    """Drop the cached grain tiles — they bake the page colour, so a palette
-    switch has to rebuild them."""
+    """Drop every cached grain tile.
+
+    Not needed for a palette switch — the cache is keyed by page colour, so
+    that takes care of itself. This is the reset for the cases the key can't
+    see, such as the grain constants changing under a test.
+    """
     _tiles.clear()
 
 
 def grain_tile(dpr: float) -> QPixmap:
-    """The grain tile for a device-pixel-ratio, built once and cached."""
-    key = round(dpr * 100)
+    """The grain tile for a device-pixel-ratio, built once per palette and
+    cached."""
+    base = theme.ZEN_MD_BG
+    key = (round(dpr * 100), base.name())
     tile = _tiles.get(key)
     if tile is None:
-        tile = QPixmap.fromImage(_build_tile(theme.ZEN_MD_BG, dpr))
+        tile = QPixmap.fromImage(_build_tile(base, dpr))
         tile.setDevicePixelRatio(dpr)
         _tiles[key] = tile
     return tile

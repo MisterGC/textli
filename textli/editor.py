@@ -1009,7 +1009,8 @@ class ZenMarkdownEditor(QWidget):
         )
         self._apply_status_stylesheet()
         self._highlighter.rehighlight()
-        md_paper.invalidate_cache()
+        # The paper sheet needs no nudge: its tiles are keyed by page colour,
+        # so the switch misses on its own and both palettes stay cached.
         if self._rendered_mode:
             self._render_markdown(self._editor.toPlainText())
         self._update_focus()

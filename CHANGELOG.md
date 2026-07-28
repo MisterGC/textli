@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The paper sheet kept the previous palette when the theme switched with no
+  editor open** (#49) — the grain tile bakes the page colour into its colour
+  table, but the cache was keyed by device-pixel-ratio alone, from back when
+  that colour was a constant. A host switching palettes between editors (start
+  dark, close the note, go light, reopen) got the old theme's grain under the
+  new theme's ink. The cache is now keyed by page colour too, so a tile can
+  never outlive its palette — and both palettes stay cached, so switching back
+  and forth reuses tiles instead of rebuilding them.
+
 ## [0.7.0] - 2026-07-27
 
 ### Added
