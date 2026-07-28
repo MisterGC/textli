@@ -115,3 +115,26 @@ def test_paint_smoke_both_views_and_both_states():
     ed._toggle_rendered()
     assert not ed._editor.grab().isNull()     # write view, flat page
     ed._toggle_paper()                        # restore the shared pref
+
+
+def test_the_grain_tile_never_outlives_its_palette():
+    """#49 — the tile bakes the page colour into its colour table, so keying
+    it on the device-pixel-ratio alone let a dark tile paint under light ink
+    the next time an editor opened. No editor is involved here on purpose:
+    the switch happens with nothing listening, which is exactly the case an
+    invalidate-on-apply_theme hook could not cover."""
+    QApplication.instance() or QApplication([])
+    theme.set_theme("dark")
+    dark_tile = paper.grain_tile(2.0)
+    dark_px = dark_tile.toImage().pixelColor(0, 0)
+
+    theme.set_theme("light")
+    light_px = paper.grain_tile(2.0).toImage().pixelColor(0, 0)
+    assert light_px != dark_px
+    # the grain sits within a few luminance steps of its own page colour
+    assert abs(light_px.red() - theme.LIGHT.ZEN_MD_BG.red()) <= 4
+
+    # switching back reuses the tile already built for that palette
+    theme.set_theme("dark")
+    assert paper.grain_tile(2.0) is dark_tile
+    theme.set_theme("light")
