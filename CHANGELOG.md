@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Read-view prose sat too far apart to cohere, and list items had no
+  grouping gap** (#54) — the reading leading was set with Qt's
+  `ProportionalHeight`, which is a percentage of the font's *natural line
+  box* rather than of the em. Against Literata's 1.485em box the configured
+  145% rendered at roughly 2.2em, well past the point where consecutive
+  lines still read as one block: the eye lost the line on the return sweep
+  and paragraphs came apart into evenly-spaced stripes. It also scaled each
+  line by the tallest fragment on it, so a line carrying inline code was led
+  differently than a plain one and the leading wobbled inside a single
+  paragraph. Leading is now an absolute line box of 1.55em, resolved through
+  the view's own font metrics so it means the same thing at every zoom and
+  on every platform — the old gaps multiplied the point size as though a
+  point were a pixel, which holds only at 72 dpi. List items now get an
+  explicit gap of their own, smaller than a paragraph's, so the three breaks
+  finally rank: line, then item, then paragraph. Headings and any block
+  holding an image keep their natural height, which a fixed box would crop.
+
 - **CriticMarkup marks were dropped after an inline code span that wrapped
   across lines** (#52) — CommonMark lets a code span cross a line, and
   hard-wrapped prose wraps long spans routinely, but the inline-code pattern
