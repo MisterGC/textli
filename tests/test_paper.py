@@ -13,7 +13,9 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli import paper  # noqa: E402
 from textli import settings as md_settings  # noqa: E402
-from textli.constants import _CTRL_MOD, ZEN_MD_PAPER_GRAIN, ZEN_MD_PAPER_TILE  # noqa: E402
+from textli.constants import (  # noqa: E402
+    _CTRL_MOD, ZEN_MD_DESK_GRAIN, ZEN_MD_PAPER_GRAIN, ZEN_MD_PAPER_TILE,
+)
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 from textli import theme
 
@@ -115,6 +117,111 @@ def test_paint_smoke_both_views_and_both_states():
     ed._toggle_rendered()
     assert not ed._editor.grab().isNull()     # write view, flat page
     ed._toggle_paper()                        # restore the shared pref
+
+
+# ── the desk: the surround as a surface (#56) ──
+
+def _desked(canvas_w: int = 0):
+    """An editor painted at full opacity in a 1400x800 host, plus a sampler.
+
+    The fade-in leaves the widget at opacity 0, which paints nothing at all —
+    so a grab straight after construction would measure the host, not the desk.
+    """
+    QApplication.instance() or QApplication([])
+    host = QWidget()
+    host.resize(1400, 800)
+    pal = host.palette()
+    pal.setColor(pal.ColorRole.Window, theme.ZEN_BACKDROP)
+    host.setPalette(pal)
+    host.setAutoFillBackground(True)
+    canvas = None
+    if canvas_w:
+        canvas = QWidget(host)
+        canvas.setGeometry(0, 0, canvas_w, 800)
+        canvas.setAutoFillBackground(True)
+    ed = ZenMarkdownEditor(host, MD, title="T", canvas=canvas)
+    ed.resize(1400, 800)
+    host.show()
+    ed._opacity.setOpacity(1.0)
+    ed._host = host      # keep refs alive
+    ed._cv = canvas
+
+    def band(x0, width):
+        """(mean lightness, spread) of a horizontal run at the card's midline."""
+        img = host.grab().toImage()
+        y = int(ed._card_rect().center().y())
+        vals = [img.pixelColor(x, y).lightness() for x in range(x0, x0 + width)]
+        return sum(vals) / len(vals), max(vals) - min(vals)
+
+    return ed, band
+
+
+def test_desk_tile_matches_dpr_and_is_cached():
+    QApplication.instance() or QApplication([])
+    tile = paper.desk_tile(2.0)
+    assert tile.width() == tile.height() == ZEN_MD_PAPER_TILE * 2
+    assert tile.devicePixelRatio() == 2.0
+    assert paper.desk_tile(2.0) is tile
+
+
+def test_desk_grain_is_translucent_and_bakes_no_colour():
+    """The sheet's tile bakes the page colour and so must be keyed by it
+    (#49). The desk's cannot: an embedding host paints the ground under the
+    chrome. It modulates alpha over white instead — which also means it can
+    never go stale against a palette switch."""
+    QApplication.instance() or QApplication([])
+    img = paper._build_desk_tile(1.0)
+    assert img.hasAlphaChannel()
+    alphas = set()
+    for y in range(0, img.height(), 5):
+        for x in range(0, img.width(), 5):
+            px = img.pixelColor(x, y)
+            assert (px.red(), px.green(), px.blue()) == (255, 255, 255)
+            assert 0 <= px.alpha() <= ZEN_MD_DESK_GRAIN
+            alphas.add(px.alpha())
+    assert len(alphas) > 1                       # noise, not a flat wash
+
+    theme.set_theme("dark")
+    try:                                         # same tile in either palette
+        assert paper._build_desk_tile(1.0) == img
+    finally:
+        theme.set_theme("light")
+
+
+def test_the_desk_gives_the_surround_texture():
+    ed, band = _desked()
+    _, spread = band(3, 40)
+    assert spread > 0                            # grain
+    ed._paper = False
+    ed.update()
+    _, flat = band(3, 40)
+    assert flat == 0                             # the toggle takes it away
+
+
+def test_the_desk_sinks_toward_the_window_edges():
+    """One light: the sheet's own falloff runs bright-centre to dark-edge, and
+    the desk has to run the same way. It shades toward black rather than the
+    sheet's warm body ink — body ink is *lighter* than the dimmed surround, so
+    reusing it brightened the corners instead of sinking them."""
+    for name in ("light", "dark"):
+        theme.set_theme(name)
+        try:
+            ed, band = _desked()
+            edge, _ = band(3, 40)
+            beside, _ = band(int(ed._card_rect().left()) - 44, 40)
+            assert edge < beside, f"{name}: corners must sit deeper than the sheet's edge"
+        finally:
+            theme.set_theme("light")
+
+
+def test_the_desk_leaves_a_host_canvas_alone():
+    """A host's canvas keeps its own pixels under the gentler wash — the desk
+    is chrome-only, or an embedded textli would paint over its host."""
+    ed, band = _desked(canvas_w=300)
+    _, on_canvas = band(60, 180)
+    assert on_canvas == 0
+    _, on_chrome = band(int(ed._card_rect().right()) + 20, 40)
+    assert on_chrome > 0
 
 
 def test_the_grain_tile_never_outlives_its_palette():

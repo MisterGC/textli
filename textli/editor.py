@@ -36,6 +36,7 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPen,
+    QRegion,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
@@ -3835,6 +3836,9 @@ class ZenMarkdownEditor(QWidget):
         # together with the widget's opacity effect.
         canvas = self._canvas_rect_in_self()
         full = self.rect()
+        # Where the desk may go: everything the chrome wash covers. A host's
+        # canvas is off limits — it keeps its own pixels under the gentler dim.
+        desk_region = QRegion(full)
         if canvas is None or not full.intersects(canvas):
             p.fillRect(full, theme.ZEN_MD_DIM_COLOR)
         else:
@@ -3866,9 +3870,26 @@ class ZenMarkdownEditor(QWidget):
                 )
             # Canvas — gentler dim, animates with the editor's opacity.
             p.fillRect(clipped, theme.ZEN_MD_CANVAS_DIM_COLOR)
+            desk_region -= QRegion(clipped)
+
+        card = self._card_rect()
+        # The desk (#56) — the surround as a surface. One light, centred where
+        # the sheet's is, but spread across the whole window: the sheet's ramp
+        # is bounded by the sheet, and the desk keeps falling off past it into
+        # the corners. Framing the desk on the *card* instead would put every
+        # pixel beside the sheet in the gradient's padded tail, flattening the
+        # widest part of the surround to a constant. Painted under the shadow,
+        # so the sheet still sits *on* the desk.
+        light_w = float(full.width())
+        light_x = card.center().x() - light_w / 2.0
+        if self._paper:
+            p.save()
+            p.setClipRegion(desk_region)
+            md_paper.paint_desk(p, QRectF(full), light_x, light_w,
+                                self.devicePixelRatioF())
+            p.restore()
 
         # Drop shadow, then the solid writing card on top.
-        card = self._card_rect()
         self._paint_card_shadow(p, card)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(theme.ZEN_MD_BG))

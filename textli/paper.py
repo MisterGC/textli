@@ -23,6 +23,17 @@ edge. Grain tiles anchor locally (card vs. viewport coordinates): the
 offset depends only on the paint rect, so partial repaints (caret blinks,
 single-line updates) reproduce the exact pixels they cover, and the
 mismatch where card meets view is invisible — misaligned noise is noise.
+
+The surround gets the same two cues (``paint_desk``, #56), so the sheet
+lies on a desk rather than floating in a void. It is the same surface in a
+darker key, and it differs in exactly the two places a dark ground forces:
+its grain is a *translucent* overlay, because an embedding host paints the
+ground and the desk cannot bake a colour it does not know; and its falloff
+shades toward black rather than the sheet's warm body ink, which is lighter
+than the dimmed surround and would brighten the corners it is meant to
+sink. The light is one light — the desk's frame is centred on the card but
+spans the window, so the ramp continues past the sheet instead of ending
+with it.
 """
 
 from __future__ import annotations
@@ -39,10 +50,12 @@ from PySide6.QtGui import (
     QPainterPath,
     QPixmap,
     qRgb,
+    qRgba,
 )
 from PySide6.QtWidgets import QAbstractScrollArea
 
 from textli.constants import (
+    ZEN_MD_DESK_EDGE_ALPHA, ZEN_MD_DESK_GRAIN,
     ZEN_MD_PAPER_EDGE_ALPHA, ZEN_MD_PAPER_GRAIN, ZEN_MD_PAPER_PLATEAU,
     ZEN_MD_PAPER_SEED, ZEN_MD_PAPER_TILE,
 )
@@ -55,6 +68,9 @@ from textli import theme
 # Keying on the value it depends on also means nothing has to remember to
 # invalidate — a switch simply misses, and both palettes stay cached.
 _tiles: dict[tuple[int, str], QPixmap] = {}
+
+# The desk's tiles need no colour in the key: they bake none (#56).
+_desk_tiles: dict[int, QPixmap] = {}
 
 
 def _build_tile(base: QColor, dpr: float) -> QImage:
@@ -73,14 +89,48 @@ def _build_tile(base: QColor, dpr: float) -> QImage:
     return img.copy()   # detach from `data` before it goes out of scope
 
 
-def invalidate_cache() -> None:
-    """Drop every cached grain tile.
+def _build_desk_tile(dpr: float) -> QImage:
+    """One desk tile: translucent white noise, alpha 0..ZEN_MD_DESK_GRAIN.
 
-    Not needed for a palette switch — the cache is keyed by page colour, so
-    that takes care of itself. This is the reset for the cases the key can't
-    see, such as the grain constants changing under a test.
+    Unlike the sheet's tile this bakes no colour. An embedded host paints the
+    ground under the chrome, so the desk cannot know what it sits on and has
+    to modulate whatever is already there — which also means it can never go
+    stale against a palette switch. Same Indexed8 trick, alpha in the colour
+    table instead of a shade: the seeded bytes *are* the pixels.
+
+    It only ever lightens. At these alphas, blending a near-black backdrop
+    toward white moves it some six times as far as blending toward black, so
+    a symmetric tile would read one-directional anyway.
+    """
+    side = max(1, round(ZEN_MD_PAPER_TILE * dpr))
+    data = random.Random(ZEN_MD_PAPER_SEED).randbytes(side * side)
+    img = QImage(data, side, side, side, QImage.Format.Format_Indexed8)
+    span = ZEN_MD_DESK_GRAIN + 1
+    img.setColorTable([qRgba(255, 255, 255, b % span) for b in range(256)])
+    return img.copy()   # detach from `data` before it goes out of scope
+
+
+def invalidate_cache() -> None:
+    """Drop every cached tile, sheet and desk.
+
+    Not needed for a palette switch — the sheet's cache is keyed by page
+    colour and the desk's tiles bake no colour at all, so that takes care of
+    itself. This is the reset for the cases the keys can't see, such as the
+    grain constants changing under a test.
     """
     _tiles.clear()
+    _desk_tiles.clear()
+
+
+def desk_tile(dpr: float) -> QPixmap:
+    """The desk tile for a device-pixel-ratio, built once and cached."""
+    key = round(dpr * 100)
+    tile = _desk_tiles.get(key)
+    if tile is None:
+        tile = QPixmap.fromImage(_build_desk_tile(dpr))
+        tile.setDevicePixelRatio(dpr)
+        _desk_tiles[key] = tile
+    return tile
 
 
 def grain_tile(dpr: float) -> QPixmap:
@@ -96,19 +146,27 @@ def grain_tile(dpr: float) -> QPixmap:
     return tile
 
 
-def _paint_light(painter: QPainter, rect, x0: float, w: float) -> None:
-    """The falloff: warm ink ramping in from both ends of the light frame
-    ``[x0, x0 + w]``, fully clear across the central plateau."""
-    ink = QColor(theme.ZEN_TEXT_COLOR)
+def _paint_light(painter: QPainter, rect, x0: float, w: float,
+                 edge_alpha: int = ZEN_MD_PAPER_EDGE_ALPHA,
+                 ink: QColor | None = None) -> None:
+    """The falloff: ``ink`` ramping in from both ends of the light frame
+    ``[x0, x0 + w]``, fully clear across the central plateau.
+
+    The sheet shades toward warm body ink, which is darker than paper. The
+    desk cannot reuse it: body ink is *lighter* than the dimmed surround, so
+    the same gradient brightens the corners instead of sinking them. Shadow
+    is whatever is darker than the ground, so the desk passes black (#56).
+    """
+    ink = QColor(theme.ZEN_TEXT_COLOR if ink is None else ink)
     grad = QLinearGradient(x0, 0.0, x0 + w, 0.0)
     edge = (1.0 - ZEN_MD_PAPER_PLATEAU) / 2.0   # where falloff meets full bright
     for pos, alpha in (
-            (0.0, ZEN_MD_PAPER_EDGE_ALPHA),
-            (edge * 0.5, ZEN_MD_PAPER_EDGE_ALPHA // 4),   # eased knee
+            (0.0, edge_alpha),
+            (edge * 0.5, edge_alpha // 4),   # eased knee
             (edge, 0),
             (1.0 - edge, 0),
-            (1.0 - edge * 0.5, ZEN_MD_PAPER_EDGE_ALPHA // 4),
-            (1.0, ZEN_MD_PAPER_EDGE_ALPHA)):
+            (1.0 - edge * 0.5, edge_alpha // 4),
+            (1.0, edge_alpha)):
         ink.setAlpha(alpha)
         grad.setColorAt(pos, QColor(ink))
     painter.fillRect(rect, QBrush(grad))
@@ -149,3 +207,25 @@ def paint_card(painter: QPainter, card: QRectF, radius: float,
                             QPointF(card.x() % t, card.y() % t))
     _paint_light(painter, card, card.x(), card.width())
     painter.restore()
+
+
+def paint_desk(painter: QPainter, rect: QRectF, light_x: float,
+               light_w: float, dpr: float) -> None:
+    """Dress the surround in the desk surface — translucent grain and a
+    deeper falloff, laid over whatever the chrome wash left (#56).
+
+    ``light_x``/``light_w`` frame the falloff. The caller passes a frame
+    centred on the *card* but as wide as the window, so the sheet and the
+    desk are lit from the same place while the desk keeps falling off past
+    the sheet into the corners.
+
+    The caller owns the clip — a host's canvas is off limits — and this
+    paints across the whole ``rect`` inside it, so the tiling phase stays
+    continuous and the chrome strips read as one surface rather than four.
+    """
+    tile = desk_tile(dpr)
+    t = ZEN_MD_PAPER_TILE
+    painter.drawTiledPixmap(rect, tile,
+                            QPointF(rect.x() % t, rect.y() % t))
+    _paint_light(painter, rect, light_x, light_w, ZEN_MD_DESK_EDGE_ALPHA,
+                 QColor(0, 0, 0))
