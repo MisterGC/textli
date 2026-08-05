@@ -48,8 +48,15 @@ _RE_COMMENT = re.compile(
 # excluded from the code range (group 1 starts the region) so those markers
 # stay parseable instead of hiding the fence and corrupting the region map.
 _RE_FENCE = re.compile(r"^[ \t]*(?:\{(?:==|\+\+|--|~~)[ \t]*)?(`{3,}|~{3,})")
-# Inline code span: a backtick run, content not crossing a newline, same run.
-_RE_INLINE_CODE = re.compile(r"(`+)(?:(?!\1)[^\n])+\1")
+# Inline code span: a backtick run, content, the same run again. CommonMark
+# lets a span cross a line (the newline just reads as a space), and hard-wrapped
+# prose wraps long spans all the time — so the content may span lines, but stops
+# at a blank one. Without the newline the *closing* backtick of a wrapped span
+# was left over as an opener: it paired with the next backtick anywhere later,
+# and everything between was masked as code, so any mark in that stretch was
+# read as documentation and silently dropped (#52). The blank-line stop keeps a
+# genuinely unpaired backtick from swallowing the rest of the document.
+_RE_INLINE_CODE = re.compile(r"(`+)(?:(?!\1)(?:[^\n]|\n(?!\s*\n)))+\1")
 
 
 @dataclass(frozen=True)

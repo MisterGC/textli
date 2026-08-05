@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **CriticMarkup marks were dropped after an inline code span that wrapped
+  across lines** (#52) — CommonMark lets a code span cross a line, and
+  hard-wrapped prose wraps long spans routinely, but the inline-code pattern
+  refused newlines. The closing backtick of a wrapped span was then left over
+  as an *opener*: it paired with the next backtick anywhere later in the
+  document and everything between was masked as code, so any `{++`, `{--`,
+  `{~~` or `{==` in that stretch was read as documentation and silently
+  skipped. The mark fell through to GFM strikethrough, which made the
+  *document* look broken rather than the parser. Spans may now cross lines but
+  stop at a blank one, so a genuinely unpaired backtick still can't swallow
+  the rest of the file.
+
 ## [0.7.1] - 2026-07-29
 
 ### Fixed
