@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The sheet now lies on a desk** (#56) — the surround was a flat fill, which
+  is most of what you look at and read as a void rather than a room. It wears
+  the same two cues `paper.py` already gives the page, grain and a horizontal
+  light falloff, lit from the same place: the desk's light frame is centred on
+  the card but spans the window, so one ramp runs bright at the sheet and sinks
+  into the corners instead of each surface having its own light. It rides the
+  existing `⌘⇧P`, and where a host supplies a canvas the desk stops at its edge
+  — that canvas keeps its own pixels under the gentler wash, so an embedded
+  textli never paints over its host. Two things a dark ground forces and the
+  sheet's own numbers could not carry: the desk's grain is a *translucent*
+  overlay rather than a colour-baked tile, since an embedding host paints the
+  ground and the desk cannot bake a colour it does not know (which also means
+  its tiles can never go stale against a palette switch), and its falloff
+  shades toward black rather than the warm body ink the sheet uses — body ink
+  is *lighter* than the dimmed surround, so reusing it brightened the corners
+  it was meant to sink.
+
 ### Fixed
 
 - **CriticMarkup marks were dropped after an inline code span that wrapped

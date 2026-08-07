@@ -86,6 +86,19 @@ ZEN_MD_PAPER_SEED = 0x7311     # fixed — the sheet looks the same every launch
 ZEN_MD_PAPER_EDGE_ALPHA = 16   # falloff ink alpha at the window edges
 ZEN_MD_PAPER_PLATEAU = 0.5     # central width fraction kept fully bright
 
+# The desk (#56): the surround wears the same two cues as the sheet, framed by
+# the *card* so one light falls across both instead of each having its own.
+# Neither of the sheet's numbers carries over to a dark ground:
+#   * the grain is an alpha ceiling on a translucent overlay, not a ± step
+#     around a known colour — an embedded host paints the ground, so the desk
+#     can't bake one. It only lightens: at these alphas, blending a near-black
+#     backdrop toward white moves it some six times as far as blending toward
+#     black, so a symmetric tile would read one-directional anyway;
+#   * the falloff runs deeper, because the desk lies further from the light
+#     than the sheet does.
+ZEN_MD_DESK_GRAIN = 10         # max alpha of the noise overlay (of 255)
+ZEN_MD_DESK_EDGE_ALPHA = 46    # falloff ink alpha at the window edges
+
 # ── Modifier helpers ─────────────────────────────────────────────
 # Qt swaps Control/Meta on macOS: MetaModifier is the physical ⌃ key there.
 _CTRL_MOD = (
