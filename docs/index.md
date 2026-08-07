@@ -40,8 +40,10 @@ uv tool install textli-editor
 textli notes.md
 ```
 
-Type. `Esc` saves and closes. `F1` shows the complete key reference at any
-time — the same help whether textli runs standalone or embedded.
+A new file opens in the reading view; `⌘R` switches to writing, and
+`textli -w notes.md` starts there. `Esc` saves and closes. `F1` shows the
+complete key reference at any time — the same help whether textli runs
+standalone or embedded.
 
 ## Where to go next
 

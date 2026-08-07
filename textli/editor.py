@@ -664,6 +664,7 @@ class ZenMarkdownEditor(QWidget):
         file_path: Path | None = None,
         anchor: str = "",
         start_in_read: bool = False,
+        stored_view_wins: bool | None = None,
         canvas: QWidget | None = None,
         theme_name: str | None = None,
     ):
@@ -757,13 +758,22 @@ class ZenMarkdownEditor(QWidget):
         self._start_fade_in()
         # Open at a location / in a mode (used by textli's open-at-anchor). The
         # read-view toggle and centerCursor both need a laid-out viewport, so do
-        # this after show(). Explicit requests win over memory: `-r` forces the
-        # read view, an anchor overrides the remembered offsets.
+        # this after show(). Explicit requests win over memory: `-r`/`-w` force
+        # a view, an anchor overrides the remembered offsets.
+        #
+        # ``stored_view_wins`` says whether the remembered view may override
+        # ``start_in_read``, and it has to be its own answer: "write, memory
+        # wins" (an embedder that named no view) and "write, memory loses"
+        # (`-w`) are the same ``start_in_read`` with opposite outcomes. Left
+        # at ``None`` it follows the older rule — asking for a view forces it
+        # — so nothing an embedding host passes today changes meaning (#58).
         if start_in_read:
             self._toggle_rendered()
         if file_path is not None:
-            self._restore_position(restore_mode=not start_in_read,
-                                   restore_offsets=not anchor)
+            self._restore_position(
+                restore_mode=(not start_in_read if stored_view_wins is None
+                              else stored_view_wins),
+                restore_offsets=not anchor)
         if anchor:
             self._jump_to_anchor(anchor)
 
@@ -1432,6 +1442,13 @@ class ZenMarkdownEditor(QWidget):
             return
         mode, caret, top = stored
         if restore_mode and mode == "read" and not self._rendered_mode:
+            self._toggle_rendered()
+        elif restore_mode and mode == "write" and self._rendered_mode:
+            # Symmetric on purpose (#58). While the app always opened writing,
+            # only the read direction needed restoring — the other one came
+            # free from the default. Now that the CLI opens reading, a file
+            # left writing has to be carried back the other way, or "resumes
+            # where you left it" would hold in one direction only.
             self._toggle_rendered()
         if not restore_offsets:
             return

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`textli notes.md` now opens the reading view** (#58) — reading a document
+  is the common case and writing one the exception, so reaching the page no
+  longer costs a `⌘R` every time. `textli -w notes.md` (`--write`) opens the
+  write view instead; `-r`/`--read` keeps working and now names the default,
+  so an existing alias or script doesn't break, and asking for both at once is
+  a usage error rather than one silently winning. Only the standalone CLI
+  changes — `ZenMarkdownEditor(start_in_read=…)` keeps its meaning, and nothing
+  an embedding host passes today behaves differently.
+
+  Resuming a file's view had to become symmetric to survive the flip. The
+  restore only ever toggled *into* the read view: a file left writing came
+  back writing because writing was what the app opened in, not because
+  anything carried it there. With reading the default, that half of "resumes
+  where you left it" would have quietly stopped holding, so the restore now
+  carries a file back in both directions. Reading is the default for a file
+  with no remembered view; `-r` or `-w` overrides whatever is remembered.
+
 ### Added
 
 - **The sheet now lies on a desk** (#56) — the surround was a flat fill, which

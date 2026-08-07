@@ -31,9 +31,9 @@ Python 3.12 or newer is required.
 ## The CLI
 
 ```sh
-textli notes.md                     # open a file (created on first save)
+textli notes.md                     # open a file reading (created on first save)
 textli notes.md#design-decisions    # open and jump to a heading
-textli -r review.md                 # start in the rendered reading view
+textli -w notes.md                  # start in the editable write view
 textli notes.md --pdf               # write notes.pdf and exit, no window
 textli notes.md --pdf out/paper.pdf # ... or to a path you name
 ```

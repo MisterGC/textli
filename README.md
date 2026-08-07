@@ -41,15 +41,17 @@ existing PyPI name), but everywhere else it's just textli: the command is
 ## Use
 
 ```sh
-textli notes.md                     # open (created on first save)
+textli notes.md                     # open reading (created on first save)
 textli notes.md#design-decisions    # jump straight to a heading
-textli -r review.md                 # start in the reading view
+textli -w notes.md                  # start in the editable write view
 textli notes.md --pdf               # export the typeset page, no window
 ```
 
-The editor opens ready to type (vim NORMAL mode) and autosaves while you
-work, and every file **resumes where you left it** — view mode, caret and
-scroll included. It also **watches the open file**, so edits made outside
+A file you haven't opened before **opens in the reading view**; `⌘R` (or
+`-w`) puts you in the write view, ready to type in vim NORMAL mode. It
+autosaves while you work, and every file **resumes where you left it** —
+view mode, caret and scroll included, so a note you were writing comes
+back writing. It also **watches the open file**, so edits made outside
 textli (an agent applying your comments, a `git` checkout) reload in place
 without a restart. A faint **whisper status** in the card's corner keeps you
 oriented —
