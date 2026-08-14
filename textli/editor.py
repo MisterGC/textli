@@ -32,10 +32,12 @@ from PySide6.QtGui import (
     QFontInfo,
     QFontMetricsF,
     QGradient,
+    QImage,
     QKeyEvent,
     QLinearGradient,
     QPainter,
     QPen,
+    QPixmap,
     QRegion,
     QTextBlockFormat,
     QTextCharFormat,
@@ -93,6 +95,7 @@ from textli.constants import (
 )
 from textli.fonts import register_bundled_fonts
 from textli.highlight import MarkdownHighlighter, compute_focus_range
+from textli.imageview import ImageInspector
 from textli.jump import WordJumpOverlay
 from textli.suggest import SuggestionAnimator
 from textli.vim import VimKeyHandler, VimMode
@@ -615,6 +618,7 @@ def editor_help_html() -> str:
         ("gl", "Links overview — same jump-list; Enter follows the picked link"),
         ("↵", "Follow the link under the caret — a <span style='font-family:monospace'>.md</span> opens in place, web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
         ("↵", "…or the source reference under it — <span style='font-family:monospace'>editor.py</span>, <span style='font-family:monospace'>textli/editor.py:2455</span>, <span style='font-family:monospace'>view.py:80-95</span> — opens the file read-only at that line"),
+        ("↵", "…or the image under it — a picture, chart, diagram or formula fills the window for a closer look; <span style='font-family:monospace'>Esc</span> puts the page back"),
         ("gb / ⌫", "Back to the document (or source file) the last link or reference was followed from"),
         ("go", "Open another file (stays in the reading view)"),
     ])}</table>
@@ -929,6 +933,8 @@ class ZenMarkdownEditor(QWidget):
 
         # Word jump overlay
         self._jump: WordJumpOverlay | None = None
+        # Full-page image inspector (`↵` on an image in the read view, #59)
+        self._image_view: ImageInspector | None = None
 
         # Whisper status — one faint line in the card's corner (content built
         # in textli.status). Word counts are debounced off textChanged; the
@@ -1902,6 +1908,65 @@ class ZenMarkdownEditor(QWidget):
         if not was_rendered:
             self._toggle_rendered()
         return path
+
+    def _image_pixmap_at_caret(self) -> QPixmap | None:
+        """The picture under the read-view caret, at whatever resolution the
+        document actually holds (#59).
+
+        The caret sits *beside* an image as often as on it — an image alone in
+        its paragraph is a single object-replacement character — so this takes
+        the fragment under the caret if there is one and otherwise the first
+        image in the caret's block. That makes `↵` work anywhere on the line
+        a diagram occupies, which is how a reader thinks about it.
+
+        Ordinary Markdown images come back at their full size on disk, so
+        expanding one is a real enlargement. Charts, `.grafli` diagrams and
+        math were rasterised at the prose column's width and can only be
+        scaled up from there.
+        """
+        if not self._rendered_mode:
+            return None
+        doc = self._rendered.document()
+        pos = self._rendered.textCursor().position()
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return None
+        under = first = None
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            fmt = frag.charFormat()
+            if fmt.isImageFormat():
+                if first is None:
+                    first = fmt.toImageFormat()
+                if frag.position() <= pos <= frag.position() + frag.length():
+                    under = fmt.toImageFormat()
+                    break
+            it += 1
+        imf = under or first
+        if imf is None or not imf.name():
+            return None
+        res = doc.resource(QTextDocument.ResourceType.ImageResource,
+                           QUrl(imf.name()))
+        if isinstance(res, QPixmap):
+            return None if res.isNull() else res
+        if isinstance(res, QImage):
+            return None if res.isNull() else QPixmap.fromImage(res)
+        return None
+
+    def _expand_image_at_caret(self) -> bool:
+        """`↵` on an image — fill the card with it. False when there is none,
+        so Enter falls through to whatever else it does here."""
+        pixmap = self._image_pixmap_at_caret()
+        if pixmap is None:
+            return False
+        if self._image_view is None:
+            self._image_view = ImageInspector(self)
+        # The whole window, not the card: charts and diagrams are drawn at
+        # the *column* width and the card is barely wider than that.
+        self._image_view.open(pixmap, QRectF(self.rect()),
+                              restore_focus_to=self._rendered)
+        return True
 
     def _baked_print_doc(self):
         """A clone of the rendered document with the code band baked in as a
@@ -3951,6 +4016,8 @@ class ZenMarkdownEditor(QWidget):
         if layout:
             self._apply_card_margins(layout)
         self._refresh_status()   # the card corner moved with the window
+        if self._image_view is not None and self._image_view.is_active():
+            self._image_view.set_area(QRectF(self.rect()))
 
     def _parent_resized(self):
         parent = self.parentWidget()
@@ -4021,6 +4088,12 @@ class ZenMarkdownEditor(QWidget):
         # Jump overlay consumes all keys while active
         if self._jump and self._jump.is_active():
             self._jump.keyPressEvent(event)
+            return True
+
+        # So does the expanded image — Esc has to land there rather than
+        # falling through to save-and-close (#59).
+        if self._image_view is not None and self._image_view.is_active():
+            self._image_view.keyPressEvent(event)
             return True
 
         # F1 — the editor's own help (works in either view). The editor owns and
@@ -4268,6 +4341,10 @@ class ZenMarkdownEditor(QWidget):
             if href and self._follow_rendered_link(href):
                 return True
             if self._follow_source_ref_at_caret():
+                return True
+            # An image under the caret opens full-page (#59) — after the link
+            # and source-ref checks, so a linked image still follows its link.
+            if self._expand_image_at_caret():
                 return True
             self._reveal_active_comment()
             return True

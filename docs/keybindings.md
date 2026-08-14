@@ -73,6 +73,7 @@ See [Opening files](opening.md) for how the matching works.
 | `gl` | Links overview — same jump-list; `Enter` follows the picked link |
 | `↵` | Follow the link under the caret — a `.md` opens in place, web/mail in the browser, `#heading` jumps there, anything else via the system handler |
 | `↵` | Follow the **source reference** under the caret — `editor.py`, `textli/editor.py:2455`, `view.py:80-95` — opening the file read-only at that line (see [Source references](#source-references)) |
+| `↵` | Expand the **image** under the caret — an ordinary picture, a chart, a `.grafli` diagram or a formula fills the window for a closer look. `Esc` (or `↵` again) puts the page back |
 | `gb` / `⌫` | Back to the document (or source file) the last link or reference was followed from |
 | `go` | Open another file (stays in the reading view) |
 
