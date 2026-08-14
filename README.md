@@ -77,6 +77,7 @@ complete key reference, or see the
 | `go` | Open another file — fuzzy history + per-segment path completion |
 | `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |
 | `↵` | Follow the source reference under the caret — `` `editor.py:42` `` opens the file read-only at that line (reading view) |
+| `↵` | Expand the image under the caret — picture, chart, diagram or formula fills the window; `Esc` closes (reading view) |
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |

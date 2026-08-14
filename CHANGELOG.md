@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`↵` on an image in the reading view fills the window with it** (#59) — a
+  picture is drawn at the prose column's width, which is right for reading
+  around it and too small for reading *into* it; a dense `.grafli` diagram or
+  a chart with a dozen labels couldn't be inspected without leaving textli.
+  `Esc` (or `↵` again) puts the page back with caret and scroll untouched. It
+  works for every kind of image the page can hold — ordinary Markdown images,
+  charts, `.grafli` diagrams and rendered math — and `↵` keeps its existing
+  jobs, so a link or source reference under the caret still wins.
+
+  It covers the window rather than the card deliberately: charts and diagrams
+  are rasterised at the *column* width and the card is only ~130px wider, so
+  expanding into the card alone would have enlarged a diagram by about a
+  tenth. Only ordinary Markdown images have a full-size original to enlarge
+  from; the rendered kinds are scaled up from their bitmap, and that scaling
+  is capped at 4x so a small formula becomes readable rather than a smear.
+  Re-rendering those at the expanded size is left for later.
+
 ### Changed
 
 - **`textli notes.md` now opens the reading view** (#58) — reading a document
