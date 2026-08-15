@@ -88,6 +88,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Esc` quit the standalone app outright** (#63) — it autosaved and closed,
+  so one reflexive keypress ended the session and cost the reader their window
+  and their place. Nothing was ever lost from the file, but nothing about
+  reading a document suggests that key should end the program. `Esc` standalone
+  now only steps back: leave visual mode, close an overlay, cancel the headings
+  overview, put an expanded image away. With nothing left to back out of it
+  flashes how to quit and does nothing else. An embedding host is untouched —
+  there the editor is modal and `Esc` is how it hands back, which is what the
+  new flag defaults to, and `⇧Esc` still means cancel-and-discard.
+
+  `⌘Q` (`Ctrl+Q` elsewhere) now quits, because `Esc` was the only keyboard exit
+  there was: macOS hands Qt applications a `⌘Q` through the default application
+  menu, but on Linux and Windows the window's close button would otherwise have
+  been the only way out.
+
 - **The caret and the selection flattened an image instead of marking it**
   (#61) — a wash reads well over text, where it tints the paper between the
   letters, but over a picture it covers the content and dulls the thing you

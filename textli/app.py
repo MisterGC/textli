@@ -12,8 +12,8 @@ import signal
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import QApplication, QWidget
 
 from textli import settings as md_settings
@@ -67,10 +67,14 @@ class TextliHost(QWidget):
         view may override, which is what the CLI passes when neither ``-r``
         nor ``-w`` was given (#58)."""
         self.setWindowTitle(f"textli — {path.name}")
+        self._install_quit_shortcut()
         self._editor = ZenMarkdownEditor(
             parent=self, text=text, title=path.name, file_path=path,
             anchor=anchor, start_in_read=read,
             stored_view_wins=stored_view_wins,
+            # Standalone, Esc is not an exit — the reader is at a document,
+            # not in a modal editor a host is waiting on (#63).
+            close_on_escape=False,
         )
         # File-backed editing autosaves, so closing simply ends the session.
         self._editor.cancelled.connect(self.close)
@@ -78,6 +82,19 @@ class TextliHost(QWidget):
         # `go` switches files in place — keep the window title honest.
         self._editor.file_opened.connect(
             lambda p: self.setWindowTitle(f"textli — {p.name}"))
+
+    def _install_quit_shortcut(self):
+        """``⌘Q`` / ``Ctrl+Q`` quits (#63).
+
+        Explicit because ``Esc`` used to be the only keyboard exit: macOS
+        hands Qt applications a ``⌘Q`` through the default application menu,
+        but on Linux and Windows the window's close button would otherwise be
+        the only way out.
+        """
+        for seq in (QKeySequence.StandardKey.Quit, QKeySequence("Ctrl+Q")):
+            short = QShortcut(QKeySequence(seq), self)
+            short.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            short.activated.connect(self.close)
 
     def closeEvent(self, event):
         super().closeEvent(event)
