@@ -18,10 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image *is* one glyph, so the cell was the entire picture; and Qt paints the
   selection inside the document layout with no hook to exempt an image. An
   image under the caret or inside the selection is now redrawn from its own
-  resource over whatever wash landed on it and given a 2px rounded frame
-  instead — the caret's colour at full strength (the wash's alpha is low
+  resource over whatever wash landed on it, and marked with four 4px corner
+  brackets in the caret's colour at full strength (the wash's alpha is low
   because it covers a whole cell, and at that alpha a thin stroke barely
   registers) or the selection colour. Text is untouched.
+
+  The brackets sit *inside* the picture rather than around it. An outline hung
+  on the outside has to line up with the drawn edge exactly — and it didn't,
+  because the laid-out rectangle needed the block's left margin added back and
+  was taking the line's descent as part of the image's height — so it read as
+  broken. Inside, the geometry only has to be close, nothing claims layout
+  room the image never reserved, and the cost is a few pixels of content at
+  each corner.
 
 - **An image wider than the prose column broke the page sideways instead of
   scaling down** (#60) — Qt draws an image at its natural pixel size, so a

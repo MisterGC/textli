@@ -180,6 +180,45 @@ def _batched(doc):
         cur.endEditBlock()
 
 
+# The corner marks that say an image is under the caret or in the selection
+# (#61). They sit *inside* the picture rather than around it: an outline hung
+# on the outside has to line up with the drawn edge exactly or it reads as
+# broken, and it also claims layout room the image never reserved. Inside,
+# the geometry only has to be close, and the cost is a few pixels of content
+# at each corner.
+_MARK_WIDTH = 4.0
+# How far inside the edge the brackets sit. Comfortably more than the stroke
+# needs, so a pixel or two of rounding between the laid-out rectangle and the
+# drawn picture can never leave a mark hanging off the edge.
+_MARK_INSET = 8.0
+_MARK_ARM_MIN = 14.0
+_MARK_ARM_MAX = 34.0
+_MARK_ARM_SHARE = 0.12      # of the picture's shorter side
+
+
+def _paint_corner_marks(painter: QPainter, cell: QRectF, colour) -> None:
+    """Four L-shaped brackets, one per corner, drawn inside ``cell``."""
+    arm = max(_MARK_ARM_MIN,
+              min(_MARK_ARM_MAX, min(cell.width(), cell.height())
+                  * _MARK_ARM_SHARE))
+    if cell.width() < 3 * arm or cell.height() < 3 * arm:
+        arm = min(cell.width(), cell.height()) / 3.0
+    if arm < 4.0:
+        return                       # too small to mark without covering it
+    pen = QPen(QColor(colour))
+    pen.setWidth(int(_MARK_WIDTH))
+    pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    r = cell.adjusted(_MARK_INSET, _MARK_INSET, -_MARK_INSET, -_MARK_INSET)
+    for x, y, dx, dy in ((r.left(), r.top(), 1, 1),
+                         (r.right(), r.top(), -1, 1),
+                         (r.left(), r.bottom(), 1, -1),
+                         (r.right(), r.bottom(), -1, -1)):
+        painter.drawLine(QPointF(x, y), QPointF(x + dx * arm, y))
+        painter.drawLine(QPointF(x, y), QPointF(x, y + dy * arm))
+
+
 def _caret_frame_ink() -> QColor:
     """The caret's hue at full strength, for framing an image (#61).
 
@@ -446,25 +485,35 @@ class _ReadingView(QTextBrowser):
 
     @staticmethod
     def _image_cell(doc, layout, block, frag, off):
-        """The drawn rectangle of an image fragment, in viewport coords."""
-        bl = block.layout()
+        """The drawn rectangle of an image fragment, in viewport coords.
+
+        The width is the advance across the object-replacement character,
+        which *is* the drawn width. The height comes from the image format
+        when something set one — the column fit does (#60) — and from the
+        picture's own aspect ratio otherwise. The bottom sits on the line's
+        baseline, which is where Qt puts an inline image; adding the line's
+        descent as well pushed the rectangle below the picture.
+        """
         rel = frag.position() - block.position()
-        line = bl.lineForTextPosition(rel)
+        line = block.layout().lineForTextPosition(rel)
         if not line.isValid():
             return None
         x1 = line.cursorToX(rel)[0]
         w = line.cursorToX(rel + frag.length())[0] - x1
         if w <= 0:
             return None
-        pix = _resource_pixmap(doc, frag.charFormat().toImageFormat())
-        if pix is None or pix.width() <= 0:
-            return None
-        h = w * pix.height() / pix.width()
-        top = doc.documentLayout().blockBoundingRect(block).top()
-        # Bottom-aligned to the baseline, which is where Qt puts an inline
-        # image; for an image alone in its block that fills the line exactly.
-        bottom = top + line.y() + line.ascent() + line.descent()
-        return QRectF(x1 + off.x(), bottom - h + off.y(), w, h)
+        imf = frag.charFormat().toImageFormat()
+        h = imf.height()
+        if h <= 0:
+            pix = _resource_pixmap(doc, imf)
+            if pix is None or pix.width() <= 0:
+                return None
+            h = w * pix.height() / pix.width()
+        # cursorToX is relative to the block's own text area, so the block's
+        # left edge (the document margin, plus any indent) has to come back in.
+        br = doc.documentLayout().blockBoundingRect(block)
+        bottom = br.top() + line.y() + line.ascent()
+        return QRectF(br.left() + x1 + off.x(), bottom - h + off.y(), w, h)
 
     def _paint_image_marks(self, doc, layout, off):
         marks = self._marked_image_rects(doc, layout, off)
@@ -475,11 +524,7 @@ class _ReadingView(QTextBrowser):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         for cell, pix, colour in marks:
             painter.drawPixmap(cell.toRect(), pix)
-            pen = QPen(QColor(colour))
-            pen.setWidth(2)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(cell.adjusted(-1, -1, 1, 1), 3.0, 3.0)
+            _paint_corner_marks(painter, cell, colour)
         painter.end()
 
     def _paint_overlays(self, doc, layout, off):
