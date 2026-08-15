@@ -309,3 +309,59 @@ def test_fence_examples_in_code_still_stay_literal():
     # literal syntax example, never a parsed mark
     src = "```\n{==not a comment==}{>>just docs<<}\n```\n"
     assert mc.parse_marks(src) == []
+
+
+# ── inline code spans that wrap across lines (#52) ───────────────
+
+MULTILINE_SPAN = "`Foo<REF =\nBar>`. "
+
+
+def test_a_mark_after_a_wrapped_code_span_still_parses():
+    """CommonMark lets an inline code span cross a line, and hard-wrapped
+    prose does it all the time. When the pattern refused newlines, the closing
+    backtick of a wrapped span was left over as an *opener*: it paired with the
+    next backtick later in the document and everything between was masked as
+    code, so the mark in that stretch was silently dropped (#52)."""
+    for mark, kind in (
+            ("{~~old~>new~~}", "substitute"),
+            ("{++added++}", "insert"),
+            ("{--removed--}", "delete"),
+    ):
+        src = f"{MULTILINE_SPAN}{mark} and `x` tail\n"
+        marks = mc.parse_marks(src)
+        assert [m.kind for m in marks] == [kind], src
+
+
+def test_a_comment_after_a_wrapped_code_span_still_parses():
+    src = f"{MULTILINE_SPAN}{{==span==}}{{>>body<<}} and `x` tail\n"
+    comments = mc.parse(src)
+    assert len(comments) == 1
+    assert comments[0].span == "span"
+    assert comments[0].body == "body"
+
+
+def test_code_ranges_masks_the_span_itself_not_the_text_after_it():
+    src = "`Foo<REF =\nBar>`. {~~old~>new~~} and `x` tail\n"
+    ranges = mc.code_ranges(src)
+    assert src[ranges[0][0]:ranges[0][1]] == "`Foo<REF =\nBar>`"
+    mark_at = src.index("{~~")
+    assert not any(a <= mark_at < b for a, b in ranges), \
+        "the mark must not sit inside a masked range"
+
+
+def test_a_mark_inside_a_wrapped_code_span_stays_literal():
+    """The other half of the rule: real code is documentation, not markup."""
+    src = "`a {~~old~>new~~}\nb` tail\n"
+    assert mc.parse_marks(src) == []
+
+
+def test_an_unpaired_backtick_cannot_swallow_the_next_paragraph():
+    """A blank line ends the span, so a stray backtick can't mask the rest of
+    the document and hide every mark after it."""
+    src = "an unterminated ` backtick\n\n{~~old~>new~~} in the next paragraph\n"
+    assert [m.kind for m in mc.parse_marks(src)] == ["substitute"]
+
+
+def test_a_single_line_code_span_is_unaffected():
+    src = "`Foo<REF = Bar>`. {~~old~>new~~} and `x` tail\n"
+    assert [m.kind for m in mc.parse_marks(src)] == ["substitute"]

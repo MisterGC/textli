@@ -12,8 +12,8 @@ import signal
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import QApplication, QWidget
 
 from textli import settings as md_settings
@@ -57,15 +57,24 @@ class TextliHost(QWidget):
         path: Path,
         text: str,
         anchor: str = "",
-        read: bool = False,
+        read: bool = True,
+        stored_view_wins: bool | None = None,
     ) -> None:
         """Create the editor on the given file. Call after the host is shown
         so the editor sizes to a real window rect. ``anchor`` scrolls to a
-        heading (its markdown slug); ``read`` opens the rendered read view."""
+        heading (its markdown slug); ``read`` opens the rendered read view.
+        ``stored_view_wins`` makes ``read`` a fallback the file's remembered
+        view may override, which is what the CLI passes when neither ``-r``
+        nor ``-w`` was given (#58)."""
         self.setWindowTitle(f"textli — {path.name}")
+        self._install_quit_shortcut()
         self._editor = ZenMarkdownEditor(
             parent=self, text=text, title=path.name, file_path=path,
             anchor=anchor, start_in_read=read,
+            stored_view_wins=stored_view_wins,
+            # Standalone, Esc is not an exit — the reader is at a document,
+            # not in a modal editor a host is waiting on (#63).
+            close_on_escape=False,
         )
         # File-backed editing autosaves, so closing simply ends the session.
         self._editor.cancelled.connect(self.close)
@@ -73,6 +82,19 @@ class TextliHost(QWidget):
         # `go` switches files in place — keep the window title honest.
         self._editor.file_opened.connect(
             lambda p: self.setWindowTitle(f"textli — {p.name}"))
+
+    def _install_quit_shortcut(self):
+        """``⌘Q`` / ``Ctrl+Q`` quits (#63).
+
+        Explicit because ``Esc`` used to be the only keyboard exit: macOS
+        hands Qt applications a ``⌘Q`` through the default application menu,
+        but on Linux and Windows the window's close button would otherwise be
+        the only way out.
+        """
+        for seq in (QKeySequence.StandardKey.Quit, QKeySequence("Ctrl+Q")):
+            short = QShortcut(QKeySequence(seq), self)
+            short.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            short.activated.connect(self.close)
 
     def closeEvent(self, event):
         super().closeEvent(event)
@@ -97,10 +119,18 @@ def main():
              "doesn't exist. Or: `textli skill` to print/install the bundled "
              "AI skill (see `textli skill --help`).",
     )
-    parser.add_argument(
+    view = parser.add_mutually_exclusive_group()
+    view.add_argument(
         "-r", "--read",
         action="store_true",
-        help="Open in the rendered read view (default: editable write view)",
+        help="Open in the rendered read view, ignoring the file's remembered "
+             "view (reading is the default for a file with none)",
+    )
+    view.add_argument(
+        "-w", "--write",
+        action="store_true",
+        help="Open in the editable write view, ignoring the file's remembered "
+             "view",
     )
     parser.add_argument(
         "--pdf",
@@ -151,7 +181,13 @@ def main():
 
     host = TextliHost()
     host.showMaximized()
-    host.open(path, text, anchor=anchor, read=args.read)
+    # No flag: open reading, but let a file that was left writing come back
+    # writing. Either flag is a demand and the remembered view steps aside.
+    host.open(path, text, anchor=anchor,
+              read=not args.write,
+              # Either flag is a demand; with neither, reading is only the
+              # fallback and a file left writing comes back writing.
+              stored_view_wins=not (args.read or args.write))
 
     sys.exit(app.exec())
 

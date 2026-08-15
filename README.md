@@ -41,15 +41,17 @@ existing PyPI name), but everywhere else it's just textli: the command is
 ## Use
 
 ```sh
-textli notes.md                     # open (created on first save)
+textli notes.md                     # open reading (created on first save)
 textli notes.md#design-decisions    # jump straight to a heading
-textli -r review.md                 # start in the reading view
+textli -w notes.md                  # start in the editable write view
 textli notes.md --pdf               # export the typeset page, no window
 ```
 
-The editor opens ready to type (vim NORMAL mode) and autosaves while you
-work, and every file **resumes where you left it** — view mode, caret and
-scroll included. It also **watches the open file**, so edits made outside
+A file you haven't opened before **opens in the reading view**; `⌘R` (or
+`-w`) puts you in the write view, ready to type in vim NORMAL mode. It
+autosaves while you work, and every file **resumes where you left it** —
+view mode, caret and scroll included, so a note you were writing comes
+back writing. It also **watches the open file**, so edits made outside
 textli (an agent applying your comments, a `git` checkout) reload in place
 without a restart. A faint **whisper status** in the card's corner keeps you
 oriented —
@@ -63,7 +65,7 @@ complete key reference, or see the
 | Key | Action |
 | --- | --- |
 | `⌘R` | Toggle write ↔ reading view |
-| `Esc` | Save & close (`⇧Esc` cancels) |
+| `Esc` | Step back — leave visual mode, close an overlay, put an expanded image away. Embedded in a host app it also saves & closes (`⇧Esc` cancels); standalone, `⌘Q` quits |
 | `⌘↵` | Full-window width |
 | `⌘.` | Section focus (dim all but the current paragraph / section) |
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
@@ -75,6 +77,7 @@ complete key reference, or see the
 | `go` | Open another file — fuzzy history + per-segment path completion |
 | `↵` | Follow the link under the caret — `.md` opens in place, web in the browser, `#heading` jumps (reading view) |
 | `↵` | Follow the source reference under the caret — `` `editor.py:42` `` opens the file read-only at that line (reading view) |
+| `↵` | Expand the image under the caret — picture, chart, diagram or formula fills the window; `Esc` closes (reading view) |
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |

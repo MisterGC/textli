@@ -51,7 +51,12 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  # Lets docs/changelog.md pull in the repository's CHANGELOG.md, so the
+  # site and the file can never drift apart. check_paths fails the build
+  # rather than silently emitting the include marker as literal text.
+  - pymdownx.snippets:
+      base_path: ['.']
+      check_paths: true
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
@@ -75,4 +80,5 @@ nav:
   - Keybindings: keybindings.md
   - Embedding: embedding.md
   - AI agents: ai.md
+  - Changelog: changelog.md
   - Contributing: contributing.md

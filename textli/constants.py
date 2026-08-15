@@ -49,10 +49,26 @@ ZEN_MD_MUTED_ALPHA = 100
 ZEN_MD_FONT_SIZE = 16
 ZEN_MD_FONT_SIZE_MIN = 10
 ZEN_MD_FONT_SIZE_MAX = 32
-# Read-view long-form leading — proportional line height (%) applied to prose
-# (not code, which reads better tight), paired with the proportional reading
-# face so sustained reading breathes.
-ZEN_MD_READING_LINE_HEIGHT = 145
+# Read-view long-form rhythm (#33, #54) — all three are multiples of the body
+# em, resolved to pixels against the view's own font metrics so the numbers
+# mean the same thing at every zoom, on every platform, and under a different
+# reading face.
+#
+# The leading is applied as an *absolute* line height. Qt's ProportionalHeight
+# is a percentage of the font's natural line box, not of the em — Literata's
+# box is 1.485em, so the 145 this replaces landed near 2.2em, far past the
+# ~1.4-1.6em at which consecutive lines still read as one block. It also
+# scaled each line by the tallest fragment on it, so a line carrying inline
+# code (mono, 1.32em) came out shorter than a plain one and the leading
+# wobbled inside a single paragraph.
+#
+# Both gaps sit above the line gap, so a break *between* blocks always reads
+# larger than a break *inside* one. List items get the smaller of the two:
+# they had no gap at all, which left a wrapped bullet's continuation line
+# indistinguishable from the start of the next bullet.
+ZEN_MD_READING_LEADING = 1.55    # × body em — the line box
+ZEN_MD_READING_PARA_GAP = 0.9    # × body em — after a plain paragraph
+ZEN_MD_READING_ITEM_GAP = 0.6    # × body em — after a list item
 # Modal card: width hugs the text column, height takes most of the window.
 # Card chrome strips (the area outside the canvas) get the dim wash so a
 # host's canvas itself stays fully saturated.
@@ -72,6 +88,21 @@ ZEN_MD_CARD_RADIUS = 12
 #     back the moment `gb` returns to the document.
 # ⌘+/⌘- still ride on top of both, and a column already wider than this keeps
 # its width.
+# How much of the prose column a picture may fill (#62). A picture drawn to
+# the full measure is as tall as its aspect ratio makes it, which is a lot of
+# page for something the reader is mostly reading around; three quarters of
+# the width is three quarters of the height too. Nothing is lost — `↵` fills
+# the window with the original — and it is a *width* cap rather than a height
+# one on purpose: a height cap would depend on the window, so the same
+# document would lay out differently on a laptop and a monitor.
+ZEN_MD_PICTURE_WIDTH_SHARE = 0.75
+
+# A display formula alone in its paragraph is set on the left, indented from
+# the prose rather than flush with it, so it still reads as lifted out of the
+# sentence. A multiple of the body em, resolved against the view's own font
+# metrics, so it means the same at any zoom and on any platform.
+ZEN_MD_FORMULA_INDENT = 2.0
+
 ZEN_MD_SRC_FONT_SCALE = 0.82
 ZEN_MD_SRC_COLUMNS = 88
 
@@ -85,6 +116,19 @@ ZEN_MD_PAPER_TILE = 144        # grain tile side (logical px)
 ZEN_MD_PAPER_SEED = 0x7311     # fixed — the sheet looks the same every launch
 ZEN_MD_PAPER_EDGE_ALPHA = 16   # falloff ink alpha at the window edges
 ZEN_MD_PAPER_PLATEAU = 0.5     # central width fraction kept fully bright
+
+# The desk (#56): the surround wears the same two cues as the sheet, framed by
+# the *card* so one light falls across both instead of each having its own.
+# Neither of the sheet's numbers carries over to a dark ground:
+#   * the grain is an alpha ceiling on a translucent overlay, not a ± step
+#     around a known colour — an embedded host paints the ground, so the desk
+#     can't bake one. It only lightens: at these alphas, blending a near-black
+#     backdrop toward white moves it some six times as far as blending toward
+#     black, so a symmetric tile would read one-directional anyway;
+#   * the falloff runs deeper, because the desk lies further from the light
+#     than the sheet does.
+ZEN_MD_DESK_GRAIN = 10         # max alpha of the noise overlay (of 255)
+ZEN_MD_DESK_EDGE_ALPHA = 46    # falloff ink alpha at the window edges
 
 # ── Modifier helpers ─────────────────────────────────────────────
 # Qt swaps Control/Meta on macOS: MetaModifier is the physical ⌃ key there.

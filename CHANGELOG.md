@@ -5,6 +5,209 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-15
+
+### Added
+
+- **`↵` on an image in the reading view fills the window with it** (#59) — a
+  picture is drawn at the prose column's width, which is right for reading
+  around it and too small for reading *into* it; a dense `.grafli` diagram or
+  a chart with a dozen labels couldn't be inspected without leaving textli.
+  `Esc` (or `↵` again) puts the page back with caret and scroll untouched. It
+  works for every kind of image the page can hold — ordinary Markdown images,
+  charts, `.grafli` diagrams and rendered math — and `↵` keeps its existing
+  jobs, so a link or source reference under the caret still wins.
+
+  It covers the window rather than the card deliberately: charts and diagrams
+  are rasterised at the *column* width and the card is only ~130px wider, so
+  expanding into the card alone would have enlarged a diagram by about a
+  tenth. Only ordinary Markdown images have a full-size original to enlarge
+  from; the rendered kinds are scaled up from their bitmap, and that scaling
+  is capped at 4x so a small formula becomes readable rather than a smear.
+  Re-rendering those at the expanded size is left for later.
+
+- **The sheet now lies on a desk** (#56) — the surround was a flat fill, which
+  is most of what you look at and read as a void rather than a room. It wears
+  the same two cues `paper.py` already gives the page, grain and a horizontal
+  light falloff, lit from the same place: the desk's light frame is centred on
+  the card but spans the window, so one ramp runs bright at the sheet and sinks
+  into the corners instead of each surface having its own light. It rides the
+  existing `⌘⇧P`, and where a host supplies a canvas the desk stops at its edge
+  — that canvas keeps its own pixels under the gentler wash, so an embedded
+  textli never paints over its host. Two things a dark ground forces and the
+  sheet's own numbers could not carry: the desk's grain is a *translucent*
+  overlay rather than a colour-baked tile, since an embedding host paints the
+  ground and the desk cannot bake a colour it does not know (which also means
+  its tiles can never go stale against a palette switch), and its falloff
+  shades toward black rather than the warm body ink the sheet uses — body ink
+  is *lighter* than the dimmed surround, so reusing it brightened the corners
+  it was meant to sink.
+
+### Changed
+
+- **An image travels into and out of the full-window view instead of cutting**
+  (#64) — `↵` grew the page into the expanded picture in a single frame, and
+  `Esc` cut back the same way, which left the reader re-finding their place
+  because nothing connected the small picture to the large one. It now grows
+  out of where it sits on the page, with the backdrop fading in behind it, and
+  goes back the same way; the eye follows one object rather than reconciling
+  two. Same durations and curves as the editor's own fade in and out, so
+  there is one motion vocabulary rather than a second. Reversing mid-flight
+  picks up from wherever the picture currently is, so a quick `↵ Esc` doesn't
+  snap, and keys stay swallowed for the whole of the closing tween — it is
+  still on screen, so nothing should land on the document underneath.
+
+- **A display formula is set on the left, indented, rather than centred**
+  (#65) —
+  it still reads as lifted out of the sentence rather than starting one, and
+  it lines up with the prose the way the rest of the page does. Two body ems
+  of indent, resolved through the view's font metrics so it holds at any zoom
+  and on any platform. An inline `$…$` is untouched — it stays where it sits
+  in its sentence. Charts and `.grafli` diagrams keep the centring they had.
+
+- **A picture is now drawn at most three quarters of the prose column** (#62)
+  — filling the measure also means being as tall as the aspect ratio makes
+  it, which is a lot of page for something the reader is mostly reading
+  *around*: a 4:3 image in a 692px column took 519px of height and now takes
+  389px. No detail is lost, since `↵` fills the window with the original
+  (#59). Charts and `.grafli` diagrams are *rasterised* at the capped width
+  rather than rendered to the full column and drawn scaled down, so they stay
+  crisp; the cost is slightly less room for a chart's labels. Still downscale
+  only — a picture already narrower than the cap keeps its own size.
+
+  A width cap rather than a height one on purpose. A height cap would target
+  the wasted space more directly but would depend on the window, so the same
+  document would lay out differently on a laptop and a monitor; the sheet's
+  geometry is meant to hold still. Alignment is unchanged: plain images stay
+  left with the prose, while display formulas, charts and diagrams keep the
+  centring they already had.
+
+- **`textli notes.md` now opens the reading view** (#58) — reading a document
+  is the common case and writing one the exception, so reaching the page no
+  longer costs a `⌘R` every time. `textli -w notes.md` (`--write`) opens the
+  write view instead; `-r`/`--read` keeps working and now names the default,
+  so an existing alias or script doesn't break, and asking for both at once is
+  a usage error rather than one silently winning. Only the standalone CLI
+  changes — `ZenMarkdownEditor(start_in_read=…)` keeps its meaning, and nothing
+  an embedding host passes today behaves differently.
+
+  Resuming a file's view had to become symmetric to survive the flip. The
+  restore only ever toggled *into* the read view: a file left writing came
+  back writing because writing was what the app opened in, not because
+  anything carried it there. With reading the default, that half of "resumes
+  where you left it" would have quietly stopped holding, so the restore now
+  carries a file back in both directions. Reading is the default for a file
+  with no remembered view; `-r` or `-w` overrides whatever is remembered.
+
+### Fixed
+
+- **`Esc` quit the standalone app outright** (#63) — it autosaved and closed,
+  so one reflexive keypress ended the session and cost the reader their window
+  and their place. Nothing was ever lost from the file, but nothing about
+  reading a document suggests that key should end the program. `Esc` standalone
+  now only steps back: leave visual mode, close an overlay, cancel the headings
+  overview, put an expanded image away. With nothing left to back out of it
+  flashes how to quit and does nothing else. An embedding host is untouched —
+  there the editor is modal and `Esc` is how it hands back, which is what the
+  new flag defaults to, and `⇧Esc` still means cancel-and-discard.
+
+  `⌘Q` (`Ctrl+Q` elsewhere) now quits, because `Esc` was the only keyboard exit
+  there was: macOS hands Qt applications a `⌘Q` through the default application
+  menu, but on Linux and Windows the window's close button would otherwise have
+  been the only way out.
+
+- **The caret and the selection flattened an image instead of marking it**
+  (#61) — a wash reads well over text, where it tints the paper between the
+  letters, but over a picture it covers the content and dulls the thing you
+  are trying to look at. Measured against a `#cc4422` test image, the caret
+  took it to `#92443a` and a selection to `#c28c85`. Two mechanisms were
+  doing it: textli's own block caret fills the glyph cell under it, and an
+  image *is* one glyph, so the cell was the entire picture; and Qt paints the
+  selection inside the document layout with no hook to exempt an image. An
+  image under the caret or inside the selection is now redrawn from its own
+  resource over whatever wash landed on it, and marked with four 4px corner
+  brackets in the caret's colour at full strength (the wash's alpha is low
+  because it covers a whole cell, and at that alpha a thin stroke barely
+  registers) or the selection colour. Text is untouched.
+
+  The brackets sit *inside* the picture rather than around it, their outer
+  face flush with its edge. An outline hung on the outside has to line up with
+  the drawn edge exactly — and it didn't, because the laid-out rectangle
+  needed the block's left margin added back and was taking the line's descent
+  as part of the image's height — so it read as broken. Both are fixed, and
+  drawing inside means nothing claims layout room the image never reserved;
+  the cost is a few pixels of content at each corner.
+
+  A **rendered formula keeps the wash**. It is typeset text that happens to
+  arrive as a bitmap: it sits in a sentence, it is small, and a tint reads
+  over it exactly as it reads over the letters around it. Charts and `.grafli`
+  diagrams go the other way and get the brackets — they are pictures with
+  detail to inspect, and a wash flattens them the same way it flattens a
+  screenshot.
+
+- **An image wider than the prose column broke the page sideways instead of
+  scaling down** (#60) — Qt draws an image at its natural pixel size, so a
+  2400px screenshot in a 700px column pushed the document's ideal width to
+  2408px and grew a horizontal scrollbar. Charts, `.grafli` diagrams and math
+  never did this, since they're rasterised at the column width and carry an
+  explicit size; a plain `![](shot.png)` carried none. Wide images are now
+  scaled down to the column with their aspect ratio kept, and the document
+  resource is left at full resolution so `↵` (#59) still enlarges the
+  original. Downscale only — an icon keeps its own size rather than being
+  stretched to fill the measure. This also fixes `@2x` assets, which rendered
+  at twice their intended size because Qt reads natural pixel size as logical
+  size.
+
+  The real damage was second-order: authors and agents worked around the
+  overflow by shipping pre-shrunk files, and once `↵` could expand an image
+  that downscaled copy was all the detail there was. The bundled AI skill now
+  says to ship images at full resolution and why.
+
+- **Nothing re-rendered when the reading column changed** (#60) — a width
+  step or
+  the full-width toggle resized the card, but charts and diagrams kept the
+  bitmap they were rasterised at, so widening the column left them small and
+  soft. The read view now re-renders when the column moves, coalesced so a
+  burst of width steps settles into one render, and carries the reader's
+  position across as a fraction of the document rather than a pixel offset —
+  a narrower column makes the same document taller. The threshold that
+  triggers it sits above the scrollbar's width on purpose: fitting an image
+  changes the document's height, which can bring the scrollbar in or out,
+  which moves the column again, and chasing it exactly never settles.
+
+- **Read-view prose sat too far apart to cohere, and list items had no
+  grouping gap** (#54) — the reading leading was set with Qt's
+  `ProportionalHeight`, which is a percentage of the font's *natural line
+  box* rather than of the em. Against Literata's 1.485em box the configured
+  145% rendered at roughly 2.2em, well past the point where consecutive
+  lines still read as one block: the eye lost the line on the return sweep
+  and paragraphs came apart into evenly-spaced stripes. It also scaled each
+  line by the tallest fragment on it, so a line carrying inline code was led
+  differently than a plain one and the leading wobbled inside a single
+  paragraph. Leading is now an absolute line box of 1.55em, resolved through
+  the view's own font metrics so it means the same thing at every zoom and
+  on every platform — the old gaps multiplied the point size as though a
+  point were a pixel, which holds only at 72 dpi. List items now get an
+  explicit gap of their own, smaller than a paragraph's, so the three breaks
+  finally rank: line, then item, then paragraph. Headings and any block
+  holding an image keep their natural height, which a fixed box would crop.
+  That exemption also stopped the leading inflating an image's own line: a
+  picture *is* the line's tallest fragment, so 145% of it left 45% of the
+  image's height as blank space underneath — a measured 78px gap below a
+  173px picture, before the paragraph gap.
+
+- **CriticMarkup marks were dropped after an inline code span that wrapped
+  across lines** (#52) — CommonMark lets a code span cross a line, and
+  hard-wrapped prose wraps long spans routinely, but the inline-code pattern
+  refused newlines. The closing backtick of a wrapped span was then left over
+  as an *opener*: it paired with the next backtick anywhere later in the
+  document and everything between was masked as code, so any `{++`, `{--`,
+  `{~~` or `{==` in that stretch was read as documentation and silently
+  skipped. The mark fell through to GFM strikethrough, which made the
+  *document* look broken rather than the parser. Spans may now cross lines but
+  stop at a blank one, so a genuinely unpaired backtick still can't swallow
+  the rest of the file.
+
 ## [0.7.1] - 2026-07-29
 
 ### Fixed

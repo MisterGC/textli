@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import os
 import re
+import sys
 from collections import deque, namedtuple
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,10 +33,13 @@ from PySide6.QtGui import (
     QFontInfo,
     QFontMetricsF,
     QGradient,
+    QImage,
     QKeyEvent,
     QLinearGradient,
     QPainter,
     QPen,
+    QPixmap,
+    QRegion,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
@@ -83,7 +87,9 @@ from textli.constants import (
     ZEN_MD_CARD_H_RATIO, ZEN_MD_CARD_INNER_PAD_H, ZEN_MD_CARD_INNER_PAD_V,
     ZEN_MD_CARD_RADIUS, ZEN_MD_FONT_SIZE, ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN, ZEN_MD_HEADING_SIZES,
-    ZEN_MD_READING_LINE_HEIGHT, ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
+    ZEN_MD_READING_ITEM_GAP, ZEN_MD_READING_LEADING, ZEN_MD_READING_PARA_GAP,
+    ZEN_MD_FORMULA_INDENT, ZEN_MD_PICTURE_WIDTH_SHARE,
+    ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
     ZEN_MD_FOCUS_CORE_LINES, ZEN_MD_FOCUS_DIM_MAX,
     ZEN_MD_FOCUS_FALLOFF_LINES, ZEN_MD_MUTED_ALPHA, ZEN_MD_TABLE_PAD,
     ZEN_MD_MAX_WIDTH,
@@ -92,6 +98,7 @@ from textli.constants import (
 )
 from textli.fonts import register_bundled_fonts
 from textli.highlight import MarkdownHighlighter, compute_focus_range
+from textli.imageview import ImageInspector
 from textli.jump import WordJumpOverlay
 from textli.suggest import SuggestionAnimator
 from textli.vim import VimKeyHandler, VimMode
@@ -132,6 +139,18 @@ _MD_FEATURES = (
 # URL scheme for rendered math images. Each formula becomes an image ref in
 # the markdown handed to setMarkdown (`![math](textli-math://N)`), resolved
 # from the document's resource cache — never from disk or network.
+# How far the column must move before the read view is re-rendered for it
+# (#60). Not a tolerance for taste: fitting an image changes the document's
+# height, which can bring the vertical scrollbar in or out, which changes the
+# viewport width by the scrollbar's 8px, which moves the column again. Chasing
+# the column exactly makes those two states trade places forever, so the
+# threshold sits above that width and the loop settles.
+# How the quit shortcut reads on this platform, for the hint Esc flashes when
+# it has nothing left to back out of (#63).
+_QUIT_KEYS = "⌘Q" if sys.platform == "darwin" else "CTRL+Q"
+
+_REFIT_EPSILON = 12.0
+
 _MATH_SCHEME = "textli-math"
 
 # URL scheme for rendered chart images (#41). A ``<!-- chart: … -->`` marker and
@@ -166,6 +185,102 @@ def _batched(doc):
         yield
     finally:
         cur.endEditBlock()
+
+
+def _is_picture(imf) -> bool:
+    """True for an image the reader looks *at*, false for a rendered formula.
+
+    A formula is typeset text that happens to arrive as a bitmap: it is words
+    in a sentence, it is small, and the wash reads over it exactly as it reads
+    over the letters around it. Charts and `.grafli` diagrams are the other
+    way round — they are pictures with detail to inspect, and a wash flattens
+    them the same way it flattens a screenshot (#61).
+    """
+    return not imf.name().startswith(f"{_MATH_SCHEME}://")
+
+
+# The corner marks that say an image is under the caret or in the selection
+# (#61). They sit *inside* the picture rather than around it: an outline hung
+# on the outside has to line up with the drawn edge exactly or it reads as
+# broken, and it also claims layout room the image never reserved. Inside,
+# the geometry only has to be close, and the cost is a few pixels of content
+# at each corner.
+_MARK_WIDTH = 4.0
+# How far inside the edge the brackets sit: half the stroke, so its outer
+# face is flush with the picture's edge rather than floating in from it. This
+# started larger, as slack for a laid-out rectangle that was off by the
+# block's left margin and by the line's descent; with both fixed the rectangle
+# matches the drawn picture to a pixel and the slack is just a visible gap.
+_MARK_INSET = _MARK_WIDTH / 2
+_MARK_ARM_MIN = 14.0
+_MARK_ARM_MAX = 34.0
+_MARK_ARM_SHARE = 0.12      # of the picture's shorter side
+
+
+def _paint_corner_marks(painter: QPainter, cell: QRectF, colour) -> None:
+    """Four L-shaped brackets, one per corner, drawn inside ``cell``."""
+    arm = max(_MARK_ARM_MIN,
+              min(_MARK_ARM_MAX, min(cell.width(), cell.height())
+                  * _MARK_ARM_SHARE))
+    if cell.width() < 3 * arm or cell.height() < 3 * arm:
+        arm = min(cell.width(), cell.height()) / 3.0
+    if arm < 4.0:
+        return                       # too small to mark without covering it
+    pen = QPen(QColor(colour))
+    pen.setWidth(int(_MARK_WIDTH))
+    pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    r = cell.adjusted(_MARK_INSET, _MARK_INSET, -_MARK_INSET, -_MARK_INSET)
+    for x, y, dx, dy in ((r.left(), r.top(), 1, 1),
+                         (r.right(), r.top(), -1, 1),
+                         (r.left(), r.bottom(), 1, -1),
+                         (r.right(), r.bottom(), -1, -1)):
+        painter.drawLine(QPointF(x, y), QPointF(x + dx * arm, y))
+        painter.drawLine(QPointF(x, y), QPointF(x, y + dy * arm))
+
+
+def _caret_frame_ink() -> QColor:
+    """The caret's hue at full strength, for framing an image (#61).
+
+    ``ZEN_MD_CARET`` is deliberately translucent because it washes a whole
+    glyph cell; at that alpha a 2px stroke barely registers, so the frame
+    takes the colour and drops the transparency.
+    """
+    ink = QColor(theme.ZEN_MD_CARET)
+    ink.setAlpha(255)
+    return ink
+
+
+def _resource_pixmap(doc, imf) -> QPixmap | None:
+    """The picture behind an image format, at whatever resolution the document
+    holds — full size on disk for an ordinary Markdown image, the rasterised
+    bitmap for a chart, diagram or formula. None when it can't be resolved."""
+    if not imf.name():
+        return None
+    res = doc.resource(QTextDocument.ResourceType.ImageResource,
+                       QUrl(imf.name()))
+    if isinstance(res, QImage):
+        res = QPixmap.fromImage(res)
+    if not isinstance(res, QPixmap) or res.isNull():
+        return None
+    return res
+
+
+def _block_has_image(block) -> bool:
+    """True if any fragment in ``block`` is an image — rendered math, a chart,
+    a grafli diagram, or an ordinary picture.
+
+    Such a block keeps its natural line height: the reading leading is measured
+    from the body em, and an image is routinely taller than that, so a fixed
+    line box would crop it.
+    """
+    it = block.begin()
+    while not it.atEnd():
+        if it.fragment().charFormat().isImageFormat():
+            return True
+        it += 1
+    return False
 
 
 def _paper_light_frame(view) -> tuple[float, float]:
@@ -357,9 +472,97 @@ class _ReadingView(QTextBrowser):
         if (self._strikes or self._heading_rules or self._quote_bars
                 or self._focus_span or self._focus_reading):
             self._paint_overlays(doc, layout, off)
+        # Images marked by the caret or the selection get their own pixels
+        # back and a frame instead of a wash (#61) — after the base paint,
+        # which is what laid the wash down, and before the caret, which skips
+        # the ones handled here.
+        self._paint_image_marks(doc, layout, off)
         # The caret sits on top of every wash — it's always in the bright band,
         # but painting it last guarantees it's never dimmed.
         self._paint_caret(off)
+
+    def _marked_image_rects(self, doc, layout, off):
+        """``(rect, pixmap, colour)`` for every image the caret sits on or the
+        selection covers (#61).
+
+        A wash over text tints the paper between the letters; over an image it
+        covers the content. These get redrawn from their resource and framed
+        instead. The rect is built from the layout rather than the image's
+        stated size: the horizontal extent is the advance across the object
+        replacement character, which *is* the drawn width, and the picture
+        sits on the line's baseline.
+        """
+        cur = self.textCursor()
+        sel_start, sel_end = cur.selectionStart(), cur.selectionEnd()
+        caret = cur.position()
+        out = []
+        block = doc.findBlock(min(sel_start, caret))
+        last = doc.findBlock(max(sel_end, caret))
+        end_pos = last.position() + last.length() if last.isValid() else -1
+        while block.isValid() and block.position() < max(end_pos, 1):
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                pos = frag.position()
+                if fmt.isImageFormat() and _is_picture(fmt.toImageFormat()):
+                    in_sel = sel_start <= pos < sel_end
+                    on_caret = (sel_start == sel_end
+                                and pos <= caret <= pos + frag.length())
+                    if in_sel or on_caret:
+                        cell = self._image_cell(doc, layout, block, frag, off)
+                        pix = _resource_pixmap(doc, fmt.toImageFormat())
+                        if cell is not None and pix is not None:
+                            out.append((cell, pix,
+                                        theme.ZEN_SELECTION_BG if in_sel
+                                        else _caret_frame_ink()))
+                it += 1
+            block = block.next()
+        return out
+
+    @staticmethod
+    def _image_cell(doc, layout, block, frag, off):
+        """The drawn rectangle of an image fragment, in viewport coords.
+
+        The width is the advance across the object-replacement character,
+        which *is* the drawn width. The height comes from the image format
+        when something set one — the column fit does (#60) — and from the
+        picture's own aspect ratio otherwise. The bottom sits on the line's
+        baseline, which is where Qt puts an inline image; adding the line's
+        descent as well pushed the rectangle below the picture.
+        """
+        rel = frag.position() - block.position()
+        line = block.layout().lineForTextPosition(rel)
+        if not line.isValid():
+            return None
+        x1 = line.cursorToX(rel)[0]
+        w = line.cursorToX(rel + frag.length())[0] - x1
+        if w <= 0:
+            return None
+        imf = frag.charFormat().toImageFormat()
+        h = imf.height()
+        if h <= 0:
+            pix = _resource_pixmap(doc, imf)
+            if pix is None or pix.width() <= 0:
+                return None
+            h = w * pix.height() / pix.width()
+        # cursorToX is relative to the block's own text area, so the block's
+        # left edge (the document margin, plus any indent) has to come back in.
+        br = doc.documentLayout().blockBoundingRect(block)
+        bottom = br.top() + line.y() + line.ascent()
+        return QRectF(br.left() + x1 + off.x(), bottom - h + off.y(), w, h)
+
+    def _paint_image_marks(self, doc, layout, off):
+        marks = self._marked_image_rects(doc, layout, off)
+        if not marks:
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        for cell, pix, colour in marks:
+            painter.drawPixmap(cell.toRect(), pix)
+            _paint_corner_marks(painter, cell, colour)
+        painter.end()
 
     def _paint_overlays(self, doc, layout, off):
         painter = QPainter(self.viewport())
@@ -475,6 +678,26 @@ class _ReadingView(QTextBrowser):
                                  QPointF(x2 + off.x(), y + off.y()))
             block = block.next()
 
+    def _caret_on_image(self) -> bool:
+        """True when the caret sits on an image — its cell is the whole
+        picture, so the soft block would wash all of it (#61)."""
+        cur = self.textCursor()
+        if cur.hasSelection():
+            return False
+        pos = cur.position()
+        block = self.document().findBlock(pos)
+        if not block.isValid():
+            return False
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if (frag.charFormat().isImageFormat()
+                    and _is_picture(frag.charFormat().toImageFormat())
+                    and frag.position() <= pos <= frag.position() + frag.length()):
+                return True
+            it += 1
+        return False
+
     def _caret_cell(self, off):
         """The glyph-cell rectangle under the caret (viewport coords), or None
         if it can't be laid out — the soft block is painted here. Width is the
@@ -503,6 +726,8 @@ class _ReadingView(QTextBrowser):
         focus (an open card takes focus, so the caret rests then)."""
         if not self.hasFocus():
             return
+        if self._caret_on_image():
+            return           # framed by _paint_image_marks instead (#61)
         cell = self._caret_cell(off)
         if cell is None:
             return
@@ -555,7 +780,11 @@ def editor_help_html() -> str:
     <p style='{hdr}'>Views &amp; session</p>
     <table>{rows([
         ("⌘R", "Toggle the source editor ↔ rendered reading view"),
-        ("Esc", "Save &amp; close (⇧Esc cancels / discards pending changes)"),
+        ("Esc", "Step back — leave visual mode, close an overlay, "
+         "put an expanded image away. Embedded in a host app it also saves "
+         "&amp; closes the editor (⇧Esc cancels / discards pending changes); "
+         "standalone, <span style='font-family:monospace'>"
+         + _QUIT_KEYS + "</span> quits"),
         ("⌘↵", "Toggle full-window width"),
         ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
@@ -614,6 +843,7 @@ def editor_help_html() -> str:
         ("gl", "Links overview — same jump-list; Enter follows the picked link"),
         ("↵", "Follow the link under the caret — a <span style='font-family:monospace'>.md</span> opens in place, web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there"),
         ("↵", "…or the source reference under it — <span style='font-family:monospace'>editor.py</span>, <span style='font-family:monospace'>textli/editor.py:2455</span>, <span style='font-family:monospace'>view.py:80-95</span> — opens the file read-only at that line"),
+        ("↵", "…or the image under it — a picture, chart, diagram or formula fills the window for a closer look; <span style='font-family:monospace'>Esc</span> puts the page back"),
         ("gb / ⌫", "Back to the document (or source file) the last link or reference was followed from"),
         ("go", "Open another file (stays in the reading view)"),
     ])}</table>
@@ -663,6 +893,8 @@ class ZenMarkdownEditor(QWidget):
         file_path: Path | None = None,
         anchor: str = "",
         start_in_read: bool = False,
+        stored_view_wins: bool | None = None,
+        close_on_escape: bool = True,
         canvas: QWidget | None = None,
         theme_name: str | None = None,
     ):
@@ -700,6 +932,10 @@ class ZenMarkdownEditor(QWidget):
         # The host's canvas widget — the dim wash skips over this rect so
         # the canvas itself stays fully saturated while UI chrome dims.
         self._canvas = canvas
+        # Whether Esc ends the session. True for an embedding host, where the
+        # editor is modal and Esc hands back; the standalone app passes False,
+        # so Esc there only backs out of whatever is on top (#63).
+        self._close_on_escape = close_on_escape
 
         # Load persisted font size preference
         settings = md_settings.app_settings()
@@ -756,13 +992,22 @@ class ZenMarkdownEditor(QWidget):
         self._start_fade_in()
         # Open at a location / in a mode (used by textli's open-at-anchor). The
         # read-view toggle and centerCursor both need a laid-out viewport, so do
-        # this after show(). Explicit requests win over memory: `-r` forces the
-        # read view, an anchor overrides the remembered offsets.
+        # this after show(). Explicit requests win over memory: `-r`/`-w` force
+        # a view, an anchor overrides the remembered offsets.
+        #
+        # ``stored_view_wins`` says whether the remembered view may override
+        # ``start_in_read``, and it has to be its own answer: "write, memory
+        # wins" (an embedder that named no view) and "write, memory loses"
+        # (`-w`) are the same ``start_in_read`` with opposite outcomes. Left
+        # at ``None`` it follows the older rule — asking for a view forces it
+        # — so nothing an embedding host passes today changes meaning (#58).
         if start_in_read:
             self._toggle_rendered()
         if file_path is not None:
-            self._restore_position(restore_mode=not start_in_read,
-                                   restore_offsets=not anchor)
+            self._restore_position(
+                restore_mode=(not start_in_read if stored_view_wins is None
+                              else stored_view_wins),
+                restore_offsets=not anchor)
         if anchor:
             self._jump_to_anchor(anchor)
 
@@ -900,8 +1145,8 @@ class ZenMarkdownEditor(QWidget):
         self._vim = VimKeyHandler(
             editor=self._editor,
             mode_changed=self._on_mode_changed,
-            close_save=self._close_save,
-            close_cancel=self._close_cancel,
+            close_save=lambda: self._request_close(),
+            close_cancel=lambda: self._request_close(cancel=True),
             open_file=self._open_file_dialog,
             open_headings=self._open_headings_overview,
         )
@@ -918,6 +1163,11 @@ class ZenMarkdownEditor(QWidget):
 
         # Word jump overlay
         self._jump: WordJumpOverlay | None = None
+        # Full-page image inspector (`↵` on an image in the read view, #59)
+        self._image_view: ImageInspector | None = None
+        # Coalesces re-renders when the column moves (#60)
+        self._refit_timer: QTimer | None = None
+        self._rendered_at_width = 0.0
 
         # Whisper status — one faint line in the card's corner (content built
         # in textli.status). Word counts are debounced off textChanged; the
@@ -1086,6 +1336,19 @@ class ZenMarkdownEditor(QWidget):
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
         self._fade_in_anim = anim  # hold ref so it doesn't get GC'd mid-run
+
+    def _request_close(self, *, cancel: bool = False):
+        """Esc reached the bottom — close, or say how to quit (#63).
+
+        Nothing was left to back out of. For an embedding host that means
+        hand back; standalone it means the reader pressed Esc at a document,
+        which should not end the program. Autosave has already run either
+        way, so this is about the window, never the file.
+        """
+        if not self._close_on_escape:
+            self._flash_mode(f"{_QUIT_KEYS} TO QUIT")
+            return
+        self._close_cancel() if cancel else self._close_save()
 
     def _close_save(self):
         if self._file_path:
@@ -1431,6 +1694,13 @@ class ZenMarkdownEditor(QWidget):
             return
         mode, caret, top = stored
         if restore_mode and mode == "read" and not self._rendered_mode:
+            self._toggle_rendered()
+        elif restore_mode and mode == "write" and self._rendered_mode:
+            # Symmetric on purpose (#58). While the app always opened writing,
+            # only the read direction needed restoring — the other one came
+            # free from the default. Now that the CLI opens reading, a file
+            # left writing has to be carried back the other way, or "resumes
+            # where you left it" would hold in one direction only.
             self._toggle_rendered()
         if not restore_offsets:
             return
@@ -1885,6 +2155,160 @@ class ZenMarkdownEditor(QWidget):
             self._toggle_rendered()
         return path
 
+    def _fit_page_images(self, doc):
+        """Scale a too-wide Markdown image down to the column (#60).
+
+        Qt draws an image at its natural pixel size, so a screenshot wider
+        than the prose column pushes the document's ideal width past the
+        viewport and the reading view grows a horizontal scrollbar — the page
+        breaks sideways rather than the picture fitting. Charts, diagrams and
+        math never hit this because they are rasterised at the column width
+        and carry an explicit size; a plain ``![](shot.png)`` carries none.
+
+        Only fragments with no explicit size are touched, which is exactly
+        those plain images — the generated kinds already have theirs, and
+        re-fitting them would fight the size they were rendered at.
+
+        Downscale only. An icon stretched to fill the measure is worse than
+        an icon. And the *resource* is left alone at full resolution, so the
+        expanded view (#59) still has the original to enlarge from.
+
+        Format-only: shifts no offsets, so the sentinel mark pass is safe.
+        """
+        column = self._picture_width_px()
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                if fmt.isImageFormat():
+                    imf = fmt.toImageFormat()
+                    # An explicit width means something already sized it.
+                    if not imf.width() and not imf.height():
+                        targets.append((frag.position(), frag.length(), imf))
+                it += 1
+            block = block.next()
+        if not targets:
+            return
+        with _batched(doc):
+            for pos, length, imf in targets:
+                natural = self._image_logical_size(doc, imf)
+                if natural is None:
+                    continue
+                w, h = natural
+                if w <= column:
+                    continue
+                imf.setWidth(column)
+                imf.setHeight(h * column / w)
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.setCharFormat(imf)
+
+    @staticmethod
+    def _image_logical_size(doc, imf) -> tuple[float, float] | None:
+        """An image resource's size in layout units, or None if it can't be
+        resolved. Device-independent: a 2x asset is the same picture at twice
+        the pixels, not twice the picture."""
+        res = _resource_pixmap(doc, imf)
+        if res is None:
+            return None
+        dpr = res.devicePixelRatio() or 1.0
+        w, h = res.width() / dpr, res.height() / dpr
+        return (w, h) if w > 0 and h > 0 else None
+
+    def _image_pixmap_at_caret(self) -> QPixmap | None:
+        """The picture under the read-view caret, at whatever resolution the
+        document actually holds (#59).
+
+        The caret sits *beside* an image as often as on it — an image alone in
+        its paragraph is a single object-replacement character — so this takes
+        the fragment under the caret if there is one and otherwise the first
+        image in the caret's block. That makes `↵` work anywhere on the line
+        a diagram occupies, which is how a reader thinks about it.
+
+        Ordinary Markdown images come back at their full size on disk, so
+        expanding one is a real enlargement. Charts, `.grafli` diagrams and
+        math were rasterised at the prose column's width and can only be
+        scaled up from there.
+        """
+        if not self._rendered_mode:
+            return None
+        doc = self._rendered.document()
+        pos = self._rendered.textCursor().position()
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return None
+        under = first = None
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            fmt = frag.charFormat()
+            if fmt.isImageFormat():
+                if first is None:
+                    first = fmt.toImageFormat()
+                if frag.position() <= pos <= frag.position() + frag.length():
+                    under = fmt.toImageFormat()
+                    break
+            it += 1
+        imf = under or first
+        return None if imf is None else _resource_pixmap(doc, imf)
+
+    def _expand_image_at_caret(self) -> bool:
+        """`↵` on an image — fill the card with it. False when there is none,
+        so Enter falls through to whatever else it does here."""
+        pixmap = self._image_pixmap_at_caret()
+        if pixmap is None:
+            return False
+        if self._image_view is None:
+            self._image_view = ImageInspector(self)
+        # The whole window, not the card: charts and diagrams are drawn at
+        # the *column* width and the card is barely wider than that.
+        self._image_view.open(pixmap, QRectF(self.rect()),
+                              restore_focus_to=self._rendered,
+                              from_rect=self._image_cell_in_self())
+        return True
+
+    def _image_cell_in_self(self) -> QRectF | None:
+        """Where the caret's picture sits on the page, in this widget's own
+        coordinates — the rectangle the expanded view grows out of (#64).
+
+        None when it can't be located, which the inspector reads as "nothing
+        to travel from" and simply appears.
+        """
+        if not self._rendered_mode:
+            return None
+        doc = self._rendered.document()
+        pos = self._rendered.textCursor().position()
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return None
+        off = QPointF(-self._rendered.horizontalScrollBar().value(),
+                      -self._rendered.verticalScrollBar().value())
+        frag = None
+        it = block.begin()
+        while not it.atEnd():
+            f = it.fragment()
+            if f.charFormat().isImageFormat():
+                frag = f
+                if f.position() <= pos <= f.position() + f.length():
+                    break
+            it += 1
+        if frag is None:
+            return None
+        cell = self._rendered._image_cell(doc, doc.documentLayout(),
+                                          block, frag, off)
+        if cell is None:
+            return None
+        # The reading view's viewport is a child of this widget, so the
+        # rectangle has to come up into its coordinates.
+        vp = self._rendered.viewport()
+        top_left = vp.mapTo(self, cell.topLeft().toPoint())
+        return QRectF(top_left.x(), top_left.y(),
+                      cell.width(), cell.height())
+
     def _baked_print_doc(self):
         """A clone of the rendered document with the code band baked in as a
         real block background — the one view-painted overlay that carries
@@ -1942,6 +2366,53 @@ class ZenMarkdownEditor(QWidget):
         self._apply_heading_layout()
         self.update()
         self._refresh_status()
+        self._schedule_refit()
+
+    def _schedule_refit(self):
+        """Re-render the read view once the column has settled (#60).
+
+        Charts and diagrams are rasterised *at* the column width and a wide
+        image is scaled to it, so all three go stale the moment the column
+        moves — a width step, the full-width toggle, or the window resizing.
+        Re-rendering is the only thing that re-rasterises them, and it is far
+        too costly to run per keystroke, so a burst of steps settles into one.
+        """
+        if not self._rendered_mode:
+            return
+        if self._refit_timer is None:
+            self._refit_timer = QTimer(self)
+            self._refit_timer.setSingleShot(True)
+            self._refit_timer.setInterval(160)
+            self._refit_timer.timeout.connect(self._refit_rendered)
+        self._refit_timer.start()
+
+    def _refit_rendered(self):
+        """Re-render at the current column, keeping the reader's place.
+
+        The scroll offset is carried as a *fraction* rather than a pixel
+        value: a narrower column makes the same document taller, so the old
+        offset would land somewhere else entirely.
+        """
+        if not self._rendered_mode:
+            return
+        width = self._page_width_px()
+        if abs(width - self._rendered_at_width) < _REFIT_EPSILON:
+            return                      # the column ended up where it was
+        bar = self._rendered.verticalScrollBar()
+        ratio = bar.value() / bar.maximum() if bar.maximum() else 0.0
+        caret = self._rendered.textCursor().position()
+        self._render_markdown(self._editor.toPlainText())
+        doc = self._rendered.document()
+        cur = self._rendered.textCursor()
+        cur.setPosition(min(caret, max(0, doc.characterCount() - 1)))
+        self._rendered.setTextCursor(cur)
+        bar = self._rendered.verticalScrollBar()
+        bar.setValue(int(round(ratio * bar.maximum())))
+        # The viewport resizes on a later layout pass, so the column can have
+        # moved again under this render. Re-check and go round once more —
+        # the entry guard above stops it the moment the width holds still.
+        if abs(self._page_width_px() - self._rendered_at_width) >= _REFIT_EPSILON:
+            self._schedule_refit()
 
     def _toggle_full_width(self):
         """⌘↵: expand the card to fill the window (and back to the column)."""
@@ -2158,14 +2629,21 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.setCharFormat(imf)
             # A display formula alone in its paragraph (just the image's
-            # object-replacement character) is centered, LaTeX-style. A comment
-            # wraps it in sentinels that haven't been cleared yet, so strip
-            # those before the alone-in-paragraph test.
+            # object-replacement character) is set on the left, indented from
+            # the prose so it still reads as lifted out of the sentence rather
+            # than starting one. A comment wraps it in sentinels that haven't
+            # been cleared yet, so strip those before the alone-in-paragraph
+            # test. An inline formula stays where it sits in its sentence.
             core = (block_text.replace(md_comments.SENTINEL_START, "")
                     .replace(md_comments.SENTINEL_END, "").strip())
             if formula.display and core == "￼":
                 bf = QTextBlockFormat()
-                bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                bf.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                # The em in pixels, not the point size: a point is only a
+                # pixel at 72 dpi, so multiplying the size directly would
+                # come out a quarter short on a 96-dpi platform (#54).
+                em = QFontInfo(self._rendered.font()).pixelSize()
+                bf.setLeftMargin(round(em * ZEN_MD_FORMULA_INDENT))
                 cur.setPosition(block_pos)
                 cur.mergeBlockFormat(bf)
 
@@ -2202,16 +2680,28 @@ class ZenMarkdownEditor(QWidget):
         anchors.sort()
         return anchors
 
-    def _chart_width_px(self) -> float:
-        """The logical width a chart is drawn at: the reading view's content
-        column (viewport minus its document margins), falling back to the saved
-        column width before the view is laid out (tests, first render)."""
+    def _page_width_px(self) -> float:
+        """The logical width anything wide is drawn at: the reading view's
+        content column (viewport minus its document margins), falling back to
+        the saved column width before the view is laid out (tests, first
+        render). Charts and diagrams are rasterised at it; a plain Markdown
+        image too big for it is scaled down to it (#60)."""
         doc = self._rendered.document()
         vw = self._rendered.viewport().width()
         inner = vw - 2 * doc.documentMargin()
         if inner < 120:
             inner = float(self._content_width)
         return float(max(120.0, min(inner, ZEN_MD_MAX_WIDTH_MAX)))
+
+    def _picture_width_px(self) -> float:
+        """The widest a picture is drawn: a share of the prose column (#62).
+
+        Charts and diagrams are rasterised at this rather than rendered to the
+        full column and scaled down, so they stay crisp. Plain images are
+        scaled to it, and one already narrower keeps its own size — this is a
+        ceiling, never a stretch.
+        """
+        return self._page_width_px() * ZEN_MD_PICTURE_WIDTH_SHARE
 
     def _prepare_charts(self, md: str):
         """Swap each ``<!-- chart: … -->`` marker + table (`charts.py`) for a
@@ -2227,7 +2717,7 @@ class ZenMarkdownEditor(QWidget):
         markers = md_charts.parse(md)
         if not markers:
             return md, {}
-        width = self._chart_width_px()
+        width = self._picture_width_px()
         height = width / _CHART_ASPECT
         dpr = self._rendered.devicePixelRatioF()
         charts: dict[int, tuple] = {}
@@ -2333,7 +2823,7 @@ class ZenMarkdownEditor(QWidget):
         refs = graflirender.find_image_refs(md, md_comments.code_ranges(md))
         if not refs:
             return md, {}
-        width = self._chart_width_px()
+        width = self._picture_width_px()
         dpr = self._rendered.devicePixelRatioF()
         diagrams: dict = {}
         out = []
@@ -2437,9 +2927,11 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._apply_code_font(doc)
+        self._fit_page_images(doc)
         self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
+        self._rendered_at_width = self._page_width_px()
         self._settle_rendered_layout()
         self._update_rendered_focus()
         self._update_read_focus()
@@ -2512,6 +3004,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._apply_code_font(doc)
+        self._fit_page_images(doc)
         self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
@@ -2935,34 +3428,61 @@ class ZenMarkdownEditor(QWidget):
                 cur.mergeCharFormat(fmt)
 
     def _style_reading_rhythm(self, doc):
-        """Long-form breathing room (#33): a proportional line height on prose
-        (not code, which reads better tight) and a gap between top-level
-        paragraphs, so sustained reading in the proportional face doesn't run
-        together. Scales with the font zoom; read view only. Format-only."""
-        para_gap = round(self._font_size * 0.6)
-        prop = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
-        block = doc.begin()
-        while block.isValid():
-            bf = block.blockFormat()
-            if not bf.hasProperty(QTextFormat.Property.BlockCodeFence):
-                fmt = QTextBlockFormat()
-                fmt.setLineHeight(ZEN_MD_READING_LINE_HEIGHT, prop)
-                cur = QTextCursor(doc)
-                cur.setPosition(block.position())
-                nxt = block.next()
-                # Space plain top-level paragraphs — not headings (they carry
-                # their own rhythm), list items, quotes, or table cells, and
-                # not right before a heading (its top margin already separates).
-                plain = (bf.headingLevel() == 0 and bf.indent() == 0
-                         and block.textList() is None
-                         and cur.currentTable() is None
-                         and bool(block.text().strip()))
-                next_heading = (nxt.isValid()
-                                and nxt.blockFormat().headingLevel() > 0)
-                if plain and not next_heading:
-                    fmt.setBottomMargin(para_gap)
-                cur.mergeBlockFormat(fmt)
-            block = block.next()
+        """Long-form breathing room (#33, #54): an absolute line height on
+        prose (not code, which reads better tight) and a gap after every
+        block, so sustained reading in the proportional face groups into
+        paragraphs and list items instead of evenly-spaced stripes.
+
+        Everything is measured from the *view's* font metrics rather than from
+        the point size directly: a point is only a pixel at 72 dpi, so the
+        pixel-valued line box and margins would otherwise come out a quarter
+        short on a 96-dpi platform. See ``constants.py`` for why the leading is
+        absolute instead of proportional.
+
+        Two kinds of block keep their natural height: headings, whose own size
+        a body-em box would crop and whose rhythm is carried by their margins,
+        and blocks holding an image (``_block_has_image``). List items get the
+        leading like any prose, but a smaller gap than a paragraph — enough
+        that a wrapped item's own lines group tighter than two adjacent items.
+
+        Scales with the font zoom; read view only. Format-only: shifts no
+        offsets, so the sentinel mark pass stays untouched."""
+        font = self._rendered.font()
+        em = QFontInfo(font).pixelSize()
+        line_h = max(round(em * ZEN_MD_READING_LEADING),
+                     # never below the face's own box, or glyphs crop
+                     int(QFontMetricsF(font).height()) + 1)
+        para_gap = round(em * ZEN_MD_READING_PARA_GAP)
+        item_gap = round(em * ZEN_MD_READING_ITEM_GAP)
+        fixed = QTextBlockFormat.LineHeightTypes.FixedHeight.value
+        with _batched(doc):
+            block = doc.begin()
+            while block.isValid():
+                bf = block.blockFormat()
+                if not bf.hasProperty(QTextFormat.Property.BlockCodeFence):
+                    fmt = QTextBlockFormat()
+                    heading = bf.headingLevel() > 0
+                    if not heading and not _block_has_image(block):
+                        fmt.setLineHeight(line_h, fixed)
+                    cur = QTextCursor(doc)
+                    cur.setPosition(block.position())
+                    nxt = block.next()
+                    item = block.textList() is not None
+                    # Space list items and plain top-level paragraphs — not
+                    # headings (they carry their own rhythm), quotes, or table
+                    # cells, and not a paragraph right before a heading (its
+                    # top margin already separates).
+                    spaceable = (cur.currentTable() is None
+                                 and bool(block.text().strip()))
+                    next_heading = (nxt.isValid()
+                                    and nxt.blockFormat().headingLevel() > 0)
+                    if item and spaceable:
+                        fmt.setBottomMargin(item_gap)
+                    elif (spaceable and not heading and not next_heading
+                            and bf.indent() == 0):
+                        fmt.setBottomMargin(para_gap)
+                    cur.mergeBlockFormat(fmt)
+                block = block.next()
 
     def _apply_code_font(self, doc):
         """Pin code back to the monospace face. Qt flags code fixed-pitch but
@@ -3835,6 +4355,9 @@ class ZenMarkdownEditor(QWidget):
         # together with the widget's opacity effect.
         canvas = self._canvas_rect_in_self()
         full = self.rect()
+        # Where the desk may go: everything the chrome wash covers. A host's
+        # canvas is off limits — it keeps its own pixels under the gentler dim.
+        desk_region = QRegion(full)
         if canvas is None or not full.intersects(canvas):
             p.fillRect(full, theme.ZEN_MD_DIM_COLOR)
         else:
@@ -3866,9 +4389,26 @@ class ZenMarkdownEditor(QWidget):
                 )
             # Canvas — gentler dim, animates with the editor's opacity.
             p.fillRect(clipped, theme.ZEN_MD_CANVAS_DIM_COLOR)
+            desk_region -= QRegion(clipped)
+
+        card = self._card_rect()
+        # The desk (#56) — the surround as a surface. One light, centred where
+        # the sheet's is, but spread across the whole window: the sheet's ramp
+        # is bounded by the sheet, and the desk keeps falling off past it into
+        # the corners. Framing the desk on the *card* instead would put every
+        # pixel beside the sheet in the gradient's padded tail, flattening the
+        # widest part of the surround to a constant. Painted under the shadow,
+        # so the sheet still sits *on* the desk.
+        light_w = float(full.width())
+        light_x = card.center().x() - light_w / 2.0
+        if self._paper:
+            p.save()
+            p.setClipRegion(desk_region)
+            md_paper.paint_desk(p, QRectF(full), light_x, light_w,
+                                self.devicePixelRatioF())
+            p.restore()
 
         # Drop shadow, then the solid writing card on top.
-        card = self._card_rect()
         self._paint_card_shadow(p, card)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(theme.ZEN_MD_BG))
@@ -3913,6 +4453,9 @@ class ZenMarkdownEditor(QWidget):
         if layout:
             self._apply_card_margins(layout)
         self._refresh_status()   # the card corner moved with the window
+        if self._image_view is not None and self._image_view.is_active():
+            self._image_view.set_area(QRectF(self.rect()))
+        self._schedule_refit()   # the window moved the column (#60)
 
     def _parent_resized(self):
         parent = self.parentWidget()
@@ -3983,6 +4526,13 @@ class ZenMarkdownEditor(QWidget):
         # Jump overlay consumes all keys while active
         if self._jump and self._jump.is_active():
             self._jump.keyPressEvent(event)
+            return True
+
+        # So does the expanded image — Esc has to land there rather than
+        # falling through to save-and-close (#59). Visible rather than active,
+        # so keys stay swallowed while it tweens shut too (#64).
+        if self._image_view is not None and self._image_view.isVisible():
+            self._image_view.keyPressEvent(event)
             return True
 
         # F1 — the editor's own help (works in either view). The editor owns and
@@ -4231,6 +4781,10 @@ class ZenMarkdownEditor(QWidget):
                 return True
             if self._follow_source_ref_at_caret():
                 return True
+            # An image under the caret opens full-page (#59) — after the link
+            # and source-ref checks, so a linked image still follows its link.
+            if self._expand_image_at_caret():
+                return True
             self._reveal_active_comment()
             return True
         if key == Qt.Key.Key_D and shift:
@@ -4242,7 +4796,7 @@ class ZenMarkdownEditor(QWidget):
             if self._visual:
                 self._set_visual(False)
             else:
-                self._close_cancel() if shift else self._close_save()
+                self._request_close(cancel=shift)
             return True
 
         # Caret motions — extend the selection when in visual mode.
@@ -4878,12 +5432,7 @@ class ZenMarkdownEditor(QWidget):
             return
         self._content_width = new_w
         self._full_width = False
-        layout = self.layout()
-        if layout:
-            self._apply_card_margins(layout)
-        self._apply_heading_layout()
-        self.update()
-        self._refresh_status()
+        self._relayout_card()
         md_settings.app_settings().setValue(
             "zen_md/content_width", self._content_width
         )

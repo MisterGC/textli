@@ -3,9 +3,9 @@
 **A lightweight text editor with focused writing and reading in mind.**
 
 textli puts one warm, paper-toned column of text on screen and nothing else.
-It opens ready to type — vim NORMAL mode, autosave on — and one keystroke
-(`⌘R`) flips the Markdown source into a rendered **reading view** built for
-proof-reading and review.
+It opens on the rendered **reading view**, built for proof-reading and
+review; one keystroke (`⌘R`, or `-w` at the command line) flips to the
+Markdown source, vim NORMAL mode with autosave on.
 
 ## What it does
 
@@ -40,8 +40,10 @@ uv tool install textli-editor
 textli notes.md
 ```
 
-Type. `Esc` saves and closes. `F1` shows the complete key reference at any
-time — the same help whether textli runs standalone or embedded.
+A new file opens in the reading view; `⌘R` switches to writing, and
+`textli -w notes.md` starts there. `Esc` saves and closes. `F1` shows the
+complete key reference at any time — the same help whether textli runs
+standalone or embedded.
 
 ## Where to go next
 

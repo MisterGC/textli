@@ -170,6 +170,35 @@ table source. See
 [`examples/charts.md`](https://github.com/MisterGC/textli/blob/main/examples/charts.md)
 for a tour.
 
+## Images
+
+An image is drawn at most three quarters of the prose column's width — filling
+the measure also means being as tall as the picture's shape makes it, and that
+is a lot of page for something you are mostly reading around. A full-resolution
+screenshot can't push the page sideways either. Smaller images keep their own
+size — an icon is never stretched to fill the measure. The column
+is what the picture follows, so widening or narrowing it (`⌘⇧→` / `⌘⇧←`)
+refits every image, chart and diagram on the page. Plain images and display
+formulas sit left with the prose — a formula alone in its paragraph is
+indented, so it reads as lifted out of the sentence. Charts and diagrams are
+centred.
+
+When the caret rests on an image, or a selection covers one — picking out a
+span for a comment, say — the picture keeps its own colours and is marked with
+four corner brackets instead of the wash text gets. A tint over text colours
+the paper between the letters; over a picture it covers the content. The
+brackets sit just inside the edges, so they cover a few pixels of the picture
+rather than claiming room around it. Charts and diagrams count as pictures
+here; a rendered formula doesn't — it's typeset text that happens to arrive as
+an image, so it keeps the ordinary wash.
+
+Press `↵` on any image to fill the window with it for a closer look, and
+`Esc` (or `↵` again) to come back. That enlarges the **file**, not the
+scaled-down copy on the page — so keep source images at full resolution
+rather than shrinking them to fit. Charts, diagrams and formulas have no
+original to go back to (they're drawn at the column's width), so they
+enlarge only as far as stays legible.
+
 ## Diagrams
 
 A Markdown image reference to a `.grafli` file —
