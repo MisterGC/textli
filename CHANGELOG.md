@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A display formula is set on the left, indented, rather than centred** —
+  it still reads as lifted out of the sentence rather than starting one, and
+  it lines up with the prose the way the rest of the page does. Two body ems
+  of indent, resolved through the view's font metrics so it holds at any zoom
+  and on any platform. An inline `$…$` is untouched — it stays where it sits
+  in its sentence. Charts and `.grafli` diagrams keep the centring they had.
+
 - **A picture is now drawn at most three quarters of the prose column** (#62)
   — filling the measure also means being as tall as the aspect ratio makes
   it, which is a lot of page for something the reader is mostly reading

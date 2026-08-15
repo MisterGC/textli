@@ -87,7 +87,7 @@ from textli.constants import (
     ZEN_MD_CARD_RADIUS, ZEN_MD_FONT_SIZE, ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN, ZEN_MD_HEADING_SIZES,
     ZEN_MD_READING_ITEM_GAP, ZEN_MD_READING_LEADING, ZEN_MD_READING_PARA_GAP,
-    ZEN_MD_PICTURE_WIDTH_SHARE,
+    ZEN_MD_FORMULA_INDENT, ZEN_MD_PICTURE_WIDTH_SHARE,
     ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
     ZEN_MD_FOCUS_CORE_LINES, ZEN_MD_FOCUS_DIM_MAX,
     ZEN_MD_FOCUS_FALLOFF_LINES, ZEN_MD_MUTED_ALPHA, ZEN_MD_TABLE_PAD,
@@ -2563,14 +2563,21 @@ class ZenMarkdownEditor(QWidget):
             cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
             cur.setCharFormat(imf)
             # A display formula alone in its paragraph (just the image's
-            # object-replacement character) is centered, LaTeX-style. A comment
-            # wraps it in sentinels that haven't been cleared yet, so strip
-            # those before the alone-in-paragraph test.
+            # object-replacement character) is set on the left, indented from
+            # the prose so it still reads as lifted out of the sentence rather
+            # than starting one. A comment wraps it in sentinels that haven't
+            # been cleared yet, so strip those before the alone-in-paragraph
+            # test. An inline formula stays where it sits in its sentence.
             core = (block_text.replace(md_comments.SENTINEL_START, "")
                     .replace(md_comments.SENTINEL_END, "").strip())
             if formula.display and core == "￼":
                 bf = QTextBlockFormat()
-                bf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                bf.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                # The em in pixels, not the point size: a point is only a
+                # pixel at 72 dpi, so multiplying the size directly would
+                # come out a quarter short on a 96-dpi platform (#54).
+                em = QFontInfo(self._rendered.font()).pixelSize()
+                bf.setLeftMargin(round(em * ZEN_MD_FORMULA_INDENT))
                 cur.setPosition(block_pos)
                 cur.mergeBlockFormat(bf)
 
