@@ -86,7 +86,8 @@ from textli.constants import (
     ZEN_MD_CARD_H_RATIO, ZEN_MD_CARD_INNER_PAD_H, ZEN_MD_CARD_INNER_PAD_V,
     ZEN_MD_CARD_RADIUS, ZEN_MD_FONT_SIZE, ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN, ZEN_MD_HEADING_SIZES,
-    ZEN_MD_READING_LINE_HEIGHT, ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
+    ZEN_MD_READING_ITEM_GAP, ZEN_MD_READING_LEADING, ZEN_MD_READING_PARA_GAP,
+    ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
     ZEN_MD_FOCUS_CORE_LINES, ZEN_MD_FOCUS_DIM_MAX,
     ZEN_MD_FOCUS_FALLOFF_LINES, ZEN_MD_MUTED_ALPHA, ZEN_MD_TABLE_PAD,
     ZEN_MD_MAX_WIDTH,
@@ -258,6 +259,22 @@ def _resource_pixmap(doc, imf) -> QPixmap | None:
     if not isinstance(res, QPixmap) or res.isNull():
         return None
     return res
+
+
+def _block_has_image(block) -> bool:
+    """True if any fragment in ``block`` is an image — rendered math, a chart,
+    a grafli diagram, or an ordinary picture.
+
+    Such a block keeps its natural line height: the reading leading is measured
+    from the body em, and an image is routinely taller than that, so a fixed
+    line box would crop it.
+    """
+    it = block.begin()
+    while not it.atEnd():
+        if it.fragment().charFormat().isImageFormat():
+            return True
+        it += 1
+    return False
 
 
 def _paper_light_frame(view) -> tuple[float, float]:
@@ -3327,34 +3344,61 @@ class ZenMarkdownEditor(QWidget):
                 cur.mergeCharFormat(fmt)
 
     def _style_reading_rhythm(self, doc):
-        """Long-form breathing room (#33): a proportional line height on prose
-        (not code, which reads better tight) and a gap between top-level
-        paragraphs, so sustained reading in the proportional face doesn't run
-        together. Scales with the font zoom; read view only. Format-only."""
-        para_gap = round(self._font_size * 0.6)
-        prop = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
-        block = doc.begin()
-        while block.isValid():
-            bf = block.blockFormat()
-            if not bf.hasProperty(QTextFormat.Property.BlockCodeFence):
-                fmt = QTextBlockFormat()
-                fmt.setLineHeight(ZEN_MD_READING_LINE_HEIGHT, prop)
-                cur = QTextCursor(doc)
-                cur.setPosition(block.position())
-                nxt = block.next()
-                # Space plain top-level paragraphs — not headings (they carry
-                # their own rhythm), list items, quotes, or table cells, and
-                # not right before a heading (its top margin already separates).
-                plain = (bf.headingLevel() == 0 and bf.indent() == 0
-                         and block.textList() is None
-                         and cur.currentTable() is None
-                         and bool(block.text().strip()))
-                next_heading = (nxt.isValid()
-                                and nxt.blockFormat().headingLevel() > 0)
-                if plain and not next_heading:
-                    fmt.setBottomMargin(para_gap)
-                cur.mergeBlockFormat(fmt)
-            block = block.next()
+        """Long-form breathing room (#33, #54): an absolute line height on
+        prose (not code, which reads better tight) and a gap after every
+        block, so sustained reading in the proportional face groups into
+        paragraphs and list items instead of evenly-spaced stripes.
+
+        Everything is measured from the *view's* font metrics rather than from
+        the point size directly: a point is only a pixel at 72 dpi, so the
+        pixel-valued line box and margins would otherwise come out a quarter
+        short on a 96-dpi platform. See ``constants.py`` for why the leading is
+        absolute instead of proportional.
+
+        Two kinds of block keep their natural height: headings, whose own size
+        a body-em box would crop and whose rhythm is carried by their margins,
+        and blocks holding an image (``_block_has_image``). List items get the
+        leading like any prose, but a smaller gap than a paragraph — enough
+        that a wrapped item's own lines group tighter than two adjacent items.
+
+        Scales with the font zoom; read view only. Format-only: shifts no
+        offsets, so the sentinel mark pass stays untouched."""
+        font = self._rendered.font()
+        em = QFontInfo(font).pixelSize()
+        line_h = max(round(em * ZEN_MD_READING_LEADING),
+                     # never below the face's own box, or glyphs crop
+                     int(QFontMetricsF(font).height()) + 1)
+        para_gap = round(em * ZEN_MD_READING_PARA_GAP)
+        item_gap = round(em * ZEN_MD_READING_ITEM_GAP)
+        fixed = QTextBlockFormat.LineHeightTypes.FixedHeight.value
+        with _batched(doc):
+            block = doc.begin()
+            while block.isValid():
+                bf = block.blockFormat()
+                if not bf.hasProperty(QTextFormat.Property.BlockCodeFence):
+                    fmt = QTextBlockFormat()
+                    heading = bf.headingLevel() > 0
+                    if not heading and not _block_has_image(block):
+                        fmt.setLineHeight(line_h, fixed)
+                    cur = QTextCursor(doc)
+                    cur.setPosition(block.position())
+                    nxt = block.next()
+                    item = block.textList() is not None
+                    # Space list items and plain top-level paragraphs — not
+                    # headings (they carry their own rhythm), quotes, or table
+                    # cells, and not a paragraph right before a heading (its
+                    # top margin already separates).
+                    spaceable = (cur.currentTable() is None
+                                 and bool(block.text().strip()))
+                    next_heading = (nxt.isValid()
+                                    and nxt.blockFormat().headingLevel() > 0)
+                    if item and spaceable:
+                        fmt.setBottomMargin(item_gap)
+                    elif (spaceable and not heading and not next_heading
+                            and bf.indent() == 0):
+                        fmt.setBottomMargin(para_gap)
+                    cur.mergeBlockFormat(fmt)
+                block = block.next()
 
     def _apply_code_font(self, doc):
         """Pin code back to the monospace face. Qt flags code fixed-pitch but

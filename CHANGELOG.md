@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`↵` on an image in the reading view fills the window with it** (#59) — a
+  picture is drawn at the prose column's width, which is right for reading
+  around it and too small for reading *into* it; a dense `.grafli` diagram or
+  a chart with a dozen labels couldn't be inspected without leaving textli.
+  `Esc` (or `↵` again) puts the page back with caret and scroll untouched. It
+  works for every kind of image the page can hold — ordinary Markdown images,
+  charts, `.grafli` diagrams and rendered math — and `↵` keeps its existing
+  jobs, so a link or source reference under the caret still wins.
+
+  It covers the window rather than the card deliberately: charts and diagrams
+  are rasterised at the *column* width and the card is only ~130px wider, so
+  expanding into the card alone would have enlarged a diagram by about a
+  tenth. Only ordinary Markdown images have a full-size original to enlarge
+  from; the rendered kinds are scaled up from their bitmap, and that scaling
+  is capped at 4x so a small formula becomes readable rather than a smear.
+  Re-rendering those at the expanded size is left for later.
+
+- **The sheet now lies on a desk** (#56) — the surround was a flat fill, which
+  is most of what you look at and read as a void rather than a room. It wears
+  the same two cues `paper.py` already gives the page, grain and a horizontal
+  light falloff, lit from the same place: the desk's light frame is centred on
+  the card but spans the window, so one ramp runs bright at the sheet and sinks
+  into the corners instead of each surface having its own light. It rides the
+  existing `⌘⇧P`, and where a host supplies a canvas the desk stops at its edge
+  — that canvas keeps its own pixels under the gentler wash, so an embedded
+  textli never paints over its host. Two things a dark ground forces and the
+  sheet's own numbers could not carry: the desk's grain is a *translucent*
+  overlay rather than a colour-baked tile, since an embedding host paints the
+  ground and the desk cannot bake a colour it does not know (which also means
+  its tiles can never go stale against a palette switch), and its falloff
+  shades toward black rather than the warm body ink the sheet uses — body ink
+  is *lighter* than the dimmed surround, so reusing it brightened the corners
+  it was meant to sink.
+
+### Changed
+
+- **`textli notes.md` now opens the reading view** (#58) — reading a document
+  is the common case and writing one the exception, so reaching the page no
+  longer costs a `⌘R` every time. `textli -w notes.md` (`--write`) opens the
+  write view instead; `-r`/`--read` keeps working and now names the default,
+  so an existing alias or script doesn't break, and asking for both at once is
+  a usage error rather than one silently winning. Only the standalone CLI
+  changes — `ZenMarkdownEditor(start_in_read=…)` keeps its meaning, and nothing
+  an embedding host passes today behaves differently.
+
+  Resuming a file's view had to become symmetric to survive the flip. The
+  restore only ever toggled *into* the read view: a file left writing came
+  back writing because writing was what the app opened in, not because
+  anything carried it there. With reading the default, that half of "resumes
+  where you left it" would have quietly stopped holding, so the restore now
+  carries a file back in both directions. Reading is the default for a file
+  with no remembered view; `-r` or `-w` overrides whatever is remembered.
+
 ### Fixed
 
 - **The caret and the selection flattened an image instead of marking it**
@@ -67,64 +122,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes the document's height, which can bring the scrollbar in or out,
   which moves the column again, and chasing it exactly never settles.
 
-### Added
-
-- **`↵` on an image in the reading view fills the window with it** (#59) — a
-  picture is drawn at the prose column's width, which is right for reading
-  around it and too small for reading *into* it; a dense `.grafli` diagram or
-  a chart with a dozen labels couldn't be inspected without leaving textli.
-  `Esc` (or `↵` again) puts the page back with caret and scroll untouched. It
-  works for every kind of image the page can hold — ordinary Markdown images,
-  charts, `.grafli` diagrams and rendered math — and `↵` keeps its existing
-  jobs, so a link or source reference under the caret still wins.
-
-  It covers the window rather than the card deliberately: charts and diagrams
-  are rasterised at the *column* width and the card is only ~130px wider, so
-  expanding into the card alone would have enlarged a diagram by about a
-  tenth. Only ordinary Markdown images have a full-size original to enlarge
-  from; the rendered kinds are scaled up from their bitmap, and that scaling
-  is capped at 4x so a small formula becomes readable rather than a smear.
-  Re-rendering those at the expanded size is left for later.
-
-### Changed
-
-- **`textli notes.md` now opens the reading view** (#58) — reading a document
-  is the common case and writing one the exception, so reaching the page no
-  longer costs a `⌘R` every time. `textli -w notes.md` (`--write`) opens the
-  write view instead; `-r`/`--read` keeps working and now names the default,
-  so an existing alias or script doesn't break, and asking for both at once is
-  a usage error rather than one silently winning. Only the standalone CLI
-  changes — `ZenMarkdownEditor(start_in_read=…)` keeps its meaning, and nothing
-  an embedding host passes today behaves differently.
-
-  Resuming a file's view had to become symmetric to survive the flip. The
-  restore only ever toggled *into* the read view: a file left writing came
-  back writing because writing was what the app opened in, not because
-  anything carried it there. With reading the default, that half of "resumes
-  where you left it" would have quietly stopped holding, so the restore now
-  carries a file back in both directions. Reading is the default for a file
-  with no remembered view; `-r` or `-w` overrides whatever is remembered.
-
-### Added
-
-- **The sheet now lies on a desk** (#56) — the surround was a flat fill, which
-  is most of what you look at and read as a void rather than a room. It wears
-  the same two cues `paper.py` already gives the page, grain and a horizontal
-  light falloff, lit from the same place: the desk's light frame is centred on
-  the card but spans the window, so one ramp runs bright at the sheet and sinks
-  into the corners instead of each surface having its own light. It rides the
-  existing `⌘⇧P`, and where a host supplies a canvas the desk stops at its edge
-  — that canvas keeps its own pixels under the gentler wash, so an embedded
-  textli never paints over its host. Two things a dark ground forces and the
-  sheet's own numbers could not carry: the desk's grain is a *translucent*
-  overlay rather than a colour-baked tile, since an embedding host paints the
-  ground and the desk cannot bake a colour it does not know (which also means
-  its tiles can never go stale against a palette switch), and its falloff
-  shades toward black rather than the warm body ink the sheet uses — body ink
-  is *lighter* than the dimmed surround, so reusing it brightened the corners
-  it was meant to sink.
-
-### Fixed
+- **Read-view prose sat too far apart to cohere, and list items had no
+  grouping gap** (#54) — the reading leading was set with Qt's
+  `ProportionalHeight`, which is a percentage of the font's *natural line
+  box* rather than of the em. Against Literata's 1.485em box the configured
+  145% rendered at roughly 2.2em, well past the point where consecutive
+  lines still read as one block: the eye lost the line on the return sweep
+  and paragraphs came apart into evenly-spaced stripes. It also scaled each
+  line by the tallest fragment on it, so a line carrying inline code was led
+  differently than a plain one and the leading wobbled inside a single
+  paragraph. Leading is now an absolute line box of 1.55em, resolved through
+  the view's own font metrics so it means the same thing at every zoom and
+  on every platform — the old gaps multiplied the point size as though a
+  point were a pixel, which holds only at 72 dpi. List items now get an
+  explicit gap of their own, smaller than a paragraph's, so the three breaks
+  finally rank: line, then item, then paragraph. Headings and any block
+  holding an image keep their natural height, which a fixed box would crop.
+  That exemption also stopped the leading inflating an image's own line: a
+  picture *is* the line's tallest fragment, so 145% of it left 45% of the
+  image's height as blank space underneath — a measured 78px gap below a
+  173px picture, before the paragraph gap.
 
 - **CriticMarkup marks were dropped after an inline code span that wrapped
   across lines** (#52) — CommonMark lets a code span cross a line, and

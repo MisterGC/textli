@@ -6,10 +6,13 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QTextBlockFormat  # noqa: E402
+from PySide6.QtGui import QFontInfo, QFontMetricsF, QTextBlockFormat  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from textli.constants import FONT_FAMILY, READING_FONT_FAMILY, ZEN_MD_READING_LINE_HEIGHT  # noqa: E402
+from textli.constants import (  # noqa: E402
+    FONT_FAMILY, READING_FONT_FAMILY, ZEN_MD_READING_ITEM_GAP,
+    ZEN_MD_READING_LEADING, ZEN_MD_READING_PARA_GAP,
+)
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 from textli import theme
 
@@ -93,25 +96,141 @@ def test_code_stays_monospace_under_the_reading_face():
             assert frag.charFormat().fontFamilies() == [FONT_FAMILY]
 
 
+FIXED = QTextBlockFormat.LineHeightTypes.FixedHeight.value
+
+
+def _blocks(doc):
+    block = doc.begin()
+    while block.isValid():
+        yield block
+        block = block.next()
+
+
+def _bf(doc, text):
+    """The block format of the first block whose text matches ``text``."""
+    for block in _blocks(doc):
+        if block.text().strip() == text:
+            return block.blockFormat()
+    raise AssertionError(f"no block reading {text!r}")
+
+
+def _expected_leading(ed) -> int:
+    font = ed._rendered.font()
+    return max(round(QFontInfo(font).pixelSize() * ZEN_MD_READING_LEADING),
+               int(QFontMetricsF(font).height()) + 1)
+
+
 def test_reading_rhythm_leads_prose_not_code():
     ed = _editor()
     ed._toggle_rendered()
     doc = ed._rendered.document()
-    prop = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
-    prose_bf = code_bf = None
-    block = doc.begin()
-    while block.isValid():
-        if block.text().strip() == "Plain prose after.":
-            prose_bf = block.blockFormat()
-        if block.text() == "x = 1":
-            code_bf = block.blockFormat()
-        block = block.next()
-    # prose: proportional leading + a paragraph gap below
-    assert prose_bf.lineHeightType() == prop
-    assert prose_bf.lineHeight() == ZEN_MD_READING_LINE_HEIGHT
+    prose_bf = _bf(doc, "Plain prose after.")
+    code_bf = _bf(doc, "x = 1")
+    # prose: an absolute line box + a paragraph gap below
+    assert prose_bf.lineHeightType() == FIXED
+    assert prose_bf.lineHeight() == _expected_leading(ed)
     assert prose_bf.bottomMargin() > 0
-    # code stays tight — no proportional leading
-    assert code_bf.lineHeightType() != prop
+    # code stays tight — the rhythm pass skips fenced blocks entirely
+    assert code_bf.lineHeightType() != FIXED
+
+
+def test_leading_does_not_wobble_around_inline_code():
+    """#54: under ProportionalHeight a line was scaled by its own tallest
+    fragment, so a paragraph carrying inline code (mono, a shorter natural
+    box) was led differently than a plain one. An absolute box is uniform."""
+    ed = _editor()
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    with_code = _bf(doc, "Prose with inline_code in it.")
+    plain = _bf(doc, "Plain prose after.")
+    assert with_code.lineHeight() == plain.lineHeight()
+
+
+def test_leading_never_crops_the_reading_face():
+    ed = _editor()
+    ed._toggle_rendered()
+    natural = QFontMetricsF(ed._rendered.font()).height()
+    prose_bf = _bf(ed._rendered.document(), "Plain prose after.")
+    assert prose_bf.lineHeight() >= natural
+
+
+def test_leading_tracks_the_font_zoom():
+    ed = _editor()
+    ed._toggle_rendered()
+    before = _bf(ed._rendered.document(), "Plain prose after.").lineHeight()
+    # the size is persisted session-wide (see conftest), so put it back
+    ed._change_font_size(+4)
+    try:
+        after = _bf(ed._rendered.document(), "Plain prose after.").lineHeight()
+        assert after > before
+        assert after == _expected_leading(ed)
+    finally:
+        ed._change_font_size(-4)
+
+
+# ── grouping: a break between blocks beats a break inside one (#54) ──
+
+LIST_MD = ("Lead-in paragraph.\n\n"
+           "- first item that is long enough to wrap somewhere in the column\n"
+           "- second item\n\n"
+           "Trailing paragraph.\n")
+
+
+def test_list_items_get_a_grouping_gap():
+    """They previously got the leading but no gap at all, so a wrapped item's
+    continuation line was indistinguishable from the next item."""
+    ed = _editor(LIST_MD)
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    item = _bf(doc, "first item that is long enough to wrap somewhere in the column")
+    assert item.lineHeightType() == FIXED
+    assert item.bottomMargin() > 0
+
+
+def test_a_wrapped_item_groups_tighter_than_two_items_do():
+    ed = _editor(LIST_MD)
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    item = _bf(doc, "second item")
+    within = item.lineHeight()                        # line to line inside it
+    between = item.lineHeight() + item.bottomMargin()  # item to item
+    assert between > within
+
+
+def test_a_paragraph_break_beats_a_list_item_break():
+    ed = _editor(LIST_MD)
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    para = _bf(doc, "Lead-in paragraph.")
+    item = _bf(doc, "second item")
+    assert para.bottomMargin() > item.bottomMargin() > 0
+    assert ZEN_MD_READING_PARA_GAP > ZEN_MD_READING_ITEM_GAP
+
+
+# ── blocks a fixed box would crop keep their natural height (#54) ──
+
+def test_headings_keep_their_natural_line_height():
+    """A heading is set larger than the body, so a body-em box would crop it."""
+    ed = _editor()
+    ed._toggle_rendered()
+    assert _bf(ed._rendered.document(), "One").lineHeightType() != FIXED
+
+
+def test_image_blocks_keep_their_natural_line_height():
+    ed = _editor("Before.\n\n![a picture](pic.png)\n\nAfter.\n")
+    ed._toggle_rendered()
+    doc = ed._rendered.document()
+    image_bf = None
+    for block in _blocks(doc):
+        it = block.begin()
+        while not it.atEnd():
+            if it.fragment().charFormat().isImageFormat():
+                image_bf = block.blockFormat()
+            it += 1
+    assert image_bf is not None, "fixture produced no image fragment"
+    assert image_bf.lineHeightType() != FIXED
+    # ...while ordinary prose in the same document still gets the box
+    assert _bf(doc, "After.").lineHeightType() == FIXED
 
 
 # ── blockquotes ──

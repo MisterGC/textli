@@ -49,10 +49,26 @@ ZEN_MD_MUTED_ALPHA = 100
 ZEN_MD_FONT_SIZE = 16
 ZEN_MD_FONT_SIZE_MIN = 10
 ZEN_MD_FONT_SIZE_MAX = 32
-# Read-view long-form leading — proportional line height (%) applied to prose
-# (not code, which reads better tight), paired with the proportional reading
-# face so sustained reading breathes.
-ZEN_MD_READING_LINE_HEIGHT = 145
+# Read-view long-form rhythm (#33, #54) — all three are multiples of the body
+# em, resolved to pixels against the view's own font metrics so the numbers
+# mean the same thing at every zoom, on every platform, and under a different
+# reading face.
+#
+# The leading is applied as an *absolute* line height. Qt's ProportionalHeight
+# is a percentage of the font's natural line box, not of the em — Literata's
+# box is 1.485em, so the 145 this replaces landed near 2.2em, far past the
+# ~1.4-1.6em at which consecutive lines still read as one block. It also
+# scaled each line by the tallest fragment on it, so a line carrying inline
+# code (mono, 1.32em) came out shorter than a plain one and the leading
+# wobbled inside a single paragraph.
+#
+# Both gaps sit above the line gap, so a break *between* blocks always reads
+# larger than a break *inside* one. List items get the smaller of the two:
+# they had no gap at all, which left a wrapped bullet's continuation line
+# indistinguishable from the start of the next bullet.
+ZEN_MD_READING_LEADING = 1.55    # × body em — the line box
+ZEN_MD_READING_PARA_GAP = 0.9    # × body em — after a plain paragraph
+ZEN_MD_READING_ITEM_GAP = 0.6    # × body em — after a list item
 # Modal card: width hugs the text column, height takes most of the window.
 # Card chrome strips (the area outside the canvas) get the dim wash so a
 # host's canvas itself stays fully saturated.
