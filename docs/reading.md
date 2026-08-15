@@ -170,6 +170,21 @@ table source. See
 [`examples/charts.md`](https://github.com/MisterGC/textli/blob/main/examples/charts.md)
 for a tour.
 
+## Images
+
+An image wider than the prose column is scaled down to it, so a
+full-resolution screenshot can't push the page sideways. Smaller images keep
+their own size — an icon is never stretched to fill the measure. The column
+is what the picture follows, so widening or narrowing it (`⌘⇧→` / `⌘⇧←`)
+refits every image, chart and diagram on the page.
+
+Press `↵` on any image to fill the window with it for a closer look, and
+`Esc` (or `↵` again) to come back. That enlarges the **file**, not the
+scaled-down copy on the page — so keep source images at full resolution
+rather than shrinking them to fit. Charts, diagrams and formulas have no
+original to go back to (they're drawn at the column's width), so they
+enlarge only as far as stays legible.
+
 ## Diagrams
 
 A Markdown image reference to a `.grafli` file —

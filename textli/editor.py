@@ -136,6 +136,14 @@ _MD_FEATURES = (
 # URL scheme for rendered math images. Each formula becomes an image ref in
 # the markdown handed to setMarkdown (`![math](textli-math://N)`), resolved
 # from the document's resource cache — never from disk or network.
+# How far the column must move before the read view is re-rendered for it
+# (#60). Not a tolerance for taste: fitting an image changes the document's
+# height, which can bring the vertical scrollbar in or out, which changes the
+# viewport width by the scrollbar's 8px, which moves the column again. Chasing
+# the column exactly makes those two states trade places forever, so the
+# threshold sits above that width and the loop settles.
+_REFIT_EPSILON = 12.0
+
 _MATH_SCHEME = "textli-math"
 
 # URL scheme for rendered chart images (#41). A ``<!-- chart: … -->`` marker and
@@ -935,6 +943,9 @@ class ZenMarkdownEditor(QWidget):
         self._jump: WordJumpOverlay | None = None
         # Full-page image inspector (`↵` on an image in the read view, #59)
         self._image_view: ImageInspector | None = None
+        # Coalesces re-renders when the column moves (#60)
+        self._refit_timer: QTimer | None = None
+        self._rendered_at_width = 0.0
 
         # Whisper status — one faint line in the card's corner (content built
         # in textli.status). Word counts are debounced off textChanged; the
@@ -1909,6 +1920,75 @@ class ZenMarkdownEditor(QWidget):
             self._toggle_rendered()
         return path
 
+    def _fit_page_images(self, doc):
+        """Scale a too-wide Markdown image down to the column (#60).
+
+        Qt draws an image at its natural pixel size, so a screenshot wider
+        than the prose column pushes the document's ideal width past the
+        viewport and the reading view grows a horizontal scrollbar — the page
+        breaks sideways rather than the picture fitting. Charts, diagrams and
+        math never hit this because they are rasterised at the column width
+        and carry an explicit size; a plain ``![](shot.png)`` carries none.
+
+        Only fragments with no explicit size are touched, which is exactly
+        those plain images — the generated kinds already have theirs, and
+        re-fitting them would fight the size they were rendered at.
+
+        Downscale only. An icon stretched to fill the measure is worse than
+        an icon. And the *resource* is left alone at full resolution, so the
+        expanded view (#59) still has the original to enlarge from.
+
+        Format-only: shifts no offsets, so the sentinel mark pass is safe.
+        """
+        column = self._page_width_px()
+        targets = []
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                if fmt.isImageFormat():
+                    imf = fmt.toImageFormat()
+                    # An explicit width means something already sized it.
+                    if not imf.width() and not imf.height():
+                        targets.append((frag.position(), frag.length(), imf))
+                it += 1
+            block = block.next()
+        if not targets:
+            return
+        with _batched(doc):
+            for pos, length, imf in targets:
+                natural = self._image_logical_size(doc, imf)
+                if natural is None:
+                    continue
+                w, h = natural
+                if w <= column:
+                    continue
+                imf.setWidth(column)
+                imf.setHeight(h * column / w)
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.setCharFormat(imf)
+
+    @staticmethod
+    def _image_logical_size(doc, imf) -> tuple[float, float] | None:
+        """An image resource's size in layout units, or None if it can't be
+        resolved. Device-independent: a 2x asset is the same picture at twice
+        the pixels, not twice the picture."""
+        if not imf.name():
+            return None
+        res = doc.resource(QTextDocument.ResourceType.ImageResource,
+                           QUrl(imf.name()))
+        if isinstance(res, QImage):
+            res = QPixmap.fromImage(res)
+        if not isinstance(res, QPixmap) or res.isNull():
+            return None
+        dpr = res.devicePixelRatio() or 1.0
+        w, h = res.width() / dpr, res.height() / dpr
+        return (w, h) if w > 0 and h > 0 else None
+
     def _image_pixmap_at_caret(self) -> QPixmap | None:
         """The picture under the read-view caret, at whatever resolution the
         document actually holds (#59).
@@ -2025,6 +2105,53 @@ class ZenMarkdownEditor(QWidget):
         self._apply_heading_layout()
         self.update()
         self._refresh_status()
+        self._schedule_refit()
+
+    def _schedule_refit(self):
+        """Re-render the read view once the column has settled (#60).
+
+        Charts and diagrams are rasterised *at* the column width and a wide
+        image is scaled to it, so all three go stale the moment the column
+        moves — a width step, the full-width toggle, or the window resizing.
+        Re-rendering is the only thing that re-rasterises them, and it is far
+        too costly to run per keystroke, so a burst of steps settles into one.
+        """
+        if not self._rendered_mode:
+            return
+        if self._refit_timer is None:
+            self._refit_timer = QTimer(self)
+            self._refit_timer.setSingleShot(True)
+            self._refit_timer.setInterval(160)
+            self._refit_timer.timeout.connect(self._refit_rendered)
+        self._refit_timer.start()
+
+    def _refit_rendered(self):
+        """Re-render at the current column, keeping the reader's place.
+
+        The scroll offset is carried as a *fraction* rather than a pixel
+        value: a narrower column makes the same document taller, so the old
+        offset would land somewhere else entirely.
+        """
+        if not self._rendered_mode:
+            return
+        width = self._page_width_px()
+        if abs(width - self._rendered_at_width) < _REFIT_EPSILON:
+            return                      # the column ended up where it was
+        bar = self._rendered.verticalScrollBar()
+        ratio = bar.value() / bar.maximum() if bar.maximum() else 0.0
+        caret = self._rendered.textCursor().position()
+        self._render_markdown(self._editor.toPlainText())
+        doc = self._rendered.document()
+        cur = self._rendered.textCursor()
+        cur.setPosition(min(caret, max(0, doc.characterCount() - 1)))
+        self._rendered.setTextCursor(cur)
+        bar = self._rendered.verticalScrollBar()
+        bar.setValue(int(round(ratio * bar.maximum())))
+        # The viewport resizes on a later layout pass, so the column can have
+        # moved again under this render. Re-check and go round once more —
+        # the entry guard above stops it the moment the width holds still.
+        if abs(self._page_width_px() - self._rendered_at_width) >= _REFIT_EPSILON:
+            self._schedule_refit()
 
     def _toggle_full_width(self):
         """⌘↵: expand the card to fill the window (and back to the column)."""
@@ -2285,10 +2412,12 @@ class ZenMarkdownEditor(QWidget):
         anchors.sort()
         return anchors
 
-    def _chart_width_px(self) -> float:
-        """The logical width a chart is drawn at: the reading view's content
-        column (viewport minus its document margins), falling back to the saved
-        column width before the view is laid out (tests, first render)."""
+    def _page_width_px(self) -> float:
+        """The logical width anything wide is drawn at: the reading view's
+        content column (viewport minus its document margins), falling back to
+        the saved column width before the view is laid out (tests, first
+        render). Charts and diagrams are rasterised at it; a plain Markdown
+        image too big for it is scaled down to it (#60)."""
         doc = self._rendered.document()
         vw = self._rendered.viewport().width()
         inner = vw - 2 * doc.documentMargin()
@@ -2310,7 +2439,7 @@ class ZenMarkdownEditor(QWidget):
         markers = md_charts.parse(md)
         if not markers:
             return md, {}
-        width = self._chart_width_px()
+        width = self._page_width_px()
         height = width / _CHART_ASPECT
         dpr = self._rendered.devicePixelRatioF()
         charts: dict[int, tuple] = {}
@@ -2416,7 +2545,7 @@ class ZenMarkdownEditor(QWidget):
         refs = graflirender.find_image_refs(md, md_comments.code_ranges(md))
         if not refs:
             return md, {}
-        width = self._chart_width_px()
+        width = self._page_width_px()
         dpr = self._rendered.devicePixelRatioF()
         diagrams: dict = {}
         out = []
@@ -2520,9 +2649,11 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._apply_code_font(doc)
+        self._fit_page_images(doc)
         self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
+        self._rendered_at_width = self._page_width_px()
         self._settle_rendered_layout()
         self._update_rendered_focus()
         self._update_read_focus()
@@ -2595,6 +2726,7 @@ class ZenMarkdownEditor(QWidget):
         self._style_headings(doc)
         self._style_inline_code(doc)
         self._apply_code_font(doc)
+        self._fit_page_images(doc)
         self._style_reading_rhythm(doc)
         self._style_quotes(doc)
         self._style_tables(doc)
@@ -4018,6 +4150,7 @@ class ZenMarkdownEditor(QWidget):
         self._refresh_status()   # the card corner moved with the window
         if self._image_view is not None and self._image_view.is_active():
             self._image_view.set_area(QRectF(self.rect()))
+        self._schedule_refit()   # the window moved the column (#60)
 
     def _parent_resized(self):
         parent = self.parentWidget()
@@ -4993,12 +5126,7 @@ class ZenMarkdownEditor(QWidget):
             return
         self._content_width = new_w
         self._full_width = False
-        layout = self.layout()
-        if layout:
-            self._apply_card_margins(layout)
-        self._apply_heading_layout()
-        self.update()
-        self._refresh_status()
+        self._relayout_card()
         md_settings.app_settings().setValue(
             "zen_md/content_width", self._content_width
         )
