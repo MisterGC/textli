@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An image wider than the prose column broke the page sideways instead of
+  scaling down** (#60) — Qt draws an image at its natural pixel size, so a
+  2400px screenshot in a 700px column pushed the document's ideal width to
+  2408px and grew a horizontal scrollbar. Charts, `.grafli` diagrams and math
+  never did this, since they're rasterised at the column width and carry an
+  explicit size; a plain `![](shot.png)` carried none. Wide images are now
+  scaled down to the column with their aspect ratio kept, and the document
+  resource is left at full resolution so `↵` (#59) still enlarges the
+  original. Downscale only — an icon keeps its own size rather than being
+  stretched to fill the measure. This also fixes `@2x` assets, which rendered
+  at twice their intended size because Qt reads natural pixel size as logical
+  size.
+
+  The real damage was second-order: authors and agents worked around the
+  overflow by shipping pre-shrunk files, and once `↵` could expand an image
+  that downscaled copy was all the detail there was. The bundled AI skill now
+  says to ship images at full resolution and why.
+
+- **Nothing re-rendered when the reading column changed** — a width step or
+  the full-width toggle resized the card, but charts and diagrams kept the
+  bitmap they were rasterised at, so widening the column left them small and
+  soft. The read view now re-renders when the column moves, coalesced so a
+  burst of width steps settles into one render, and carries the reader's
+  position across as a fraction of the document rather than a pixel offset —
+  a narrower column makes the same document taller. The threshold that
+  triggers it sits above the scrollbar's width on purpose: fitting an image
+  changes the document's height, which can bring the scrollbar in or out,
+  which moves the column again, and chasing it exactly never settles.
+
 ### Added
 
 - **`↵` on an image in the reading view fills the window with it** (#59) — a

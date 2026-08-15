@@ -57,6 +57,17 @@ Markdown itself (and in git).
 - **Fenced code, tables, images** all render typeset: tag fences with a
   language for highlighting; image paths resolve relative to the
   document's folder.
+- **Ship images at full resolution — never pre-shrink them to fit.** An
+  image wider than the prose column is scaled down to it automatically, so
+  a large file cannot break the page. The reader also presses `↵` on any
+  image to fill the window with it for a closer look, and that enlarges
+  the *file*, not the scaled-down page copy. Downscaling a screenshot or
+  diagram before writing it out therefore destroys the only detail that
+  view can show, and buys nothing — resolution is the thing worth keeping
+  high. Small images (icons, badges) are left at their own size, never
+  stretched to fill the measure. Prefer a `.grafli` diagram or a chart
+  marker over a rasterised picture where the content allows it: both stay
+  editable and re-render crisply at whatever width the reader chooses.
 - **A value table becomes a chart** with a `<!-- chart: … -->` marker on
   the line right above a pipe table — `<!-- chart: bar x=Quarter -->` or
   `<!-- chart: line x=N table -->`. Types are `bar` and `line`; `x=<col>`
