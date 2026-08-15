@@ -8,6 +8,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtCore import QPointF  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QTextCursor  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -68,15 +69,35 @@ def _shot(ed):
 
 
 def _box(ed):
-    """The picture's bounding box on screen, found by its own colour."""
+    """The picture's exact bounding box on screen, found by its own colour.
+
+    Seeded coarsely then walked out pixel by pixel along one row and one
+    column. Sampling every other pixel instead would put the edge up to a
+    pixel off, which is enough to make a bracket sitting flush *on* the edge
+    look as though it hangs outside.
+    """
     img = _shot(ed)
-    pts = [(x, y)
-           for y in range(img.height())
-           for x in range(0, img.width(), 2)
-           if QColor(img.pixel(x, y)).name() == INK]
-    assert pts, "the picture is not on screen"
-    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    return min(xs), min(ys), max(xs), max(ys)
+    seed = next(((x, y)
+                 for y in range(0, img.height(), 4)
+                 for x in range(0, img.width(), 4)
+                 if QColor(img.pixel(x, y)).name() == INK), None)
+    assert seed is not None, "the picture is not on screen"
+    sx, sy = seed
+
+    def walk(x, y, dx, dy):
+        while True:
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < img.width() and 0 <= ny < img.height()):
+                return x, y
+            if QColor(img.pixel(nx, ny)).name() != INK:
+                return x, y
+            x, y = nx, ny
+
+    x0 = walk(sx, sy, -1, 0)[0]
+    x1 = walk(sx, sy, 1, 0)[0]
+    y0 = walk(sx, sy, 0, -1)[1]
+    y1 = walk(sx, sy, 0, 1)[1]
+    return x0, y0, x1, y1
 
 
 def _put_caret(ed, pos):
@@ -229,3 +250,78 @@ def test_only_images_are_exempt_from_the_caret_wash(reader):
     assert reader._rendered._caret_on_image() is False
     _put_caret(reader, _image_pos(reader))
     assert reader._rendered._caret_on_image() is True
+
+
+# ── a rendered formula is text, not a picture (#61) ──
+
+def _kinds(tmp_path):
+    """An editor holding one of each image kind, and their fragment positions
+    by resource scheme."""
+    QApplication.instance() or QApplication([])
+    pic = QImage(1200, 600, QImage.Format.Format_RGB32)
+    pic.fill(QColor(INK))
+    pic.save(str(tmp_path / "pic.png"))
+    (tmp_path / "a.grafli").write_text("node A 'x'\nnode B 'y'\nA -> B\n",
+                                       encoding="utf-8")
+    md = ("# T\n\nA formula $E = mc^2$ inline.\n\n![pic](pic.png)\n\n"
+          "<!-- chart: bar x=x -->\n| x | y |\n|---|---|\n| a | 1 |\n| b | 3 |\n\n"
+          "![](a.grafli)\n")
+    note = tmp_path / "n.md"
+    note.write_text(md, encoding="utf-8")
+    host = QWidget()
+    host.resize(1200, 2200)
+    ed = ZenMarkdownEditor(host, md, title="T", file_path=note,
+                           start_in_read=True)
+    ed.resize(1200, 2200)
+    host.show()
+    ed._opacity.setOpacity(1.0)
+    ed._rendered.setFocus()
+    ed._host = host
+    app = QApplication.instance()
+    for _ in range(3):
+        app.processEvents()
+        ed._refit_rendered()
+        app.processEvents()
+    found = {}
+    doc = ed._rendered.document()
+    block = doc.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            fmt = frag.charFormat()
+            if fmt.isImageFormat():
+                name = fmt.toImageFormat().name()
+                key = name.split("://")[0] if "://" in name else "file"
+                found[key] = frag.position()
+            it += 1
+        block = block.next()
+    return ed, found
+
+
+def test_a_rendered_formula_keeps_the_wash(tmp_path):
+    """A formula is typeset text that happens to arrive as a bitmap — it sits
+    in a sentence, it is small, and the wash reads over it exactly as it reads
+    over the letters around it."""
+    ed, found = _kinds(tmp_path)
+    assert "textli-math" in found, "fixture produced no formula"
+    _put_caret(ed, found["textli-math"])
+    assert ed._rendered._caret_on_image() is False      # so the caret washes it
+    marks = ed._rendered._marked_image_rects(
+        ed._rendered.document(), ed._rendered.document().documentLayout(),
+        QPointF(0, 0))
+    assert marks == []
+
+
+@pytest.mark.parametrize("kind", ["file", "textli-chart", "textli-grafli"])
+def test_pictures_get_the_brackets(tmp_path, kind):
+    """A screenshot, a chart and a diagram all have detail to inspect, and a
+    wash flattens them the same way."""
+    ed, found = _kinds(tmp_path)
+    assert kind in found, f"fixture produced no {kind}"
+    _put_caret(ed, found[kind])
+    assert ed._rendered._caret_on_image() is True
+    marks = ed._rendered._marked_image_rects(
+        ed._rendered.document(), ed._rendered.document().documentLayout(),
+        QPointF(0, 0))
+    assert len(marks) == 1

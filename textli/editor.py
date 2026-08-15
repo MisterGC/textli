@@ -180,6 +180,18 @@ def _batched(doc):
         cur.endEditBlock()
 
 
+def _is_picture(imf) -> bool:
+    """True for an image the reader looks *at*, false for a rendered formula.
+
+    A formula is typeset text that happens to arrive as a bitmap: it is words
+    in a sentence, it is small, and the wash reads over it exactly as it reads
+    over the letters around it. Charts and `.grafli` diagrams are the other
+    way round — they are pictures with detail to inspect, and a wash flattens
+    them the same way it flattens a screenshot (#61).
+    """
+    return not imf.name().startswith(f"{_MATH_SCHEME}://")
+
+
 # The corner marks that say an image is under the caret or in the selection
 # (#61). They sit *inside* the picture rather than around it: an outline hung
 # on the outside has to line up with the drawn edge exactly or it reads as
@@ -187,10 +199,12 @@ def _batched(doc):
 # the geometry only has to be close, and the cost is a few pixels of content
 # at each corner.
 _MARK_WIDTH = 4.0
-# How far inside the edge the brackets sit. Comfortably more than the stroke
-# needs, so a pixel or two of rounding between the laid-out rectangle and the
-# drawn picture can never leave a mark hanging off the edge.
-_MARK_INSET = 8.0
+# How far inside the edge the brackets sit: half the stroke, so its outer
+# face is flush with the picture's edge rather than floating in from it. This
+# started larger, as slack for a laid-out rectangle that was off by the
+# block's left margin and by the line's descent; with both fixed the rectangle
+# matches the drawn picture to a pixel and the slack is just a visible gap.
+_MARK_INSET = _MARK_WIDTH / 2
 _MARK_ARM_MIN = 14.0
 _MARK_ARM_MAX = 34.0
 _MARK_ARM_SHARE = 0.12      # of the picture's shorter side
@@ -468,7 +482,7 @@ class _ReadingView(QTextBrowser):
                 frag = it.fragment()
                 fmt = frag.charFormat()
                 pos = frag.position()
-                if fmt.isImageFormat():
+                if fmt.isImageFormat() and _is_picture(fmt.toImageFormat()):
                     in_sel = sel_start <= pos < sel_end
                     on_caret = (sel_start == sel_end
                                 and pos <= caret <= pos + frag.length())
@@ -655,6 +669,7 @@ class _ReadingView(QTextBrowser):
         while not it.atEnd():
             frag = it.fragment()
             if (frag.charFormat().isImageFormat()
+                    and _is_picture(frag.charFormat().toImageFormat())
                     and frag.position() <= pos <= frag.position() + frag.length()):
                 return True
             it += 1

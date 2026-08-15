@@ -183,7 +183,9 @@ span for a comment, say — the picture keeps its own colours and is marked with
 four corner brackets instead of the wash text gets. A tint over text colours
 the paper between the letters; over a picture it covers the content. The
 brackets sit just inside the edges, so they cover a few pixels of the picture
-rather than claiming room around it.
+rather than claiming room around it. Charts and diagrams count as pictures
+here; a rendered formula doesn't — it's typeset text that happens to arrive as
+an image, so it keeps the ordinary wash.
 
 Press `↵` on any image to fill the window with it for a closer look, and
 `Esc` (or `↵` again) to come back. That enlarges the **file**, not the
