@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-08-15
 
 ### Added
 
@@ -57,7 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snap, and keys stay swallowed for the whole of the closing tween — it is
   still on screen, so nothing should land on the document underneath.
 
-- **A display formula is set on the left, indented, rather than centred** —
+- **A display formula is set on the left, indented, rather than centred**
+  (#65) —
   it still reads as lifted out of the sentence rather than starting one, and
   it lines up with the prose the way the rest of the page does. Two body ems
   of indent, resolved through the view's font metrics so it holds at any zoom
@@ -162,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that downscaled copy was all the detail there was. The bundled AI skill now
   says to ship images at full resolution and why.
 
-- **Nothing re-rendered when the reading column changed** — a width step or
+- **Nothing re-rendered when the reading column changed** (#60) — a width
+  step or
   the full-width toggle resized the card, but charts and diagrams kept the
   bitmap they were rasterised at, so widening the column left them small and
   soft. The read view now re-renders when the column moves, coalesced so a

@@ -3,9 +3,9 @@
 **A lightweight text editor with focused writing and reading in mind.**
 
 textli puts one warm, paper-toned column of text on screen and nothing else.
-It opens ready to type — vim NORMAL mode, autosave on — and one keystroke
-(`⌘R`) flips the Markdown source into a rendered **reading view** built for
-proof-reading and review.
+It opens on the rendered **reading view**, built for proof-reading and
+review; one keystroke (`⌘R`, or `-w` at the command line) flips to the
+Markdown source, vim NORMAL mode with autosave on.
 
 ## What it does
 
