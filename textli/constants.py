@@ -88,6 +88,15 @@ ZEN_MD_CARD_RADIUS = 12
 #     back the moment `gb` returns to the document.
 # ⌘+/⌘- still ride on top of both, and a column already wider than this keeps
 # its width.
+# How much of the prose column a picture may fill (#62). A picture drawn to
+# the full measure is as tall as its aspect ratio makes it, which is a lot of
+# page for something the reader is mostly reading around; three quarters of
+# the width is three quarters of the height too. Nothing is lost — `↵` fills
+# the window with the original — and it is a *width* cap rather than a height
+# one on purpose: a height cap would depend on the window, so the same
+# document would lay out differently on a laptop and a monitor.
+ZEN_MD_PICTURE_WIDTH_SHARE = 0.75
+
 ZEN_MD_SRC_FONT_SCALE = 0.82
 ZEN_MD_SRC_COLUMNS = 88
 

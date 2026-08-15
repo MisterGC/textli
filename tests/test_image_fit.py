@@ -13,6 +13,7 @@ from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtGui import QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
+from textli.constants import ZEN_MD_PICTURE_WIDTH_SHARE  # noqa: E402
 from textli.editor import ZenMarkdownEditor  # noqa: E402
 
 WIDE_W, WIDE_H = 2400, 1350
@@ -79,18 +80,53 @@ def wide(tmp_path):
 
 # ── fitting ──
 
-def _fills_the_column(shown: float, ed) -> bool:
-    """Within a scrollbar's width of the column. Not slop for its own sake:
-    the scrollbar coming and going moves the column by its 8px, so the fit
-    settles near the column rather than exactly on it (``_REFIT_EPSILON``)."""
-    column = ed._page_width_px()
-    return column - 16 <= shown <= column + 1
+def _fills_the_cap(shown: float, ed) -> bool:
+    """Within a scrollbar's width of the picture cap. Not slop for its own
+    sake: the scrollbar coming and going moves the column by its 8px, so the
+    fit settles near the cap rather than exactly on it (``_REFIT_EPSILON``)."""
+    cap = ed._picture_width_px()
+    return cap - 16 <= shown <= cap + 1
 
 
-def test_a_wide_image_is_scaled_down_to_the_column(wide):
+def test_a_wide_image_is_scaled_down_to_the_cap(wide):
     shown, source = _images(wide)["wide.png"]
     assert source == WIDE_W                       # the file is untouched
-    assert _fills_the_column(shown, wide)
+    assert _fills_the_cap(shown, wide)
+
+
+def test_the_cap_is_a_share_of_the_column(wide):
+    """A picture drawn to the full measure is as tall as its aspect ratio
+    makes it — three quarters of the width is three quarters of the height
+    too, and `↵` still has the original to enlarge (#62)."""
+    assert wide._picture_width_px() == pytest.approx(
+        wide._page_width_px() * ZEN_MD_PICTURE_WIDTH_SHARE)
+    shown, _ = _images(wide)["wide.png"]
+    assert shown < wide._page_width_px() * 0.85   # visibly short of the column
+
+
+def test_the_cap_buys_back_vertical_space(wide):
+    """The point of the cap: less page spent on something the reader is
+    mostly reading around."""
+    doc = wide._rendered.document()
+    block = doc.begin()
+    while block.isValid():
+        if "￼" in block.text():
+            height = doc.documentLayout().blockBoundingRect(block).height()
+            at_full_column = wide._page_width_px() * WIDE_H / WIDE_W
+            assert height < at_full_column * 0.8
+            return
+        block = block.next()
+    raise AssertionError("no image block")
+
+
+def test_a_chart_is_rasterised_at_the_cap_not_scaled_down_to_it(tmp_path):
+    """Rendering to the full column and drawing it smaller would be
+    needlessly soft."""
+    ed = _reader(tmp_path, "# T\n\n" + CHART)
+    name = next(k for k in _images(ed) if k.startswith("textli-chart"))
+    shown, source = _images(ed)[name]
+    assert source == pytest.approx(shown, abs=1)  # drawn at its own size
+    assert source == pytest.approx(ed._picture_width_px(), abs=16)
 
 
 def test_a_wide_image_no_longer_breaks_the_page_sideways(wide):
@@ -167,7 +203,7 @@ def test_widening_the_column_refits_the_image(wide):
     _settle(wide)                                  # what the timer fires
     after, source = _images(wide)["wide.png"]
     assert after > before
-    assert _fills_the_column(after, wide)
+    assert _fills_the_cap(after, wide)
     assert source == WIDE_W                        # still the whole picture
 
 
@@ -178,7 +214,7 @@ def test_narrowing_the_column_refits_the_image(wide):
     _settle(wide)
     after, _ = _images(wide)["wide.png"]
     assert after < before
-    assert _fills_the_column(after, wide)
+    assert _fills_the_cap(after, wide)
 
 
 def test_a_chart_re_rasterises_at_the_new_column(tmp_path):
