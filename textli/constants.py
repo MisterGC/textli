@@ -97,6 +97,12 @@ ZEN_MD_CARD_RADIUS = 12
 # document would lay out differently on a laptop and a monitor.
 ZEN_MD_PICTURE_WIDTH_SHARE = 0.75
 
+# A display formula alone in its paragraph is set on the left, indented from
+# the prose rather than flush with it, so it still reads as lifted out of the
+# sentence. A multiple of the body em, resolved against the view's own font
+# metrics, so it means the same at any zoom and on any platform.
+ZEN_MD_FORMULA_INDENT = 2.0
+
 ZEN_MD_SRC_FONT_SCALE = 0.82
 ZEN_MD_SRC_COLUMNS = 88
 

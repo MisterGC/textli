@@ -103,16 +103,24 @@ def test_preview_mode_renders_math_too():
     assert len(_math_images(ed)) == 1
 
 
-def test_display_math_paragraph_is_centered():
+def test_display_math_paragraph_is_set_left_but_indented():
+    """A display formula is lifted out of the sentence — indented from the
+    prose rather than flush with it, so it doesn't read as starting one."""
     from PySide6.QtCore import Qt
     ed = _editor("above\n\n$$e^{i\\pi} + 1 = 0$$\n\nbelow\n")
     ed._toggle_rendered()
     doc = ed._rendered.document()
     block = doc.begin()
-    found = False
+    found = prose_margin = None
     while block.isValid():
         if OBJ in block.text():
-            assert block.blockFormat().alignment() & Qt.AlignmentFlag.AlignHCenter
-            found = True
+            bf = block.blockFormat()
+            assert not (bf.alignment() & Qt.AlignmentFlag.AlignHCenter)
+            assert bf.leftMargin() > 0
+            found = bf.leftMargin()
+        elif block.text().strip() == "above":
+            prose_margin = block.blockFormat().leftMargin()
         block = block.next()
-    assert found
+    assert found, "no display-formula block"
+    assert prose_margin == 0            # the prose itself is not indented
+    assert found > prose_margin
