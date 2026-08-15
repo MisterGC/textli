@@ -4,6 +4,7 @@ gets corner brackets instead of a wash (#61)."""
 from __future__ import annotations
 
 import os
+import shutil
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -317,6 +318,11 @@ def test_a_rendered_formula_keeps_the_wash(tmp_path):
 def test_pictures_get_the_brackets(tmp_path, kind):
     """A screenshot, a chart and a diagram all have detail to inspect, and a
     wash flattens them the same way."""
+    if kind == "textli-grafli" and shutil.which("grafli") is None:
+        pytest.skip("grafli isn't on PATH, so the reference degrades to an "
+                    "ordinary missing image and there is nothing to mark. "
+                    "The chart case covers the same code path — both are "
+                    "generated `textli-*://` resources.")
     ed, found = _kinds(tmp_path)
     assert kind in found, f"fixture produced no {kind}"
     _put_caret(ed, found[kind])
