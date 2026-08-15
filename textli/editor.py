@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import os
 import re
+import sys
 from collections import deque, namedtuple
 from contextlib import contextmanager
 from pathlib import Path
@@ -144,6 +145,10 @@ _MD_FEATURES = (
 # viewport width by the scrollbar's 8px, which moves the column again. Chasing
 # the column exactly makes those two states trade places forever, so the
 # threshold sits above that width and the loop settles.
+# How the quit shortcut reads on this platform, for the hint Esc flashes when
+# it has nothing left to back out of (#63).
+_QUIT_KEYS = "⌘Q" if sys.platform == "darwin" else "CTRL+Q"
+
 _REFIT_EPSILON = 12.0
 
 _MATH_SCHEME = "textli-math"
@@ -775,7 +780,11 @@ def editor_help_html() -> str:
     <p style='{hdr}'>Views &amp; session</p>
     <table>{rows([
         ("⌘R", "Toggle the source editor ↔ rendered reading view"),
-        ("Esc", "Save &amp; close (⇧Esc cancels / discards pending changes)"),
+        ("Esc", "Step back — leave visual mode, close an overlay, "
+         "put an expanded image away. Embedded in a host app it also saves "
+         "&amp; closes the editor (⇧Esc cancels / discards pending changes); "
+         "standalone, <span style='font-family:monospace'>"
+         + _QUIT_KEYS + "</span> quits"),
         ("⌘↵", "Toggle full-window width"),
         ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
@@ -885,6 +894,7 @@ class ZenMarkdownEditor(QWidget):
         anchor: str = "",
         start_in_read: bool = False,
         stored_view_wins: bool | None = None,
+        close_on_escape: bool = True,
         canvas: QWidget | None = None,
         theme_name: str | None = None,
     ):
@@ -922,6 +932,10 @@ class ZenMarkdownEditor(QWidget):
         # The host's canvas widget — the dim wash skips over this rect so
         # the canvas itself stays fully saturated while UI chrome dims.
         self._canvas = canvas
+        # Whether Esc ends the session. True for an embedding host, where the
+        # editor is modal and Esc hands back; the standalone app passes False,
+        # so Esc there only backs out of whatever is on top (#63).
+        self._close_on_escape = close_on_escape
 
         # Load persisted font size preference
         settings = md_settings.app_settings()
@@ -1131,8 +1145,8 @@ class ZenMarkdownEditor(QWidget):
         self._vim = VimKeyHandler(
             editor=self._editor,
             mode_changed=self._on_mode_changed,
-            close_save=self._close_save,
-            close_cancel=self._close_cancel,
+            close_save=lambda: self._request_close(),
+            close_cancel=lambda: self._request_close(cancel=True),
             open_file=self._open_file_dialog,
             open_headings=self._open_headings_overview,
         )
@@ -1322,6 +1336,19 @@ class ZenMarkdownEditor(QWidget):
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
         self._fade_in_anim = anim  # hold ref so it doesn't get GC'd mid-run
+
+    def _request_close(self, *, cancel: bool = False):
+        """Esc reached the bottom — close, or say how to quit (#63).
+
+        Nothing was left to back out of. For an embedding host that means
+        hand back; standalone it means the reader pressed Esc at a document,
+        which should not end the program. Autosave has already run either
+        way, so this is about the window, never the file.
+        """
+        if not self._close_on_escape:
+            self._flash_mode(f"{_QUIT_KEYS} TO QUIT")
+            return
+        self._close_cancel() if cancel else self._close_save()
 
     def _close_save(self):
         if self._file_path:
@@ -4729,7 +4756,7 @@ class ZenMarkdownEditor(QWidget):
             if self._visual:
                 self._set_visual(False)
             else:
-                self._close_cancel() if shift else self._close_save()
+                self._request_close(cancel=shift)
             return True
 
         # Caret motions — extend the selection when in visual mode.

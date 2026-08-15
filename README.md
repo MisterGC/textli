@@ -65,7 +65,7 @@ complete key reference, or see the
 | Key | Action |
 | --- | --- |
 | `⌘R` | Toggle write ↔ reading view |
-| `Esc` | Save & close (`⇧Esc` cancels) |
+| `Esc` | Step back — leave visual mode, close an overlay, put an expanded image away. Embedded in a host app it also saves & closes (`⇧Esc` cancels); standalone, `⌘Q` quits |
 | `⌘↵` | Full-window width |
 | `⌘.` | Section focus (dim all but the current paragraph / section) |
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |

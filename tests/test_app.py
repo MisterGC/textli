@@ -188,3 +188,93 @@ def test_cli_rejects_asking_for_both_views(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         _cli(monkeypatch, tmp_path, "-r", "-w")
     assert exc.value.code == 2          # argparse usage error, not a crash
+
+
+# ── Esc: an exit for a host, a step back for the reader (#63) ──
+
+def _press_escape(ed):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    return ed._handle_key(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
+                                    Qt.KeyboardModifier.NoModifier))
+
+
+def test_an_embedded_editor_still_hands_back_on_escape(monkeypatch, tmp_path):
+    """The host contract must not move: embedded, the editor is modal and Esc
+    is how it gives control back."""
+    from PySide6.QtTest import QTest
+    host = _host(monkeypatch)
+    note = tmp_path / "notes.md"
+    note.write_text(MD, encoding="utf-8")
+    ed = ZenMarkdownEditor(host, MD, title="T", file_path=note)
+    ed.resize(800, 600)
+    ed._opacity.setOpacity(1.0)
+    seen = []
+    ed.cancelled.connect(lambda: seen.append("cancelled"))
+    _press_escape(ed)
+    QTest.qWait(600)              # the close fades out before it emits
+    assert seen == ["cancelled"]
+
+
+def test_the_standalone_app_does_not_quit_on_escape(monkeypatch, tmp_path):
+    from PySide6.QtTest import QTest
+    _host(monkeypatch)            # stub position memory
+    note = tmp_path / "notes.md"
+    note.write_text(MD, encoding="utf-8")
+    host = TextliHost()
+    host.resize(800, 600)
+    host.show()
+    host.open(note, MD)
+    ed = host._editor
+    ed._opacity.setOpacity(1.0)
+    seen = []
+    ed.cancelled.connect(lambda: seen.append("cancelled"))
+    _press_escape(ed)
+    QTest.qWait(600)
+    assert seen == []
+    assert host.isVisible()
+
+
+def test_escape_says_how_to_quit_instead(monkeypatch, tmp_path):
+    _host(monkeypatch)
+    note = tmp_path / "notes.md"
+    note.write_text(MD, encoding="utf-8")
+    host = TextliHost()
+    host.resize(800, 600)
+    host.show()
+    host.open(note, MD)
+    ed = host._editor
+    ed._opacity.setOpacity(1.0)
+    _press_escape(ed)
+    assert ed._mode_flash is not None
+    assert "QUIT" in ed._mode_flash.text()
+
+
+def test_the_standalone_host_binds_a_quit_shortcut(monkeypatch, tmp_path):
+    """Esc used to be the only keyboard exit — on Linux and Windows the close
+    button would otherwise be the only way out."""
+    from PySide6.QtGui import QShortcut
+    _host(monkeypatch)
+    note = tmp_path / "notes.md"
+    note.write_text(MD, encoding="utf-8")
+    host = TextliHost()
+    host.open(note, MD)
+    bound = {s.key().toString() for s in host.findChildren(QShortcut)}
+    assert any("Q" in b for b in bound), bound
+
+
+def test_escape_still_backs_out_of_visual_mode_standalone(monkeypatch, tmp_path):
+    """Esc keeps its real job — it just stops falling through to an exit."""
+    _host(monkeypatch)
+    note = tmp_path / "notes.md"
+    note.write_text(MD, encoding="utf-8")
+    host = TextliHost()
+    host.resize(800, 600)
+    host.show()
+    host.open(note, MD, read=True)
+    ed = host._editor
+    ed._opacity.setOpacity(1.0)
+    ed._set_visual(True)
+    assert ed._visual is True
+    _press_escape(ed)
+    assert ed._visual is False
