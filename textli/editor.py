@@ -180,6 +180,33 @@ def _batched(doc):
         cur.endEditBlock()
 
 
+def _caret_frame_ink() -> QColor:
+    """The caret's hue at full strength, for framing an image (#61).
+
+    ``ZEN_MD_CARET`` is deliberately translucent because it washes a whole
+    glyph cell; at that alpha a 2px stroke barely registers, so the frame
+    takes the colour and drops the transparency.
+    """
+    ink = QColor(theme.ZEN_MD_CARET)
+    ink.setAlpha(255)
+    return ink
+
+
+def _resource_pixmap(doc, imf) -> QPixmap | None:
+    """The picture behind an image format, at whatever resolution the document
+    holds — full size on disk for an ordinary Markdown image, the rasterised
+    bitmap for a chart, diagram or formula. None when it can't be resolved."""
+    if not imf.name():
+        return None
+    res = doc.resource(QTextDocument.ResourceType.ImageResource,
+                       QUrl(imf.name()))
+    if isinstance(res, QImage):
+        res = QPixmap.fromImage(res)
+    if not isinstance(res, QPixmap) or res.isNull():
+        return None
+    return res
+
+
 def _paper_light_frame(view) -> tuple[float, float]:
     """The light-falloff frame for a view's paper: the enclosing editor's
     card in viewport coordinates, so the gradient spans the whole sheet and
@@ -369,9 +396,91 @@ class _ReadingView(QTextBrowser):
         if (self._strikes or self._heading_rules or self._quote_bars
                 or self._focus_span or self._focus_reading):
             self._paint_overlays(doc, layout, off)
+        # Images marked by the caret or the selection get their own pixels
+        # back and a frame instead of a wash (#61) — after the base paint,
+        # which is what laid the wash down, and before the caret, which skips
+        # the ones handled here.
+        self._paint_image_marks(doc, layout, off)
         # The caret sits on top of every wash — it's always in the bright band,
         # but painting it last guarantees it's never dimmed.
         self._paint_caret(off)
+
+    def _marked_image_rects(self, doc, layout, off):
+        """``(rect, pixmap, colour)`` for every image the caret sits on or the
+        selection covers (#61).
+
+        A wash over text tints the paper between the letters; over an image it
+        covers the content. These get redrawn from their resource and framed
+        instead. The rect is built from the layout rather than the image's
+        stated size: the horizontal extent is the advance across the object
+        replacement character, which *is* the drawn width, and the picture
+        sits on the line's baseline.
+        """
+        cur = self.textCursor()
+        sel_start, sel_end = cur.selectionStart(), cur.selectionEnd()
+        caret = cur.position()
+        out = []
+        block = doc.findBlock(min(sel_start, caret))
+        last = doc.findBlock(max(sel_end, caret))
+        end_pos = last.position() + last.length() if last.isValid() else -1
+        while block.isValid() and block.position() < max(end_pos, 1):
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                pos = frag.position()
+                if fmt.isImageFormat():
+                    in_sel = sel_start <= pos < sel_end
+                    on_caret = (sel_start == sel_end
+                                and pos <= caret <= pos + frag.length())
+                    if in_sel or on_caret:
+                        cell = self._image_cell(doc, layout, block, frag, off)
+                        pix = _resource_pixmap(doc, fmt.toImageFormat())
+                        if cell is not None and pix is not None:
+                            out.append((cell, pix,
+                                        theme.ZEN_SELECTION_BG if in_sel
+                                        else _caret_frame_ink()))
+                it += 1
+            block = block.next()
+        return out
+
+    @staticmethod
+    def _image_cell(doc, layout, block, frag, off):
+        """The drawn rectangle of an image fragment, in viewport coords."""
+        bl = block.layout()
+        rel = frag.position() - block.position()
+        line = bl.lineForTextPosition(rel)
+        if not line.isValid():
+            return None
+        x1 = line.cursorToX(rel)[0]
+        w = line.cursorToX(rel + frag.length())[0] - x1
+        if w <= 0:
+            return None
+        pix = _resource_pixmap(doc, frag.charFormat().toImageFormat())
+        if pix is None or pix.width() <= 0:
+            return None
+        h = w * pix.height() / pix.width()
+        top = doc.documentLayout().blockBoundingRect(block).top()
+        # Bottom-aligned to the baseline, which is where Qt puts an inline
+        # image; for an image alone in its block that fills the line exactly.
+        bottom = top + line.y() + line.ascent() + line.descent()
+        return QRectF(x1 + off.x(), bottom - h + off.y(), w, h)
+
+    def _paint_image_marks(self, doc, layout, off):
+        marks = self._marked_image_rects(doc, layout, off)
+        if not marks:
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        for cell, pix, colour in marks:
+            painter.drawPixmap(cell.toRect(), pix)
+            pen = QPen(QColor(colour))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(cell.adjusted(-1, -1, 1, 1), 3.0, 3.0)
+        painter.end()
 
     def _paint_overlays(self, doc, layout, off):
         painter = QPainter(self.viewport())
@@ -487,6 +596,25 @@ class _ReadingView(QTextBrowser):
                                  QPointF(x2 + off.x(), y + off.y()))
             block = block.next()
 
+    def _caret_on_image(self) -> bool:
+        """True when the caret sits on an image — its cell is the whole
+        picture, so the soft block would wash all of it (#61)."""
+        cur = self.textCursor()
+        if cur.hasSelection():
+            return False
+        pos = cur.position()
+        block = self.document().findBlock(pos)
+        if not block.isValid():
+            return False
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if (frag.charFormat().isImageFormat()
+                    and frag.position() <= pos <= frag.position() + frag.length()):
+                return True
+            it += 1
+        return False
+
     def _caret_cell(self, off):
         """The glyph-cell rectangle under the caret (viewport coords), or None
         if it can't be laid out — the soft block is painted here. Width is the
@@ -515,6 +643,8 @@ class _ReadingView(QTextBrowser):
         focus (an open card takes focus, so the caret rests then)."""
         if not self.hasFocus():
             return
+        if self._caret_on_image():
+            return           # framed by _paint_image_marks instead (#61)
         cell = self._caret_cell(off)
         if cell is None:
             return
@@ -1977,13 +2107,8 @@ class ZenMarkdownEditor(QWidget):
         """An image resource's size in layout units, or None if it can't be
         resolved. Device-independent: a 2x asset is the same picture at twice
         the pixels, not twice the picture."""
-        if not imf.name():
-            return None
-        res = doc.resource(QTextDocument.ResourceType.ImageResource,
-                           QUrl(imf.name()))
-        if isinstance(res, QImage):
-            res = QPixmap.fromImage(res)
-        if not isinstance(res, QPixmap) or res.isNull():
+        res = _resource_pixmap(doc, imf)
+        if res is None:
             return None
         dpr = res.devicePixelRatio() or 1.0
         w, h = res.width() / dpr, res.height() / dpr
@@ -2024,15 +2149,7 @@ class ZenMarkdownEditor(QWidget):
                     break
             it += 1
         imf = under or first
-        if imf is None or not imf.name():
-            return None
-        res = doc.resource(QTextDocument.ResourceType.ImageResource,
-                           QUrl(imf.name()))
-        if isinstance(res, QPixmap):
-            return None if res.isNull() else res
-        if isinstance(res, QImage):
-            return None if res.isNull() else QPixmap.fromImage(res)
-        return None
+        return None if imf is None else _resource_pixmap(doc, imf)
 
     def _expand_image_at_caret(self) -> bool:
         """`↵` on an image — fill the card with it. False when there is none,

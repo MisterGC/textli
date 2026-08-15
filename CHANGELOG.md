@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The caret and the selection flattened an image instead of marking it**
+  (#61) — a wash reads well over text, where it tints the paper between the
+  letters, but over a picture it covers the content and dulls the thing you
+  are trying to look at. Measured against a `#cc4422` test image, the caret
+  took it to `#92443a` and a selection to `#c28c85`. Two mechanisms were
+  doing it: textli's own block caret fills the glyph cell under it, and an
+  image *is* one glyph, so the cell was the entire picture; and Qt paints the
+  selection inside the document layout with no hook to exempt an image. An
+  image under the caret or inside the selection is now redrawn from its own
+  resource over whatever wash landed on it and given a 2px rounded frame
+  instead — the caret's colour at full strength (the wash's alpha is low
+  because it covers a whole cell, and at that alpha a thin stroke barely
+  registers) or the selection colour. Text is untouched.
+
 - **An image wider than the prose column broke the page sideways instead of
   scaling down** (#60) — Qt draws an image at its natural pixel size, so a
   2400px screenshot in a 700px column pushed the document's ideal width to
