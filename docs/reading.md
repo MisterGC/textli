@@ -178,6 +178,11 @@ their own size — an icon is never stretched to fill the measure. The column
 is what the picture follows, so widening or narrowing it (`⌘⇧→` / `⌘⇧←`)
 refits every image, chart and diagram on the page.
 
+When the caret rests on an image, or a selection covers one — picking out a
+span for a comment, say — the picture keeps its own colours and gets a
+2px frame instead of the wash text gets. A tint over text colours the paper
+between the letters; over a picture it covers the content.
+
 Press `↵` on any image to fill the window with it for a closer look, and
 `Esc` (or `↵` again) to come back. That enlarges the **file**, not the
 scaled-down copy on the page — so keep source images at full resolution
