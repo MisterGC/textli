@@ -2267,8 +2267,47 @@ class ZenMarkdownEditor(QWidget):
         # The whole window, not the card: charts and diagrams are drawn at
         # the *column* width and the card is barely wider than that.
         self._image_view.open(pixmap, QRectF(self.rect()),
-                              restore_focus_to=self._rendered)
+                              restore_focus_to=self._rendered,
+                              from_rect=self._image_cell_in_self())
         return True
+
+    def _image_cell_in_self(self) -> QRectF | None:
+        """Where the caret's picture sits on the page, in this widget's own
+        coordinates — the rectangle the expanded view grows out of (#64).
+
+        None when it can't be located, which the inspector reads as "nothing
+        to travel from" and simply appears.
+        """
+        if not self._rendered_mode:
+            return None
+        doc = self._rendered.document()
+        pos = self._rendered.textCursor().position()
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return None
+        off = QPointF(-self._rendered.horizontalScrollBar().value(),
+                      -self._rendered.verticalScrollBar().value())
+        frag = None
+        it = block.begin()
+        while not it.atEnd():
+            f = it.fragment()
+            if f.charFormat().isImageFormat():
+                frag = f
+                if f.position() <= pos <= f.position() + f.length():
+                    break
+            it += 1
+        if frag is None:
+            return None
+        cell = self._rendered._image_cell(doc, doc.documentLayout(),
+                                          block, frag, off)
+        if cell is None:
+            return None
+        # The reading view's viewport is a child of this widget, so the
+        # rectangle has to come up into its coordinates.
+        vp = self._rendered.viewport()
+        top_left = vp.mapTo(self, cell.topLeft().toPoint())
+        return QRectF(top_left.x(), top_left.y(),
+                      cell.width(), cell.height())
 
     def _baked_print_doc(self):
         """A clone of the rendered document with the code band baked in as a
@@ -4490,8 +4529,9 @@ class ZenMarkdownEditor(QWidget):
             return True
 
         # So does the expanded image — Esc has to land there rather than
-        # falling through to save-and-close (#59).
-        if self._image_view is not None and self._image_view.is_active():
+        # falling through to save-and-close (#59). Visible rather than active,
+        # so keys stay swallowed while it tweens shut too (#64).
+        if self._image_view is not None and self._image_view.isVisible():
             self._image_view.keyPressEvent(event)
             return True
 

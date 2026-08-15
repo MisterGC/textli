@@ -15,7 +15,9 @@ from PySide6.QtGui import QImage, QKeyEvent, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from textli.editor import ZenMarkdownEditor  # noqa: E402
-from textli.imageview import ImageInspector, _fit  # noqa: E402
+from textli.imageview import (  # noqa: E402
+    ImageInspector, _CLOSE_MS, _OPEN_MS, _fit, _lerp,
+)
 
 PIC_W, PIC_H = 1600, 900
 
@@ -133,7 +135,9 @@ def test_enter_closes_it_too(reader):
 
 def test_escape_does_not_reach_save_and_close(reader, monkeypatch):
     """The guard this feature most needs: `Esc` in the reading view saves and
-    closes the editor, and an expanded image has to swallow it first."""
+    closes the editor, and an expanded image has to swallow it first — for the
+    whole of the closing tween as well, since that is still on screen (#64)."""
+    from PySide6.QtTest import QTest
     closed = []
     monkeypatch.setattr(ZenMarkdownEditor, "_close_save",
                         lambda self: closed.append("save"))
@@ -143,6 +147,9 @@ def test_escape_does_not_reach_save_and_close(reader, monkeypatch):
     _press(reader, Qt.Key.Key_Return)
     _press(reader, Qt.Key.Key_Escape)
     assert closed == []                        # swallowed by the inspector
+    _press(reader, Qt.Key.Key_Escape)          # still closing — still swallowed
+    assert closed == []
+    QTest.qWait(_CLOSE_MS + 150)               # let it land
     _press(reader, Qt.Key.Key_Escape)          # now it reaches the editor
     assert closed == ["save"]
 
@@ -223,3 +230,88 @@ def test_an_inspector_with_no_picture_is_not_active():
     assert not view.is_active()
     view.close_view()                             # idempotent, no crash
     assert not view.is_active()
+
+
+# ── it travels between the page and the window (#64) ──
+
+def test_it_grows_out_of_where_the_picture_sits_on_the_page(reader):
+    """A cut leaves the reader re-finding their place; travelling keeps one
+    object in view."""
+    from PySide6.QtTest import QTest
+    _caret_to(reader, "<image>")
+    assert reader._image_cell_in_self() is not None
+    _press(reader, Qt.Key.Key_Return)
+    view = reader._image_view
+    assert view._from_rect is not None
+    assert view._t < 1.0                       # starts at the page, not the end
+    QTest.qWait(_OPEN_MS + 150)
+    assert view._t == pytest.approx(1.0)       # and arrives
+
+
+def test_closing_travels_back_and_only_then_hides(reader):
+    from PySide6.QtTest import QTest
+    _caret_to(reader, "<image>")
+    _press(reader, Qt.Key.Key_Return)
+    QTest.qWait(_OPEN_MS + 150)
+    _press(reader, Qt.Key.Key_Escape)
+    assert not view_active(reader)             # logically closed at once...
+    assert reader._image_view.isVisible()      # ...but still on screen
+    QTest.qWait(_CLOSE_MS + 150)
+    assert not reader._image_view.isVisible()
+
+
+def view_active(ed):
+    return ed._image_view is not None and ed._image_view.is_active()
+
+
+def test_reversing_mid_flight_picks_up_where_it_is(reader):
+    """A quick open-then-close must not snap back to the far end first."""
+    from PySide6.QtTest import QTest
+    _caret_to(reader, "<image>")
+    _press(reader, Qt.Key.Key_Return)
+    QTest.qWait(60)                            # part-way out
+    part_way = reader._image_view._t
+    assert 0.0 < part_way < 1.0
+    _press(reader, Qt.Key.Key_Escape)
+    assert reader._image_view._t == pytest.approx(part_way, abs=0.25)
+
+
+def test_the_on_page_rectangle_is_the_drawn_one_in_editor_coordinates(reader):
+    """The travel is only convincing if it starts where the picture actually
+    is. The reading view's viewport is a child of the editor, so the rect has
+    to come up into the editor's coordinates — same size, shifted origin."""
+    from PySide6.QtCore import QPointF
+    _caret_to(reader, "<image>")
+    doc = reader._rendered.document()
+    pos = reader._rendered.textCursor().position()
+    block = doc.findBlock(pos)
+    frag = next(it.fragment() for it in [block.begin()]
+                if it.fragment().charFormat().isImageFormat())
+    off = QPointF(-reader._rendered.horizontalScrollBar().value(),
+                  -reader._rendered.verticalScrollBar().value())
+    in_view = reader._rendered._image_cell(doc, doc.documentLayout(),
+                                           block, frag, off)
+    in_editor = reader._image_cell_in_self()
+    assert in_editor is not None
+    assert in_editor.width() == pytest.approx(in_view.width())
+    assert in_editor.height() == pytest.approx(in_view.height())
+    vp = reader._rendered.viewport()
+    shift = vp.mapTo(reader, vp.rect().topLeft())
+    assert in_editor.x() == pytest.approx(in_view.x() + shift.x(), abs=1)
+    assert in_editor.y() == pytest.approx(in_view.y() + shift.y(), abs=1)
+
+
+# ── the blend itself ──
+
+def test_lerp_walks_from_one_rect_to_the_other():
+    start, end = QRectF(0, 0, 10, 10), QRectF(100, 200, 110, 210)
+    assert _lerp(start, end, 0.0) == start
+    assert _lerp(start, end, 1.0) == end
+    mid = _lerp(start, end, 0.5)
+    assert mid.x() == pytest.approx(50)
+    assert mid.width() == pytest.approx(60)
+
+
+def test_lerp_with_nowhere_to_come_from_is_just_the_destination():
+    end = QRectF(1, 2, 3, 4)
+    assert _lerp(None, end, 0.0) == end

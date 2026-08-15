@@ -45,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An image travels into and out of the full-window view instead of cutting**
+  (#64) — `↵` grew the page into the expanded picture in a single frame, and
+  `Esc` cut back the same way, which left the reader re-finding their place
+  because nothing connected the small picture to the large one. It now grows
+  out of where it sits on the page, with the backdrop fading in behind it, and
+  goes back the same way; the eye follows one object rather than reconciling
+  two. Same durations and curves as the editor's own fade in and out, so
+  there is one motion vocabulary rather than a second. Reversing mid-flight
+  picks up from wherever the picture currently is, so a quick `↵ Esc` doesn't
+  snap, and keys stay swallowed for the whole of the closing tween — it is
+  still on screen, so nothing should land on the document underneath.
+
 - **A display formula is set on the left, indented, rather than centred** —
   it still reads as lifted out of the sentence rather than starting one, and
   it lines up with the prose the way the rest of the page does. Two body ems
