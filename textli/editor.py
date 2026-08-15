@@ -87,6 +87,7 @@ from textli.constants import (
     ZEN_MD_CARD_RADIUS, ZEN_MD_FONT_SIZE, ZEN_MD_FONT_SIZE_MAX,
     ZEN_MD_FONT_SIZE_MIN, ZEN_MD_HEADING_SIZES,
     ZEN_MD_READING_ITEM_GAP, ZEN_MD_READING_LEADING, ZEN_MD_READING_PARA_GAP,
+    ZEN_MD_PICTURE_WIDTH_SHARE,
     ZEN_MD_SRC_COLUMNS, ZEN_MD_SRC_FONT_SCALE,
     ZEN_MD_FOCUS_CORE_LINES, ZEN_MD_FOCUS_DIM_MAX,
     ZEN_MD_FOCUS_FALLOFF_LINES, ZEN_MD_MUTED_ALPHA, ZEN_MD_TABLE_PAD,
@@ -2147,7 +2148,7 @@ class ZenMarkdownEditor(QWidget):
 
         Format-only: shifts no offsets, so the sentinel mark pass is safe.
         """
-        column = self._page_width_px()
+        column = self._picture_width_px()
         targets = []
         block = doc.begin()
         while block.isValid():
@@ -2619,6 +2620,16 @@ class ZenMarkdownEditor(QWidget):
             inner = float(self._content_width)
         return float(max(120.0, min(inner, ZEN_MD_MAX_WIDTH_MAX)))
 
+    def _picture_width_px(self) -> float:
+        """The widest a picture is drawn: a share of the prose column (#62).
+
+        Charts and diagrams are rasterised at this rather than rendered to the
+        full column and scaled down, so they stay crisp. Plain images are
+        scaled to it, and one already narrower keeps its own size — this is a
+        ceiling, never a stretch.
+        """
+        return self._page_width_px() * ZEN_MD_PICTURE_WIDTH_SHARE
+
     def _prepare_charts(self, md: str):
         """Swap each ``<!-- chart: … -->`` marker + table (`charts.py`) for a
         chart image ref and rasterize it (`chartrender.py`) at the reading
@@ -2633,7 +2644,7 @@ class ZenMarkdownEditor(QWidget):
         markers = md_charts.parse(md)
         if not markers:
             return md, {}
-        width = self._page_width_px()
+        width = self._picture_width_px()
         height = width / _CHART_ASPECT
         dpr = self._rendered.devicePixelRatioF()
         charts: dict[int, tuple] = {}
@@ -2739,7 +2750,7 @@ class ZenMarkdownEditor(QWidget):
         refs = graflirender.find_image_refs(md, md_comments.code_ranges(md))
         if not refs:
             return md, {}
-        width = self._page_width_px()
+        width = self._picture_width_px()
         dpr = self._rendered.devicePixelRatioF()
         diagrams: dict = {}
         out = []

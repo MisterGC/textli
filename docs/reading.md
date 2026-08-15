@@ -172,11 +172,14 @@ for a tour.
 
 ## Images
 
-An image wider than the prose column is scaled down to it, so a
-full-resolution screenshot can't push the page sideways. Smaller images keep
-their own size — an icon is never stretched to fill the measure. The column
+An image is drawn at most three quarters of the prose column's width — filling
+the measure also means being as tall as the picture's shape makes it, and that
+is a lot of page for something you are mostly reading around. A full-resolution
+screenshot can't push the page sideways either. Smaller images keep their own
+size — an icon is never stretched to fill the measure. The column
 is what the picture follows, so widening or narrowing it (`⌘⇧→` / `⌘⇧←`)
-refits every image, chart and diagram on the page.
+refits every image, chart and diagram on the page. Plain images sit left with
+the prose; display formulas, charts and diagrams are centred.
 
 When the caret rests on an image, or a selection covers one — picking out a
 span for a comment, say — the picture keeps its own colours and is marked with

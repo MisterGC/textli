@@ -45,6 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A picture is now drawn at most three quarters of the prose column** (#62)
+  — filling the measure also means being as tall as the aspect ratio makes
+  it, which is a lot of page for something the reader is mostly reading
+  *around*: a 4:3 image in a 692px column took 519px of height and now takes
+  389px. No detail is lost, since `↵` fills the window with the original
+  (#59). Charts and `.grafli` diagrams are *rasterised* at the capped width
+  rather than rendered to the full column and drawn scaled down, so they stay
+  crisp; the cost is slightly less room for a chart's labels. Still downscale
+  only — a picture already narrower than the cap keeps its own size.
+
+  A width cap rather than a height one on purpose. A height cap would target
+  the wasted space more directly but would depend on the window, so the same
+  document would lay out differently on a laptop and a monitor; the sheet's
+  geometry is meant to hold still. Alignment is unchanged: plain images stay
+  left with the prose, while display formulas, charts and diagrams keep the
+  centring they already had.
+
 - **`textli notes.md` now opens the reading view** (#58) — reading a document
   is the common case and writing one the exception, so reaching the page no
   longer costs a `⌘R` every time. `textli -w notes.md` (`--write`) opens the
