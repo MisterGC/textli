@@ -82,6 +82,26 @@ class TextliHost(QWidget):
         # `go` switches files in place — keep the window title honest.
         self._editor.file_opened.connect(
             lambda p: self.setWindowTitle(f"textli — {p.name}"))
+        self._restore_fullscreen()
+
+    def _restore_fullscreen(self):
+        """Come back fullscreen if that's how the last session was left (#65).
+
+        The preference is applied *here*, in the standalone host, rather than in
+        the editor: an embedded editor that fullscreened its host's window on
+        construction would be taking over an application it's only a widget in.
+        Only ever entered from here — leaving fullscreen stays the window's own
+        business, so a session started in a normal window is left alone.
+
+        Guarded on visibility because ``--pdf`` opens the editor on a host it
+        never shows: ``showFullScreen`` would put that headless export on
+        screen.
+        """
+        if not self.isVisible():
+            return
+        if md_settings.app_settings().value(
+                "zen_md/fullscreen", False, type=bool):
+            self.showFullScreen()
 
     def _install_quit_shortcut(self):
         """``⌘Q`` / ``Ctrl+Q`` quits (#63).

@@ -10,6 +10,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌘R` | Toggle the source editor ↔ rendered reading view |
 | `Esc` | Step back — leave visual mode, close an overlay, put an expanded image away. **Embedded** in a host app it also saves & closes the editor (`⇧Esc` cancels / discards pending changes); **standalone** it never quits — `⌘Q` (`Ctrl+Q`) does |
 | `⌘↵` | Toggle full-window width |
+| `F11` / `⌘⇧F` | Fullscreen — textli fills the screen, the OS chrome steps out (persists) |
 | `⌘.` | Section focus — dim all but the current paragraph (writing) / section (reading) |
 | `⌘T` | Typewriter scrolling — hold the caret line steady while writing (persists) |
 | `⌘⇧P` | Paper surface — grain & light under the text; off = the flat page (persists) |

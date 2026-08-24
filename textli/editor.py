@@ -786,6 +786,7 @@ def editor_help_html() -> str:
          "standalone, <span style='font-family:monospace'>"
          + _QUIT_KEYS + "</span> quits"),
         ("⌘↵", "Toggle full-window width"),
+        ("F11 / ⌘⇧F", "Fullscreen — textli fills the screen, the OS chrome steps out (persists)"),
         ("⌘.", "Section focus — dim all but the current paragraph (writing) / section (reading)"),
         ("⌘T", "Typewriter scrolling — hold the caret line steady while writing (persists)"),
         ("⌘⇧P", "Paper surface — grain &amp; light under the text; off = the flat page (persists)"),
@@ -960,6 +961,10 @@ class ZenMarkdownEditor(QWidget):
         # views — the page as material rather than a flat hex (paper.py).
         # Off is the flat page; persists like ⌘T.
         self._paper = settings.value("zen_md/paper", True, type=bool)
+        # Where the window came from before F11 (see _toggle_fullscreen).
+        # True is the right default: the standalone host opens maximized, so an
+        # editor built into an already-fullscreen window restores to that.
+        self._pre_fullscreen_maximized = True
 
         # Load persisted content-column width preference (adjustable like font).
         self._content_width = settings.value(
@@ -1605,6 +1610,34 @@ class ZenMarkdownEditor(QWidget):
         name = theme.toggle()
         md_settings.app_settings().setValue("zen_md/theme", name)
         self._flash_mode("DARK" if theme.is_dark() else "LIGHT")
+
+    def _toggle_fullscreen(self):
+        """F11 / ⌘⇧F — the window's own fullscreen: textli fills the screen and
+        the OS chrome (title bar, dock, taskbar) steps out (#65).
+
+        Acts on ``self.window()``, so it works the same standalone and embedded
+        — the editor never assumes it *is* the window. Restoring puts the
+        window back the way it was found: ``isMaximized`` reads ``False`` while
+        fullscreen, so the pre-fullscreen state has to be captured on the way
+        in rather than inspected on the way out.
+
+        The preference persists, but only the standalone host acts on it at
+        startup (``TextliHost.open``) — an embedded editor fullscreening its
+        host's window unasked would be a surprise, so that stays a keystroke.
+        """
+        win = self.window()
+        if win.isFullScreen():
+            if self._pre_fullscreen_maximized:
+                win.showMaximized()
+            else:
+                win.showNormal()
+        else:
+            self._pre_fullscreen_maximized = win.isMaximized()
+            win.showFullScreen()
+        md_settings.app_settings().setValue(
+            "zen_md/fullscreen", win.isFullScreen())
+        self._flash_mode(
+            "FULLSCREEN" if win.isFullScreen() else "FULLSCREEN OFF")
 
     def _typewriter_recenter(self):
         """Keep the caret line at the typewriter height (~40% down the
@@ -4599,6 +4632,19 @@ class ZenMarkdownEditor(QWidget):
                 and event.modifiers() & _CTRL_MOD
                 and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self._toggle_theme()
+            return True
+
+        # F11 / Ctrl+Shift+F — fullscreen the window (works in either view,
+        # persists). F11 is the conventional key on Linux/Windows; ⌘⇧F joins
+        # the ⌘⇧P / ⌘⇧D toggle family and is the reachable one on macOS, where
+        # F11 is spoken for by the system. Must precede the read view's plain
+        # Ctrl+F (page down), which doesn't exclude shift — the same ordering
+        # Ctrl+Shift+P needs against Ctrl+P above.
+        if event.key() == Qt.Key.Key_F11 or (
+                event.key() == Qt.Key.Key_F
+                and event.modifiers() & _CTRL_MOD
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._toggle_fullscreen()
             return True
 
         # Ctrl+P — print (works in either view)
