@@ -26,15 +26,22 @@ The complete reference — the same content the editor shows on `F1`.
 | Key | Action |
 | --- | --- |
 | `h j k l` | Move left / down / up / right |
-| `w / b / e` | Next word / previous word / word end |
-| `0 / $` · `gg / G` | Line start / end · document start / end |
+| `w b e` · `W B E` | Next word / previous word / word end · the same by WORD (whitespace-delimited) |
+| `0 ^ $` · `gg G` | Line start / first non-blank / line end · document start / end |
+| `{ }` · `%` | Previous / next blank line · jump to the matching bracket |
+| `fx` · `tx` · `Fx` · `Tx` | Jump to the next `x` / just before it · the same backwards; `;` and `,` repeat the last one |
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
-| `Esc` | Back to NORMAL mode |
-| `x` · `dd` · `dw` | Delete char · line · to next word (into the register) |
+| `Esc` | Back to NORMAL mode (also abandons a half-typed operator) |
+| `d` `c` `y` + motion | Delete / change / yank over **any** motion — `de`, `d$`, `dG`, `d}`, `dfx`, `c2w` |
+| `dd` `cc` `yy` | The line-wise form of each operator (`2dd` — two lines) |
+| `diw` · `ci"` · `da(` | Operate on a text object: `i`/`a` plus `w` `W` `p`, a quote, or a bracket |
+| `x` `X` · `D` `C` · `s` `S` | Delete char forward / back · to line end (and change) · substitute char / line |
+| `rx` · `~` · `J` | Replace the char with `x` · toggle case · join this line with the next |
+| `.` | Repeat the last change — including whatever was typed in INSERT |
 | `u` · `⌃r` | Undo · redo the last change |
-| `v` | VISUAL — extend a selection with the motions, then `d` / `y` / `c` |
-| `yy` · `yw` · `p` / `P` | Yank line / word · paste after / before |
-| `2j` · `3dd` | A leading count repeats the next motion or edit |
+| `v` | VISUAL — extend with the motions, take a text object (`viw`), then `d` / `y` / `c` / `p` |
+| `p` / `P` | Paste after / before (line-wise when the register holds whole lines) |
+| `2j` · `3dd` · `2d3w` | A leading count repeats the next motion or edit, and multiplies across both |
 | `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
 | `gh` | Headings overview — an outline of the source (`j`/`k` preview, `Enter` keeps, `Esc` restores) |

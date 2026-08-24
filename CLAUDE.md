@@ -75,6 +75,11 @@ why the suite is fast and why `editor.py` hasn't collapsed under its own weight.
 - **`srcref.py`** — source references in prose (`` `textli/editor.py:2455` ``).
   Deliberately conservative: a chip counts only with a file extension or an
   explicit line anchor, so prose chips like `` `.md` `` aren't followable.
+- **`vimmotion.py`** — where a vim motion lands and what a text object covers,
+  over a plain string. The word-boundary rules (vim's blank/word/punctuation
+  classes) are the part that has to *feel* like vim, so they're unit-tested
+  without a widget; `vim.py` stays the Qt half that turns an answer into a
+  cursor move or an edit.
 - **`links.py`** — which Markdown link covers a caret column (inline links win
   over the bare URL inside their own parens).
 - **`search.py`** — fuzzy in-document matching; phrase hits outrank word hits,
@@ -124,9 +129,13 @@ span maps back to its source annotation.
 
 ### Interaction surfaces
 
-- **`vim.py`** — `VimKeyHandler`, a stateful NORMAL/INSERT handler that operates
-  on any `QPlainTextEdit`. Shared by `ZenMarkdownEditor`'s write view and
-  `InlineVimEditor` — the one place vim keybindings live.
+- **`vim.py`** — `VimKeyHandler`, a stateful NORMAL/INSERT/VISUAL handler that
+  operates on any `QPlainTextEdit`. Shared by `ZenMarkdownEditor`'s write view
+  and `InlineVimEditor` — the one place vim keybindings live. Built on vim's
+  grammar (count + operator + motion/text object) rather than a table of key
+  pairs, so a motion added to `_motion_for` is immediately available to `d`,
+  `c`, `y` and VISUAL at once. `.` repeats a change by replaying its buffered
+  keystrokes, which is why an INSERT leg (`cwword<Esc>`) repeats too.
 - **`inline_editor.py`** — `InlineVimEditor`, the embeddable editor. Knows nothing
   about what it edits: host passes text in, gets it back via `committed(str)` or
   `cancelled()`. Opens in INSERT mode.

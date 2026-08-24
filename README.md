@@ -82,6 +82,7 @@ complete key reference, or see the
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
+| `d` `c` `y` | Operators over any motion or text object — `dw`, `d}`, `ci"`, `daw`; `.` repeats the last change |
 | `F1` | Full help |
 
 ## Embed

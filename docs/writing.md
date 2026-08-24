@@ -9,20 +9,41 @@ centered column. The editor opens here, in vim **NORMAL** mode.
 
 ## Vim editing
 
-The essentials work the way your fingers expect:
+Editing follows vim's own grammar — a **count**, an **operator**, and a
+**motion** or **text object** — so the pieces below combine rather than having
+to be learned as separate commands:
 
-- **Motions** — `h j k l`, `w / b / e`, `0 / $`, `gg / G`.
+- **Motions** — `h j k l`, `w b e` (and `W B E` by whitespace-delimited WORD),
+  `0 ^ $`, `{ }` for the blank line before/after, `gg G`, `%` to the matching
+  bracket, and `fx` / `tx` / `Fx` / `Tx` to a character on this line (`;` and
+  `,` repeat the last one).
+- **Operators** — `d` delete, `c` change, `y` yank. Each one takes any motion
+  above: `de`, `d$`, `dG`, `d}`, `dfx`, `c2w`. Doubling it works on whole
+  lines — `dd`, `cc`, `yy`.
+- **Text objects** — `i` (inner) or `a` (around) plus `w` / `W` for a word,
+  `p` for a paragraph, a quote (`"` `'` `` ` ``), or a bracket (`(` `[` `{`
+  `<`). So `diw` takes the word under the caret, `ci"` rewrites a string,
+  `da(` removes a call's parentheses and all.
+- **Shorthands** — `x` / `X` (char forward/back), `D` / `C` (to line end,
+  delete or change), `s` / `S` (substitute a character / the line), `rx`
+  (replace one character), `~` (toggle case), `J` (join with the next line).
 - **Entering INSERT** — `i a` (before/after the caret), `I A` (line
   start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
-- **Edits** — `x` (char), `dd` (line), `dw` (to next word).
+- **Repeat** — `.` replays the last change, the text you typed in INSERT
+  included: `ciwword` `Esc`, then `.` on the next word rewrites that one too.
 - **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
-- **VISUAL** — `v` starts a selection that the motions extend; `d` / `y` / `c`
-  then delete, yank or change it.
-- **Yank & paste** — `yy` / `yw` yank a line / word, `p` / `P` paste after /
-  before. Deletes (`x`, `dd`, `dw`) fill the same register, so a `dd` then `p`
-  moves a line.
+- **VISUAL** — `v` starts a selection that the motions extend; text objects
+  work here too (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or
+  replace it with the register.
+- **Yank & paste** — `y` with any motion or object fills the register, as does
+  every delete, so `dd` then `p` moves a line. `p` / `P` paste after / before,
+  on their own lines when the register holds whole ones.
 - **Counts** — a leading number repeats the next motion or edit: `3j`, `5w`,
-  `2dd`, `4x`.
+  `2dd`, `4x`. An operator and its motion each take one and they multiply, so
+  `2d3w` deletes six words.
+
+A half-typed operator is not a trap: `Esc` abandons `d` or `c` without
+touching the text (and without closing the editor).
 
 In NORMAL mode `Esc` saves and closes the editor; `⇧Esc` cancels and
 discards pending changes.
