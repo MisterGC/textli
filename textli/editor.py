@@ -1613,7 +1613,7 @@ class ZenMarkdownEditor(QWidget):
 
     def _toggle_fullscreen(self):
         """F11 / ⌘⇧F — the window's own fullscreen: textli fills the screen and
-        the OS chrome (title bar, dock, taskbar) steps out (#65).
+        the OS chrome (title bar, dock, taskbar) steps out.
 
         Acts on ``self.window()``, so it works the same standalone and embedded
         — the editor never assumes it *is* the window. Restoring puts the

@@ -85,7 +85,7 @@ class TextliHost(QWidget):
         self._restore_fullscreen()
 
     def _restore_fullscreen(self):
-        """Come back fullscreen if that's how the last session was left (#65).
+        """Come back fullscreen if that's how the last session was left.
 
         The preference is applied *here*, in the standalone host, rather than in
         the editor: an embedded editor that fullscreened its host's window on
