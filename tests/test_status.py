@@ -53,6 +53,18 @@ def test_read_status_section_elides_when_long():
     assert len(head) <= 2 + 48        # "§ " + capped section
 
 
+def test_read_status_document_status_trails():
+    # the declared frontmatter status describes the whole document, so it
+    # comes after the positional parts
+    s = read_status(0.5, 220, changes=2, section="Architecture",
+                    status="draft")
+    assert s == "§ Architecture · 50% · ~1 min left · 2 changes · status: draft"
+    # declared but unset — the axis shows, the value is blank
+    assert read_status(0.0, 0, status="").endswith("status: —")
+    # a document that declares none adds nothing
+    assert "status:" not in read_status(0.0, 0)
+
+
 def test_read_status_link_target_leads_and_wins_over_section():
     # on a link, the whisper shows where Enter goes instead of the section
     s = read_status(0.3, 500, section="Design", link="other.md")

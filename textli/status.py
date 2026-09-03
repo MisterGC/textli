@@ -3,7 +3,8 @@
 The status line is a single faint line in the corner of the card: in the
 write view it whispers the vim mode, the word count, and what this session
 added; in the read view, how far through the piece the reader is, roughly
-how much reading is left, and what still awaits review. All formatting
+how much reading is left, what still awaits review, and — for a document
+that declares one — the frontmatter status it carries. All formatting
 lives here, Qt-free, so it stays cheap to unit-test — the editor only
 paints the string.
 """
@@ -14,6 +15,7 @@ import math
 import re
 
 from textli import comments
+from textli import frontmatter
 
 # A calm middle of the silent-reading estimates — the "time left" whisper
 # only needs to be honest, not exact.
@@ -66,15 +68,33 @@ def _crumb(text: str) -> str:
     return text
 
 
+# What the whisper shows for a document that declares its status values but
+# has not set one — the axis exists, the value doesn't.
+UNSET = "—"
+
+
+def doc_status(current: str) -> str:
+    """The status part of the read-view whisper: ``status: draft``, or
+    ``status: —`` for a document that declares values but sets none. Written
+    with the frontmatter key itself, so the whisper names the line it reads."""
+    return f"{frontmatter.STATUS_KEY}: {current.strip() or UNSET}"
+
+
 def read_status(progress: float, words_total: int,
                 changes: int = 0, comment_count: int = 0,
-                section: str = "", link: str = "") -> str:
+                section: str = "", link: str = "",
+                status: str | None = None) -> str:
     """The read-view whisper: ``§ Design · 42% · ~7 min left · 2 comments``.
     ``progress`` is the fraction of the document the view has scrolled past
     (0..1); ``section`` is the heading under the caret (empty before the first
     heading). When the caret is on a link, ``link`` leads instead — ``→ where
     Enter goes`` — since that's the salient thing. Review parts appear only
-    while there is something to review."""
+    while there is something to review.
+
+    ``status`` is the document's declared frontmatter state (``""`` when it
+    declares values but sets none); ``None`` — a document that declares none —
+    adds nothing to the whisper. It trails the positional parts because it
+    describes the whole document, not where the reader is in it."""
     progress = min(1.0, max(0.0, progress))
     parts = [f"{round(progress * 100)}%"]
     minutes = math.ceil(words_total * (1.0 - progress) / WORDS_PER_MINUTE)
@@ -88,4 +108,6 @@ def read_status(progress: float, words_total: int,
         parts.insert(0, f"→ {_crumb(link)}")
     elif section.strip():
         parts.insert(0, f"§ {_crumb(section)}")
+    if status is not None:
+        parts.append(doc_status(status))
     return SEP.join(parts)

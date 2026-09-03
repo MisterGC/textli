@@ -35,6 +35,21 @@ Markdown itself (and in git).
   `#3-decisions`). Anchors work from other documents (`notes.md#section`
   opens that heading in place) and from the CLI
   (`textli notes.md#design-decisions`).
+- **Give a doc a status the reader can flip.** Frontmatter that lists its
+  own legal values opts the document into textli's status gesture: the
+  reading view whispers `status: draft` and `gs` cycles the reader through
+  the declared values, writing `status:` back and saving. Declare both
+  lines when the doc has a lifecycle worth tracking:
+
+  ```yaml
+  ---
+  status: draft
+  statuses: draft, review, final
+  ---
+  ```
+
+  Without the `statuses:` line the document is untouched — so add it only
+  where the states mean something.
 - **Links open in place.** A relative link to another `.md` renders that
   file where you stand (`gb` returns), so a folder of linked notes reads
   like a small wiki. Web/mail links open in the browser; `#slug` jumps

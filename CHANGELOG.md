@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The reading view shows a document's frontmatter status, and `gs` changes
+  it** (#69) — Qt keeps YAML frontmatter off the rendered page, so a
+  document's `status:` was invisible while reading and could only be changed
+  by flipping to the write view and typing a value from memory. The whisper
+  now ends with `status: draft` for a document that carries one, and `gs`
+  opens a card listing the values in the order the document declares them,
+  on the one it currently has: `j`/`k` move, a digit picks directly, `Enter`
+  writes `status:` and saves the file, `Esc` leaves it alone.
+
+  A document opts in by listing its own legal values, so textli never invents
+  a vocabulary for someone else's workflow:
+
+  ```yaml
+  ---
+  status: draft
+  statuses: draft, review, final
+  ---
+  ```
+
+  Inline, flow (`[draft, review]`) and block-list forms all read. A document
+  without a `statuses:` line is untouched — nothing new in the whisper, and
+  `gs` says there is nothing to change. Only the `status:` line is rewritten
+  (added above `statuses:` when the document has none yet); the rest of the
+  frontmatter is left byte for byte, and the edit is one step on the write
+  view's undo stack. `gs` is a reading-view gesture: in the write view the
+  frontmatter is on screen already.
+
+### Changed
+
+- **PySide6 floor raised to 6.8** — Qt 6.8 is where the Markdown reader parks
+  frontmatter in the document's metadata instead of rendering it as prose,
+  which is what makes the status readable rather than a block of raw text at
+  the top of the page.
+
 ## [0.8.0] - 2026-08-15
 
 ### Added

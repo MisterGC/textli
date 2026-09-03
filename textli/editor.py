@@ -68,6 +68,7 @@ from textli import charts as md_charts
 from textli import codeblocks as md_codeblocks
 from textli import comments as md_comments
 from textli import formulas as md_formulas
+from textli import frontmatter as md_frontmatter
 from textli import graflirender
 from textli import links as md_links
 from textli import mathrender
@@ -774,8 +775,12 @@ def editor_help_html() -> str:
     <p>The faint line in the card's corner is the <b>whisper status</b>: while
     writing it shows the vim mode, word count, and this session's delta; while
     reading, the section you're in (or where a link goes when the caret is on
-    one), how far you are, roughly how many minutes remain, and what still
-    awaits review. It hides whenever a card (search, open, overview) is up.</p>
+    one), how far you are, roughly how many minutes remain, what still awaits
+    review, and — for a document whose frontmatter declares a
+    <span style='font-family:monospace'>statuses:</span> list — the
+    <span style='font-family:monospace'>status:</span> it carries
+    (<b>gs</b> changes it). It hides whenever a card (search, open, overview) is
+    up.</p>
 
     <p style='{hdr}'>Views &amp; session</p>
     <table>{rows([
@@ -854,6 +859,7 @@ def editor_help_html() -> str:
         ("↵", "…or the image under it — a picture, chart, diagram or formula fills the window for a closer look; <span style='font-family:monospace'>Esc</span> puts the page back"),
         ("gb / ⌫", "Back to the document (or source file) the last link or reference was followed from"),
         ("go", "Open another file (stays in the reading view)"),
+        ("gs", "Status — pick from the values the document's frontmatter declares in <span style='font-family:monospace'>statuses:</span>; Enter sets <span style='font-family:monospace'>status:</span> and saves"),
     ])}</table>
 
     <p style='{hdr}'>Reading view — comments</p>
@@ -1070,6 +1076,11 @@ class ZenMarkdownEditor(QWidget):
         self._overview_view = None
         # `gl` follows the picked row (a link); `gc`/`gh` just land on it.
         self._overview_targets = None
+        # `gs` status picker: the values the document declares, and which one
+        # is selected. Only up for a document whose frontmatter declares any.
+        self._status_picker: QLabel | None = None
+        self._status_values: tuple[str, ...] = ()
+        self._status_sel = 0
         # In-session back-stack of (path, source, caret, scroll) for link
         # navigation — `gb`/Backspace walks it. Not persisted (position memory
         # owns resume).
@@ -1298,7 +1309,8 @@ class ZenMarkdownEditor(QWidget):
             return
         if (self._search_overlay is not None
                 or self._open_overlay is not None
-                or self._overview_overlay is not None):
+                or self._overview_overlay is not None
+                or self._status_picker is not None):
             lbl.hide()
             return
         src = self._editor.toPlainText()
@@ -1318,12 +1330,14 @@ class ZenMarkdownEditor(QWidget):
             span = sb.maximum() + sb.pageStep()
             progress = (sb.value() + sb.pageStep()) / span if span else 1.0
             href = self._rendered_anchor_at_caret()
+            declared = md_frontmatter.status(src)
             text = md_status.read_status(
                 progress, words,
                 changes=len(self._rendered_suggestions),
                 comment_count=len(self._rendered_comments),
                 section=self._current_rendered_section(),
-                link=self._link_hint(href) if href else "")
+                link=self._link_hint(href) if href else "",
+                status=declared.current if declared else None)
             if self._visual:
                 text = f"VISUAL{md_status.SEP}{text}"
         else:
@@ -2465,6 +2479,7 @@ class ZenMarkdownEditor(QWidget):
         if self._on_source_page():
             return          # a peeked file has no write view to flip to
         self._close_overview()
+        self._close_status_picker()
         # Search highlights address one view's offsets — stale in the other.
         # The query itself survives: n/N re-runs it against the new view.
         self._editor.setExtraSelections([])
@@ -4079,14 +4094,25 @@ class ZenMarkdownEditor(QWidget):
         lbl = self._overview_overlay
         if lbl is None:
             return
+        self._paint_list_overlay(
+            lbl, self._overview_title,
+            [inner for (_s, _e, inner) in self._overview_rows],
+            self._overview_sel, self._overview_view or self._rendered)
+
+    def _paint_list_overlay(self, lbl: QLabel, title: str, inners, sel: int,
+                            view):
+        """Paint a numbered pick-list card in the top-right of ``view``: a bold
+        title over one row per entry, the selected row washed. Shared by the
+        `gc`/`gh`/`gl` jump lists and the `gs` status picker so they read as one
+        gesture — the caller owns what the rows mean."""
         lines = []
-        for i, (_s, _e, inner) in enumerate(self._overview_rows):
+        for i, inner in enumerate(inners):
             bg = (f"background:{theme.ZEN_MD_COMMENT_HL.name()};"
-                  if i == self._overview_sel else "")
+                  if i == sel else "")
             lines.append(f"<tr><td style='{bg}padding:2px 10px'>{i + 1}"
                          f"&nbsp;&nbsp;{inner}</td></tr>")
         header = (f"<div style='padding:2px 10px;color:{theme.ZEN_TEXT_COLOR.name()};"
-                  f"font-weight:bold'>{self._overview_title}</div>")
+                  f"font-weight:bold'>{title}</div>")
         html = (f"<div style='font-family:\"{FONT_FAMILY}\";"
                 f"font-size:{max(ZEN_MD_FONT_SIZE_MIN, self._font_size - 3)}pt;"
                 f"color:{theme.ZEN_TEXT_COLOR.name()}'>{header}"
@@ -4098,8 +4124,8 @@ class ZenMarkdownEditor(QWidget):
             f" border: 1px solid {theme.ZEN_CARD_BORDER.name()};"
             " border-radius: 8px; padding: 8px; }")
         lbl.adjustSize()
-        vp = self._overview_view or self._rendered
-        lbl.move(vp.x() + max(16, vp.width() - lbl.width() - 24), vp.y() + 24)
+        lbl.move(view.x() + max(16, view.width() - lbl.width() - 24),
+                 view.y() + 24)
         lbl.show()
         lbl.raise_()
 
@@ -4192,6 +4218,109 @@ class ZenMarkdownEditor(QWidget):
         view = self._overview_view or getattr(self, "_rendered", None)
         if view is not None:
             view.setFocus()
+        self._refresh_status()
+
+    # ── `gs` — the document's declared frontmatter status ──
+
+    def _open_status_picker(self):
+        """gs — pick the document's status from the values its own frontmatter
+        declares, in declared order, opening on the current one. A document
+        with no ``statuses:`` line has no state to change, so the gesture just
+        says so; a peeked source page and a read-only document refuse it."""
+        if self._on_source_page():
+            return
+        if self._read_only:
+            self._flash_notice("read-only — the status stays as it is")
+            return
+        declared = md_frontmatter.status(self._editor.toPlainText())
+        if declared is None:
+            self._flash_notice(
+                f"no status declared — add a "
+                f"`{md_frontmatter.VALUES_KEY}:` line to the frontmatter")
+            return
+        self._status_values = declared.values
+        self._status_sel = declared.index
+        if self._status_picker is None:
+            lbl = QLabel(self)
+            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            lbl.setTextFormat(Qt.TextFormat.RichText)
+            self._status_picker = lbl
+        self._render_status_picker()
+        self._refresh_status()
+
+    def _render_status_picker(self):
+        """(Re)paint the status card — one row per declared value, the current
+        one marked so the pick is legible even while the selection moves."""
+        lbl = self._status_picker
+        if lbl is None:
+            return
+        current = (md_frontmatter.status(self._editor.toPlainText())
+                   or md_frontmatter.Status("", ())).current
+        inners = []
+        for value in self._status_values:
+            mark = ("&nbsp;<span style='color:"
+                    f"{theme.ZEN_HINT_COLOR.name()}'>· now</span>"
+                    if value == current else "")
+            inners.append(self._esc_html(value) + mark)
+        self._paint_list_overlay(lbl, md_status.doc_status(current), inners,
+                                 self._status_sel, self._rendered)
+
+    def _handle_status_key(self, event: QKeyEvent) -> bool:
+        """Keys while the status picker is open: j/k (or arrows) move, Enter
+        sets the selected value, a digit picks one directly, Esc / q / g
+        leaves the status as it was. Everything else is swallowed."""
+        key = event.key()
+        n = len(self._status_values)
+        if key in (Qt.Key.Key_J, Qt.Key.Key_Down):
+            self._status_sel = min(n - 1, self._status_sel + 1)
+            self._render_status_picker()
+            return True
+        if key in (Qt.Key.Key_K, Qt.Key.Key_Up):
+            self._status_sel = max(0, self._status_sel - 1)
+            self._render_status_picker()
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._commit_status(self._status_sel)
+            return True
+        if Qt.Key.Key_1 <= key <= Qt.Key.Key_9:
+            idx = key - Qt.Key.Key_1
+            if idx < n:
+                self._commit_status(idx)
+            return True
+        if key in (Qt.Key.Key_Escape, Qt.Key.Key_Q, Qt.Key.Key_G):
+            self._close_status_picker()
+            return True
+        return True   # swallow everything else while the picker is up
+
+    def _commit_status(self, idx: int):
+        """Write the picked value into the frontmatter and save the file. The
+        source edit goes through the same path as a comment or a suggestion, so
+        it lands on the undo stack as one step and the reader keeps their place;
+        the save is immediate rather than left to the autosave timer, so what
+        the whisper now claims is what is on disk."""
+        if not (0 <= idx < len(self._status_values)):
+            self._close_status_picker()
+            return
+        value = self._status_values[idx]
+        self._close_status_picker()
+        src = self._editor.toPlainText()
+        new_src = md_frontmatter.with_status(src, value)
+        if new_src != src:
+            # Frontmatter never reaches the page, so the re-render leaves every
+            # rendered position where it was — park the caret back on it.
+            at = self._rendered.textCursor().position()
+            self._apply_source_change_pos(new_src, lambda: at)
+            self._autosave()
+        self._refresh_status()
+
+    def _close_status_picker(self):
+        """Hide the status card (idempotent) and hand focus back to the page."""
+        if self._status_picker is None:
+            return
+        self._status_picker.hide()
+        self._status_picker = None
+        self._rendered.setFocus()
         self._refresh_status()
 
     def _format_for_span(self, span, comment_idx: int,
@@ -4736,6 +4865,10 @@ class ZenMarkdownEditor(QWidget):
         if self._overview_overlay is not None:
             return self._handle_overview_key(event)
 
+        # Same for the `gs` status picker.
+        if self._status_picker is not None:
+            return self._handle_status_key(event)
+
         # p — toggle the clean preview (fully-accepted prose, no markup).
         if key == Qt.Key.Key_P and not ctrl:
             self._toggle_preview()
@@ -4763,7 +4896,8 @@ class ZenMarkdownEditor(QWidget):
             self._rendered_pending_bracket = "["
             return True
 
-        # `gg` — top; `gc` — changes overview; `gh` — headings; `go` — open file.
+        # `gg` — top; `gc` — changes overview; `gh` — headings; `go` — open
+        # file; `gs` — the document's declared frontmatter status.
         if key == Qt.Key.Key_G and not shift:
             if getattr(self, "_rendered_pending_g", False):
                 self._rendered_pending_g = False
@@ -4774,7 +4908,7 @@ class ZenMarkdownEditor(QWidget):
         if (getattr(self, "_rendered_pending_g", False)
                 and not ctrl and not shift
                 and key in (Qt.Key.Key_C, Qt.Key.Key_H, Qt.Key.Key_O,
-                            Qt.Key.Key_L, Qt.Key.Key_B)):
+                            Qt.Key.Key_L, Qt.Key.Key_B, Qt.Key.Key_S)):
             self._rendered_pending_g = False
             if key == Qt.Key.Key_C:
                 self._open_changes_overview()
@@ -4784,6 +4918,8 @@ class ZenMarkdownEditor(QWidget):
                 self._open_links_overview()
             elif key == Qt.Key.Key_B:
                 self._navigate_back()
+            elif key == Qt.Key.Key_S:
+                self._open_status_picker()
             else:
                 self._open_file_dialog()
             return True
