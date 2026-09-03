@@ -76,6 +76,7 @@ See [Opening files](opening.md) for how the matching works.
 | `↵` | Expand the **image** under the caret — an ordinary picture, a chart, a `.grafli` diagram or a formula fills the window for a closer look. `Esc` (or `↵` again) puts the page back |
 | `gb` / `⌫` | Back to the document (or source file) the last link or reference was followed from |
 | `go` | Open another file (stays in the reading view) |
+| `gs` | Status — pick from the values the document declares in its frontmatter; `Enter` sets `status:` and saves (see [Document status](reading.md#document-status)) |
 
 ## Source references
 

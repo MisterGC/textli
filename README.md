@@ -56,7 +56,9 @@ textli (an agent applying your comments, a `git` checkout) reload in place
 without a restart. A faint **whisper status** in the card's corner keeps you
 oriented —
 mode, word count, and session delta while writing; the section you're in,
-progress, minutes left, and open review items while reading. Press `F1` inside the editor for the
+progress, minutes left, open review items, and — for a document whose
+frontmatter declares a `statuses:` list — the `status:` it carries, while
+reading (`gs` changes it). Press `F1` inside the editor for the
 complete key reference, or see the
 [documentation](https://mistergc.github.io/textli/).
 
@@ -80,6 +82,7 @@ complete key reference, or see the
 | `↵` | Expand the image under the caret — picture, chart, diagram or formula fills the window; `Esc` closes (reading view) |
 | `gb` / `⌫` | Back to the document the last link was followed from (reading view) |
 | `gl` | Links overview — jump-list of every link (reading view) |
+| `gs` | Document status — pick from the values its frontmatter declares; `Enter` sets and saves (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
 | `F1` | Full help |
 
