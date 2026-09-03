@@ -50,7 +50,45 @@ where you are without opening the headings overview — and is absent before
 the first heading. When the caret is on a link the breadcrumb turns into
 `→ where ++enter++ goes` (a filename, host, or `#slug`), so you see the
 destination before committing. The review counts disappear as you resolve
-them: an empty whisper is a finished review.
+them: an empty whisper is a finished review. A document that declares a
+status carries it at the end of the line (`… · status: draft`) — see below.
+
+## Document status
+
+Qt's Markdown reader keeps YAML frontmatter off the page, so a document's
+`status:` is invisible while reading it. textli puts it back in the whisper —
+but only for a document that says which values it accepts:
+
+```yaml
+---
+title: The design
+status: draft
+statuses: draft, review, final
+---
+```
+
+The `statuses:` line is the opt-in. A document without it is untouched: no
+status in the whisper, and `gs` says there is none to change. The values may
+be written inline (`draft, review, final`), in flow style
+(`[draft, review, final]`), or as a block list:
+
+```yaml
+statuses:
+  - draft
+  - review
+  - final
+```
+
+`gs` opens a card listing them **in the order the document declares**, opening
+on the one it currently carries (on the first, when `status:` is unset — the
+whisper shows `status: —` until then). `j`/`k` move, a digit picks directly,
+`Enter` writes the value into `status:` and saves the file, `Esc` leaves it
+alone. The `status:` line is added above `statuses:` if the document doesn't
+have one yet; nothing else in the frontmatter is rewritten, and the change is
+one step on the write view's undo stack.
+
+`gs` is a reading-view gesture. In the write view the frontmatter is right
+there on screen — type the value.
 
 ## Typography
 
