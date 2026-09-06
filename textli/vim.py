@@ -178,9 +178,16 @@ class VimKeyHandler:
         """``.`` — replay the last change's keystrokes.
 
         Replaying rather than re-running a recorded edit is what makes an insert
-        leg repeat too (``cwfoo<Esc>`` puts ``foo`` in again). INSERT keys are
-        normally passed back to the widget, which isn't listening during a
-        replay, so printable text is inserted here instead.
+        leg repeat too (``cwfoo<Esc>`` puts ``foo`` in again). An INSERT key the
+        handler doesn't consume is normally left to the widget, which never sees
+        it during a replay — the host's event filter is not in the loop — so the
+        widget's own key handling is invoked here instead. That is the whole
+        default: typing, but also Backspace and Delete, so an insert leg that
+        corrected a typo repeats the corrected text rather than the keystrokes
+        minus their corrections. ``QPlainTextEdit``'s implementation is called
+        rather than ``self._editor``'s, because :class:`InlineVimEditor`
+        overrides ``keyPressEvent`` to route back into this handler, and
+        replaying through that override would recurse.
         """
         if not self._last_change:
             return
@@ -189,9 +196,8 @@ class VimKeyHandler:
             for _ in range(count):
                 for key, text, mods in self._last_change:
                     ev = QKeyEvent(QKeyEvent.Type.KeyPress, key, mods, text)
-                    if not self._dispatch(ev) and self._mode == VimMode.INSERT \
-                            and text and text.isprintable():
-                        self._editor.textCursor().insertText(text)
+                    if not self._dispatch(ev) and self._mode == VimMode.INSERT:
+                        QPlainTextEdit.keyPressEvent(self._editor, ev)
         finally:
             self._replaying = False
             self._set_mode(VimMode.NORMAL)

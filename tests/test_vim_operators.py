@@ -30,6 +30,8 @@ _SPECIAL = {
     "!": Qt.Key.Key_Exclam, "-": Qt.Key.Key_Minus,
 }
 _ESC = "\x1b"
+_BS = "\x08"
+_DEL = "\x7f"
 
 
 def _app():
@@ -39,8 +41,10 @@ def _app():
 def _type(text: str, keys: str, pos: int = 0):
     """Run ``keys`` against ``text`` and return ``(document, caret, mode)``.
 
-    Unconsumed keys are inserted into the widget, which is what the real host
-    does — INSERT-mode typing reaches the editor rather than the handler.
+    An unconsumed key goes to the widget's own handler, which is what the real
+    host does — its event filter returns False and Qt delivers the key to the
+    ``QPlainTextEdit``. So INSERT-mode typing, Backspace and Delete all behave
+    here exactly as they do in the editor.
     """
     _app()
     editor = QPlainTextEdit(text)
@@ -54,6 +58,10 @@ def _type(text: str, keys: str, pos: int = 0):
         mods = Qt.KeyboardModifier.NoModifier
         if ch == _ESC:
             key, ch = Qt.Key.Key_Escape, ""
+        elif ch == _BS:
+            key = Qt.Key.Key_Backspace
+        elif ch == _DEL:
+            key = Qt.Key.Key_Delete
         elif ch.isalpha():
             key = getattr(Qt.Key, f"Key_{ch.upper()}")
             if ch.isupper():
@@ -63,8 +71,8 @@ def _type(text: str, keys: str, pos: int = 0):
         else:
             key = _SPECIAL[ch]
         event = QKeyEvent(QEvent.Type.KeyPress, key, mods, ch)
-        if not handler.handle_key(event) and ch and ch.isprintable():
-            editor.textCursor().insertText(ch)
+        if not handler.handle_key(event):
+            QPlainTextEdit.keyPressEvent(editor, event)
     return editor.toPlainText(), editor.textCursor().position(), handler.mode
 
 
@@ -248,6 +256,14 @@ def test_dot_does_not_repeat_a_motion_or_an_undo():
 
 def test_dot_repeats_a_text_object_change():
     assert _doc("aaa bbb\n", "ciwZ" + _ESC + "w.") == "Z Z\n"
+
+
+def test_dot_repeats_what_the_insert_leg_left_not_every_key_typed():
+    # Backspace and Delete are part of the change. Replaying only the printable
+    # keys would put the corrected-away characters back: `iab<BS>c` leaves "ac",
+    # so `.` has to leave "ac" too, not "abc".
+    assert _doc("one\ntwo\n", "iab" + _BS + "c" + _ESC + "j0.") == "acone\nactwo\n"
+    assert _doc("one\ntwo\n", "ia" + _DEL + _ESC + "j0.") == "ane\nawo\n"
 
 
 # ── VISUAL mode shares the motions and objects ──
