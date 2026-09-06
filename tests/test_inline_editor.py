@@ -91,3 +91,22 @@ def test_autosizes_height_to_content_with_cap():
 def test_markdown_highlighter_attached_only_when_requested():
     assert _editor("# h", markdown=True)._highlighter is not None
     assert _editor("# h", markdown=False)._highlighter is None
+
+
+def test_dot_repeat_replays_an_insert_leg_without_recursing():
+    """`.` replays keys the handler doesn't consume through ``QPlainTextEdit``'s
+    own key handler. This widget's ``keyPressEvent`` routes back into the vim
+    handler, so replaying through *it* would recurse — hence the base-class call
+    in ``_repeat_last_change``. Backspace is in the leg because it is the key
+    the old printable-only replay dropped."""
+    ed = _editor("")
+    _key(ed, Qt.Key.Key_Escape)                      # opens in INSERT -> NORMAL
+    _key(ed, Qt.Key.Key_I, text="i")
+    _key(ed, Qt.Key.Key_A, text="a")
+    _key(ed, Qt.Key.Key_B, text="b")
+    _key(ed, Qt.Key.Key_Backspace, text="\x08")
+    _key(ed, Qt.Key.Key_C, text="c")
+    _key(ed, Qt.Key.Key_Escape)                      # -> NORMAL, caret steps left
+    assert ed.toPlainText() == "ac"
+    _key(ed, Qt.Key.Key_Period, text=".")            # RecursionError if it routes back
+    assert ed.toPlainText() == "aacc"                # `i` at caret 1 puts "ac" in again
