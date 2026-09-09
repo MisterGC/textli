@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Callouts render as tinted, labelled boxes** (#35) — a blockquote opening
+  with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` now
+  reads as a callout instead of an undifferentiated quote: the marker becomes
+  a label on its own line, the run sits on a wash of that kind's accent, and
+  the blockquote's left bar wears the accent too. The colours are existing
+  palette roles, so they follow a theme switch; the wash is block formatting,
+  so it prints. A plain blockquote is untouched, and an unknown `[!X]` falls
+  back to one.
+
 - **`.` repeats the last change** (#71) — NORMAL mode now has vim's repeat
   command. A change is anything that moved the document: an operator and its
   motion or text object (`dw`, `d}`, `ciw`, `daw`), a shorthand (`x`, `r`, `~`,
