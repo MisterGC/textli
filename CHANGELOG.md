@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Callouts render as tinted, labelled boxes** (#35) — a blockquote opening
+  with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` now
+  reads as a callout instead of an undifferentiated quote: the marker becomes
+  a label on its own line, the run sits on a wash of that kind's accent, and
+  the blockquote's left bar wears the accent too. The colours are existing
+  palette roles, so they follow a theme switch; the wash is block formatting,
+  so it prints. A plain blockquote is untouched, and an unknown `[!X]` falls
+  back to one.
+
+- **`.` repeats the last change** (#71) — NORMAL mode now has vim's repeat
+  command. A change is anything that moved the document: an operator and its
+  motion or text object (`dw`, `d}`, `ciw`, `daw`), a shorthand (`x`, `r`, `~`,
+  `J`, `p`), or a whole insert session, so `cwword<Esc>` and `A!<Esc>` repeat
+  with the text they typed. `3.` applies the repeat three times. Motions and
+  undo never become the thing repeated — after `xu`, `.` deletes again rather
+  than undoing again.
+
+  The repeat replays the change's keystrokes, and the insert leg replays
+  through the widget's own key handling, so Backspace and Delete inside it
+  count: `iab<BS>c<Esc>` puts in `ac` on the repeat, not `abc`.
+
 - **The reading view shows a document's frontmatter status, and `gs` changes
   it** (#69) — Qt keeps YAML frontmatter off the rendered page, so a
   document's `status:` was invisible while reading and could only be changed

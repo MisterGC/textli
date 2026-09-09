@@ -69,6 +69,7 @@ complete key reference, or see the
 | `⌘R` | Toggle write ↔ reading view |
 | `Esc` | Step back — leave visual mode, close an overlay, put an expanded image away. Embedded in a host app it also saves & closes (`⇧Esc` cancels); standalone, `⌘Q` quits |
 | `⌘↵` | Full-window width |
+| `F11` / `⌘⇧F` | Fullscreen — textli fills the screen, the OS chrome steps out (persists) |
 | `⌘.` | Section focus (dim all but the current paragraph / section) |
 | `f` | Focus reading mode — caret-locked centre line + gradient spotlight (reading view) |
 | `⌘T` | Typewriter scrolling (the caret line stays put; persists) |
@@ -84,6 +85,7 @@ complete key reference, or see the
 | `gl` | Links overview — jump-list of every link (reading view) |
 | `gs` | Document status — pick from the values its frontmatter declares; `Enter` sets and saves (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
+| `d` `c` `y` | Operators over any motion or text object — `dw`, `d}`, `ci"`, `daw`; `.` repeats the last change |
 | `F1` | Full help |
 
 ## Embed
