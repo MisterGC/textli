@@ -72,6 +72,11 @@ why the suite is fast and why `editor.py` hasn't collapsed under its own weight.
 - **`charts.py`** — a `<!-- chart: bar x=Quarter -->` marker comment opts the
   following pipe table into a rendered chart. The marker is an ordinary HTML
   comment so the source stays portable pandoc Markdown.
+- **`callouts.py`** — the `> [!NOTE]` / `> [!WARNING]` marker at the head of a
+  blockquote's first line (GitHub/Obsidian admonitions). Only the five kinds
+  GitHub defines count; an unknown `[!X]` stays a plain blockquote. The
+  kind → palette-role mapping lives in `theme.py`, the label block and the tint
+  in `editor.py`.
 - **`srcref.py`** — source references in prose (`` `textli/editor.py:2455` ``).
   Deliberately conservative: a chip counts only with a file extension or an
   explicit line anchor, so prose chips like `` `.md` `` aren't followable.

@@ -45,6 +45,11 @@ ZEN_MD_FOCUS_DIM_MAX = 212
 ZEN_MD_FOCUS_CORE_LINES = 12.0
 ZEN_MD_FOCUS_FALLOFF_LINES = 3.5
 ZEN_MD_TABLE_PAD = 6            # cell breathing room (px)
+# Callout boxes (#35): how much of a kind's accent the box wash carries. Held
+# at the strength of the code band's step off the page — a callout is a change
+# of voice inside the prose, not a panel shouting over it, and the label and
+# the accent bar already say which kind it is.
+ZEN_MD_CALLOUT_TINT_ALPHA = 30
 ZEN_MD_MUTED_ALPHA = 100
 ZEN_MD_FONT_SIZE = 16
 ZEN_MD_FONT_SIZE_MIN = 10

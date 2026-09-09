@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from textli import callouts as md_callouts
 from textli import chartrender
 from textli import charts as md_charts
 from textli import codeblocks as md_codeblocks
@@ -121,6 +122,11 @@ _ROLE_REMOVED, _ROLE_ADDED = 0, 1
 # inherit its block format, so without a tag they read as code lines — which
 # a source page's line numbering (#37) would then be off by.
 _PAD_BLOCK_PROP = QTextFormat.Property.UserProperty + 10
+# Block-format property carrying a callout's kind (#35) on every block of its
+# quote run. Set by :meth:`_mark_callouts` — which has to run before anything
+# records document offsets, because it rewrites text — and read back by
+# :meth:`_style_quotes`, which paints. A plain blockquote never carries it.
+_CALLOUT_KIND_PROP = QTextFormat.Property.UserProperty + 11
 
 # A rendered suggestion: its overall [start, end) range, the source ``Mark``, and
 # the rendered sub-ranges of its removed (struck) and added text — either may be
@@ -348,6 +354,10 @@ class _ReadingView(QTextBrowser):
         self._quote_bars: list[tuple[int, int]] = []
         self._quote_bar_color = QColor(theme.ZEN_MD_SYNTAX_COLOR)
         self._quote_bar_color.setAlpha(180)
+        # Callout bars (#35): the same geometry as a quote bar, but one colour
+        # per run — the kind's accent. Kept in its own list so a plain
+        # blockquote's bar stays exactly the entry it always was.
+        self._callout_bars: list[tuple[int, int, QColor]] = []
         # Section focus: everything outside (start_pos, end_pos) is dimmed
         # under a translucent paper wash — nothing in the document mutates,
         # so comments, search hits and marks stay intact beneath it.
@@ -397,6 +407,12 @@ class _ReadingView(QTextBrowser):
     def set_quote_bars(self, bars: list[tuple[int, int]]):
         """Replace the set of blockquote bar ranges; repaint."""
         self._quote_bars = list(bars)
+        self.viewport().update()
+
+    def set_callout_bars(self, bars: list[tuple[int, int, QColor]]):
+        """Replace the set of callout bar ranges (each with its accent);
+        repaint."""
+        self._callout_bars = list(bars)
         self.viewport().update()
 
     def set_focus_span(self, span: tuple[int, int] | None):
@@ -471,6 +487,7 @@ class _ReadingView(QTextBrowser):
             self._paint_code_bands(doc, layout, off)
         super().paintEvent(event)
         if (self._strikes or self._heading_rules or self._quote_bars
+                or self._callout_bars
                 or self._focus_span or self._focus_reading):
             self._paint_overlays(doc, layout, off)
         # Images marked by the caret or the selection get their own pixels
@@ -568,14 +585,18 @@ class _ReadingView(QTextBrowser):
     def _paint_overlays(self, doc, layout, off):
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._quote_bars:
+        # Quote bars and callout bars are the same mark in different ink: the
+        # syntax gray for a plain quote, the kind's accent for a callout (#35).
+        bars = [(first, last, self._quote_bar_color)
+                for first, last in self._quote_bars] + self._callout_bars
+        if bars:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(self._quote_bar_color)
             bar_x = doc.documentMargin() + 10 + off.x()
-            for first, last in self._quote_bars:
+            for first, last, colour in bars:
                 b0, b1 = doc.findBlock(first), doc.findBlock(last)
                 if not (b0.isValid() and b1.isValid()):
                     continue
+                painter.setBrush(colour)
                 top = layout.blockBoundingRect(b0).top() + off.y()
                 bottom = layout.blockBoundingRect(b1).bottom() + off.y()
                 painter.drawRoundedRect(
@@ -2966,6 +2987,9 @@ class ZenMarkdownEditor(QWidget):
         doc = self._rendered.document()
         self._rendered.set_anchor_band(None)   # documents carry no anchor
         doc.setMarkdown(md, _MD_FEATURES)
+        # Rewrites text (a callout's marker becomes its label block), so it
+        # runs before every pass below that records a document offset.
+        self._mark_callouts(doc)
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
         self._apply_chart_images(doc, charts)
@@ -3049,6 +3073,7 @@ class ZenMarkdownEditor(QWidget):
         md, diagrams = self._prepare_grafli(md)
         md, maths = self._prepare_math(md)
         doc.setMarkdown(md, _MD_FEATURES)
+        self._mark_callouts(doc)
         self._apply_doc_base_url(doc)
         self._apply_math_images(doc, maths)
         self._apply_chart_images(doc, charts)
@@ -3109,6 +3134,7 @@ class ZenMarkdownEditor(QWidget):
         self._rendered.set_strikes([])
         self._rendered.set_heading_rules([])
         self._rendered.set_quote_bars([])
+        self._rendered.set_callout_bars([])
         self._rendered_comments = []
         self._rendered_suggestions = []
         self._rendered_math = []
@@ -3565,30 +3591,116 @@ class ZenMarkdownEditor(QWidget):
                 cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
                 cur.mergeCharFormat(mono)
 
-    def _style_quotes(self, doc):
-        """Blockquotes read as a different voice: hint-gray ink, plus a thin
-        vertical bar at the left painted by the view (Qt only indents
-        them). Consecutive quote blocks share one bar."""
-        ink = QTextCharFormat()
-        ink.setForeground(theme.ZEN_HINT_COLOR)
-        bars = []
+    def _quote_runs(self, doc):
+        """The document's blockquote runs, as
+        ``(kind, [(block_pos, text_length), ...])`` — one entry per run of
+        consecutive quoted blocks, ``kind`` empty for a plain quote and the
+        callout's kind (#35) when :meth:`_mark_callouts` tagged it."""
+        runs: list[tuple[str, list[tuple[int, int]]]] = []
         prev_quoted = False
         block = doc.begin()
         while block.isValid():
-            quoted = block.blockFormat().intProperty(
+            bf = block.blockFormat()
+            quoted = bf.intProperty(
                 QTextFormat.Property.BlockQuoteLevel) > 0
             if quoted:
                 if not prev_quoted:
-                    bars.append([block.position(), block.position()])
-                bars[-1][1] = block.position()
-                cur = QTextCursor(doc)
-                cur.setPosition(block.position())
-                cur.setPosition(block.position() + max(0, block.length() - 1),
-                                QTextCursor.MoveMode.KeepAnchor)
-                cur.mergeCharFormat(ink)
+                    runs.append((bf.stringProperty(_CALLOUT_KIND_PROP), []))
+                runs[-1][1].append((block.position(),
+                                    max(0, block.length() - 1)))
             prev_quoted = quoted
             block = block.next()
-        self._rendered.set_quote_bars([tuple(b) for b in bars])
+        return runs
+
+    def _mark_callouts(self, doc):
+        """Turn a ``> [!NOTE]`` blockquote into a labelled block: the marker
+        becomes the kind's label word on a line of its own, and every block of
+        the quote run is tagged with the kind for :meth:`_style_quotes` to
+        paint. An unrecognised ``[!X]`` is left alone (`callouts.py`).
+
+        The label has to be *split out* because Qt folds a callout's
+        ``> [!NOTE]\\n> body`` into a single paragraph — the marker would
+        otherwise open the body's own first line.
+
+        This is the one read-view pass that rewrites text rather than only
+        applying formats, so — like :meth:`_pad_code_blocks` — it must run
+        before any pass that records document offsets, and it walks its runs
+        bottom-up because every edit shifts the positions after it.
+        """
+        hits = []
+        for _kind, blocks in self._quote_runs(doc):
+            first, _length = blocks[0]
+            found = md_callouts.match(doc.findBlock(first).text())
+            if found is not None:
+                hits.append((first, blocks[-1][0], found))
+        if not hits:
+            return
+        with _batched(doc):
+            for first, last, found in reversed(hits):
+                tag = QTextBlockFormat()
+                tag.setProperty(_CALLOUT_KIND_PROP, found.kind)
+                cur = QTextCursor(doc)
+                cur.setPosition(first)
+                cur.setPosition(last, QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeBlockFormat(tag)
+                cur = QTextCursor(doc)
+                cur.setPosition(first)
+                cur.setPosition(first + found.end,
+                                QTextCursor.MoveMode.KeepAnchor)
+                cur.insertText(found.kind)
+                # The split inherits the label block's format, tag included.
+                # A marker with nothing after it needs none — splitting there
+                # would only add an empty line inside the box.
+                if not cur.atBlockEnd():
+                    cur.insertBlock()
+
+    def _style_quotes(self, doc):
+        """Blockquotes read as a different voice: hint-gray ink, plus a thin
+        vertical bar at the left painted by the view (Qt only indents
+        them). Consecutive quote blocks share one bar.
+
+        A callout (#35) keeps that voice and adds to it: the run sits on a
+        wash of its kind's accent, the bar wears the accent instead of the
+        syntax gray, and the label block is inked in it, bold. The gaps
+        *inside* the run are closed so the wash reads as one box rather than
+        as stripes. The wash is a block background, so it is the part that
+        survives ``⌘P``; the bar, like every painted overlay, is screen-only.
+        """
+        ink = QTextCharFormat()
+        ink.setForeground(theme.ZEN_HINT_COLOR)
+        bars, callout_bars = [], []
+        with _batched(doc):
+            for kind, blocks in self._quote_runs(doc):
+                for pos, length in blocks:
+                    cur = QTextCursor(doc)
+                    cur.setPosition(pos)
+                    cur.setPosition(pos + length,
+                                    QTextCursor.MoveMode.KeepAnchor)
+                    cur.mergeCharFormat(ink)
+                span = (blocks[0][0], blocks[-1][0])
+                if not kind:
+                    bars.append(span)
+                    continue
+                callout_bars.append((*span, theme.callout_accent(kind)))
+                box = QTextBlockFormat()
+                box.setBackground(theme.callout_fill(kind))
+                for i, (pos, _length) in enumerate(blocks):
+                    fmt = QTextBlockFormat(box)
+                    if i < len(blocks) - 1:
+                        fmt.setBottomMargin(0)
+                    cur = QTextCursor(doc)
+                    cur.setPosition(pos)
+                    cur.mergeBlockFormat(fmt)
+                label = QTextCharFormat()
+                label.setForeground(theme.callout_accent(kind))
+                label.setFontWeight(QFont.Weight.Bold)
+                pos, length = blocks[0]
+                cur = QTextCursor(doc)
+                cur.setPosition(pos)
+                cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(label)
+        self._rendered.set_quote_bars(bars)
+        self._rendered.set_callout_bars(callout_bars)
 
     def _style_tables(self, doc):
         """Give Markdown tables the paper palette: thin collapsed gridlines in
