@@ -27,6 +27,8 @@ difference between ``w`` and ``W``.
 
 from __future__ import annotations
 
+import re
+
 BLANK, WORD, PUNCT = 0, 1, 2
 
 _BLANKS = " \t"
@@ -450,3 +452,49 @@ def shift_indent(line: str, levels: int, width: int = SHIFT_WIDTH) -> str:
     for ch in line[:len(line) - len(body)]:
         cols = (cols // width + 1) * width if ch == "\t" else cols + 1
     return " " * max(0, cols + levels * width) + body
+
+
+# ── List continuation ──
+
+# A Markdown list item's head: indent, a bullet (``-`` ``*`` ``+``) or a
+# number (``1.`` ``1)``), the blanks after it, and a task box. The marker
+# must be followed by a blank, so ``*emphasis*`` and a ``---`` rule never
+# read as items.
+_LIST_ITEM = re.compile(
+    r"([ \t]*)(?:[-*+]|(\d{1,9})([.)]))([ \t]+)(\[[ xX]\](?:[ \t]+|$))?")
+
+
+def indent_of(line: str) -> str:
+    """The blanks ``line`` starts with — what vim's ``autoindent`` carries
+    onto a new line, and what ``cc`` / ``S`` leave in place."""
+    return line[:len(line) - len(line.lstrip(_BLANKS))]
+
+
+def item_head(line: str) -> str:
+    """The head of the list item on ``line`` — indent, marker, blanks and
+    task box (``"  - [ ] "``) — or ``""`` when ``line`` is no list item."""
+    m = _LIST_ITEM.match(line)
+    return m.group(0) if m else ""
+
+
+def is_empty_item(line: str) -> bool:
+    """True when ``line`` is a list item with nothing after its head — the
+    one Enter ends the list on."""
+    head = item_head(line)
+    return bool(head) and not line[len(head):].strip(_BLANKS)
+
+
+def continue_line(line: str, *, above: bool = False) -> str:
+    """What a line opened next to ``line`` starts with: the next item of its
+    list (``o`` / Enter), or with ``above`` (``O``) one in the item's own
+    place. A number counts on below and stays the same above, since the item
+    it goes in front of keeps its own; a task box always starts unchecked.
+    A line that is no list item hands on just its indent."""
+    m = _LIST_ITEM.match(line)
+    if m is None:
+        return indent_of(line)
+    indent, number, delim, gap, box = m.groups()
+    head = line[len(indent):m.start(4)]
+    if number is not None:
+        head = f"{int(number) + (0 if above else 1)}{delim}"
+    return indent + head + gap + ("[ ] " if box is not None else "")
