@@ -35,8 +35,10 @@ to be learned as separate commands:
   An arrow key moved mid-insert is repeated with the rest (vim would repeat
   only what followed it); comments and `gs` are not vim changes and never
   become the one `.` repeats.
-- **Undo / redo** — `u` undoes the last change, `U` redoes it. Vim's `⌃r`
-  is taken by the reading-view toggle, and vim's line-undo `U` isn't kept.
+- **Undo / redo** — `u` undoes the last change, `U` redoes it. A change is
+  what `.` would repeat, so one `u` takes back `cwword` `Esc` whole, typed text
+  included, and the caret lands where the change began. Vim's `⌃r` is taken
+  by the reading-view toggle, and vim's line-undo `U` isn't kept.
 - **VISUAL** — `v` starts a selection that the motions extend. As in vim it
   includes the character under the caret at both ends, so `vd` deletes one
   character and `vlld` three; `v$` reaches the line break too. `o` swaps the
