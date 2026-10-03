@@ -17,9 +17,12 @@ to be learned as separate commands:
   `0 ^ $`, `{ }` for the blank line before/after, `gg G`, `%` to the matching
   bracket, and `fx` / `tx` / `Fx` / `Tx` to a character on this line (`;` and
   `,` repeat the last one).
-- **Operators** — `d` delete, `c` change, `y` yank. Each one takes any motion
-  above: `de`, `d$`, `dG`, `d}`, `dfx`, `c2w`. Doubling it works on whole
-  lines — `dd`, `cc`, `yy`.
+- **Operators** — `d` delete, `c` change, `y` yank, `>` indent and `<`
+  outdent, `gU` uppercase, `gu` lowercase and `g~` toggle case. Each one takes
+  any motion above: `de`, `d$`, `dG`, `d}`, `dfx`, `c2w`, `>j`, `gUw`. Doubling
+  it works on whole lines — `dd`, `cc`, `yy`, `>>`, `<<`, and `gUU`, `guu`,
+  `g~~` for the case operators. `>` and `<` always shift whole lines, four
+  spaces a level (vim's own Markdown style), and leave blank lines alone.
 - **Text objects** — `i` (inner) or `a` (around) plus `w` / `W` for a word,
   `p` for a paragraph, a quote (`"` `'` `` ` ``), or a bracket (`(` `[` `{`
   `<`). So `diw` takes the word under the caret, `ci"` rewrites a string,
@@ -29,7 +32,12 @@ to be learned as separate commands:
   (replace one character), `~` (toggle case), `J` (join with the next line).
 - **Entering INSERT** — `i a` (before/after the caret), `I A` (line
   start/end), `o O` (new line below/above). `Esc` returns to NORMAL on the
-  last character typed, and never steps back onto the line above.
+  last character typed, and never steps back onto the line above. A count
+  repeats what you typed when you press `Esc`: `3ihi` `Esc` leaves `hihihi`,
+  and `3o` gives each copy a line of its own.
+- **REPLACE** — `R` types over the line, one character per key, until `Esc`;
+  past the line's end it appends, and `⌫` steps back putting the overwritten
+  character back. A count repeats it, like INSERT's.
 - **Repeat** — `.` replays the last change, the text you typed in INSERT
   included: `ciwword` `Esc`, then `.` on the next word rewrites that one too.
   An arrow key moved mid-insert is repeated with the rest (vim would repeat

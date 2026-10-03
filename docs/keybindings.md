@@ -30,9 +30,12 @@ The complete reference — the same content the editor shows on `F1`.
 | `0 ^ $` · `gg G` | Line start / first non-blank / last character · document start / end |
 | `{ }` · `%` | Previous / next blank line · jump to the matching bracket |
 | `fx` · `tx` · `Fx` · `Tx` | Jump to the next `x` / just before it · the same backwards; `;` and `,` repeat the last one |
-| `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
+| `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above; a count repeats what you type (`3ihi` `Esc` → `hihihi`, `3o` opens three lines) |
+| `R` | REPLACE — type over the line until `Esc`; `⌫` puts back what was overwritten; a count repeats it |
 | `Esc` | Back to NORMAL mode, on the last typed character but never onto the line above (also abandons a half-typed operator or count) |
 | `d` `c` `y` + motion | Delete / change / yank over **any** motion — `de`, `d$`, `dG`, `d}`, `dfx`, `c2w` |
+| `>` `<` + motion | Indent / outdent the lines a motion covers by four spaces — `>ip`, `>j`; `>>` `<<` take this line (`3>>` — three lines) |
+| `gU` `gu` `g~` + motion | Uppercase / lowercase / toggle the case of any motion or object — `gUiw`, `guw`, `g~$`; `gUU` `guu` `g~~` take the line |
 | `dd` `cc` `yy` | The line-wise form of each operator (`2dd` — two lines) |
 | `diw` · `ci"` · `da(` | Operate on a text object: `i`/`a` plus `w` `W` `p`, a quote, or a bracket |
 | `x` `X` · `D` `C` · `s` `S` | Delete char forward / back · to line end (and change) · substitute char / line |
