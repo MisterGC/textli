@@ -118,10 +118,43 @@ def test_a_counted_o_numbers_each_copy(tmp_path):
     assert _text(ed) == "1. a\n2. x\n3. x\n4. x\n"
 
 
+# Nothing typed after what o / O / Enter / cc put on the line: Esc takes it
+# back off, the way vim 9.2 does with markdown's settings and autoindent.
+
+def test_o_esc_under_an_indented_line_leaves_it_empty(tmp_path):
+    ed = _editor("  ab\n", tmp_path)
+    _keys(ed, "o" + _ESC)
+    assert _text(ed) == "  ab\n\n"
+    ed = _editor("  ab\n", tmp_path)
+    _keys(ed, "O" + _ESC)
+    assert _text(ed) == "\n  ab\n"
+
+
+def test_o_esc_on_a_list_leaves_the_new_line_empty(tmp_path):
+    ed = _editor("- item\n", tmp_path)
+    _keys(ed, "o" + _ESC)
+    assert _text(ed) == "- item\n\n"
+    ed = _editor("1. a\n", tmp_path)
+    _keys(ed, "o" + _ESC)
+    assert _text(ed) == "1. a\n\n"
+
+
 def test_a_counted_o_with_nothing_typed_opens_empty_lines(tmp_path):
     ed = _editor("- a\n", tmp_path)
     _keys(ed, "3o" + _ESC)
     assert _text(ed) == "- a\n\n\n\n"
+
+
+def test_enter_esc_on_a_list_leaves_the_new_line_empty(tmp_path):
+    ed = _editor("- item\n", tmp_path)
+    _keys(ed, "A" + _CR + _ESC)
+    assert _text(ed) == "- item\n\n"
+
+
+def test_enter_on_an_untouched_indent_empties_that_line(tmp_path):
+    ed = _editor("  ab\n", tmp_path)
+    _keys(ed, "A" + _CR + _CR + "x" + _ESC)
+    assert _text(ed) == "  ab\n\n  x\n"
 
 
 def test_dot_repeats_o_with_the_next_number(tmp_path):
@@ -188,6 +221,15 @@ def test_cc_keeps_the_indent(tmp_path):
     assert ed._editor.textCursor().position() == 2
     _keys(ed, "xy" + _ESC)
     assert _text(ed) == "  xy\n"
+
+
+def test_cc_esc_with_nothing_typed_empties_the_line(tmp_path):
+    ed = _editor("  ab\n", tmp_path)
+    _keys(ed, "cc" + _ESC)
+    assert _text(ed) == "\n"
+    ed = _editor("  ab\n", tmp_path)
+    _keys(ed, "S" + _ESC)
+    assert _text(ed) == "\n"
 
 
 def test_S_keeps_the_indent(tmp_path):
