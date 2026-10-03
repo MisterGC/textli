@@ -39,9 +39,6 @@ class VimMode(enum.Enum):
 
 _MoveOp = QTextCursor.MoveOperation
 _MoveMode = QTextCursor.MoveMode
-# Qt reports line breaks in ``selectedText()`` as U+2029 (paragraph separator);
-# the register keeps real newlines so paste round-trips.
-_PARA_SEP = " "
 
 # The bracket text objects, keyed by every character vim accepts for each pair.
 _BRACKETS = {
@@ -114,6 +111,13 @@ class VimKeyHandler:
         self._revision = 0
         self._repeatable = True
         self._replaying = False
+        # VISUAL keeps vim's own ends: the anchor, and a caret cursor that sits
+        # *on* a character. Qt's selection is exclusive, so it is only the
+        # rendering of the span between them — one character wider than the
+        # caret on a forward selection (see _show_visual).
+        self._visual_anchor = 0
+        self._visual_caret: QTextCursor | None = None
+        self._visual_shown: tuple[int, int] | None = None
         # Block cursor everywhere but INSERT (NORMAL and VISUAL show it); the
         # caret only thins out while typing. Callers that open in INSERT (inline
         # editing) pass ``initial_mode``; the zen editor keeps the NORMAL default.
@@ -333,14 +337,15 @@ class VimKeyHandler:
         isn't one. Shared by NORMAL, operator-pending and VISUAL, so a motion
         added here works in all three at once."""
         text = self._editor.toPlainText()
-        pos = self._editor.textCursor().position()
+        pos = self._caret()
         if ctrl:
             return None
 
         if key == Qt.Key.Key_H and not shift:
             return Motion(max(vm.line_start(text, pos), pos - count))
         if key == Qt.Key.Key_L and not shift:
-            return Motion(min(self._last_column(text, pos), pos + count))
+            return Motion(min(self._last_column(text, pos, past_end=False),
+                              pos + count))
         if key == Qt.Key.Key_J and not shift:
             return Motion(self._line_offset(text, pos, count), linewise=True)
         if key == Qt.Key.Key_K and not shift:
@@ -401,13 +406,15 @@ class VimKeyHandler:
             return Motion(target, linewise=True)
         return None
 
-    def _last_column(self, text: str, pos: int) -> int:
+    def _last_column(self, text: str, pos: int, *, past_end: bool = True) -> int:
         """The furthest a motion may take the caret on this line. NORMAL rests
         *on* the last character, never past it, so ``$x`` deletes that
-        character; an operator (``d$``, ``dl``) or VISUAL still reaches the
-        line's end, which is what lets them take the last character too."""
+        character; an operator (``d$``, ``dl``) still reaches the line's end,
+        which is what lets it take the last character too. VISUAL is inclusive,
+        so ``l`` stops on the last character there as well; only ``$`` goes on
+        to the line break, which vim's ``v$`` selects along with the line."""
         start, end = vm.line_bounds(text, pos)
-        if self._op or self._mode != VimMode.NORMAL:
+        if self._op or (self._mode == VimMode.VISUAL and past_end):
             return end
         return max(start, end - 1)
 
@@ -417,7 +424,7 @@ class VimKeyHandler:
 
     def _find_motion(self, cmd: str, ch: str, count: int) -> Motion | None:
         target = vm.find_char(
-            self._editor.toPlainText(), self._editor.textCursor().position(),
+            self._editor.toPlainText(), self._caret(),
             ch, count, forward=cmd in ("f", "t"), till=cmd in ("t", "T"))
         if target is None:
             return None
@@ -562,7 +569,7 @@ class VimKeyHandler:
 
         # v — enter VISUAL, selecting from here as the motions extend
         if key == Qt.Key.Key_V and not shift and not ctrl:
-            self._set_mode(VimMode.VISUAL)
+            self._enter_visual()
             return True
 
         # u / U — undo / redo, riding the editor's native undo stack
@@ -719,6 +726,66 @@ class VimKeyHandler:
         self._editor.setTextCursor(c)
 
     # ── Visual mode ──
+    #
+    # vim's selection is inclusive: `v` already covers the character under the
+    # caret, and `vlld` takes three characters. Qt's is exclusive, so the
+    # handler keeps vim's two ends itself — ``_visual_anchor`` and the
+    # ``_visual_caret`` cursor — and only renders them as a Qt selection. The
+    # caret is a QTextCursor rather than an int so `j`/`k` keep their column
+    # across a short line, the way NORMAL's do.
+
+    def _caret(self) -> int:
+        """Where motions start from: the vim caret in VISUAL, else Qt's."""
+        if self._mode == VimMode.VISUAL and self._visual_caret is not None:
+            return self._visual_caret.position()
+        return self._editor.textCursor().position()
+
+    def _enter_visual(self):
+        pos = self._editor.textCursor().position()
+        self._visual_anchor = pos
+        self._visual_caret = QTextCursor(self._editor.document())
+        self._visual_caret.setPosition(pos)
+        self._set_mode(VimMode.VISUAL)
+        self._show_visual()
+
+    def _visual_span(self) -> tuple[int, int]:
+        """The selected run as ``[start, end)``: both ends included."""
+        n = len(self._editor.toPlainText())
+        lo = min(self._visual_anchor, self._visual_caret.position())
+        hi = max(self._visual_anchor, self._visual_caret.position())
+        return min(lo, n), min(hi + 1, n)
+
+    def _show_visual(self):
+        """Render the span as Qt's selection, its moving end on the caret's
+        side so the view scrolls to follow the caret."""
+        start, end = self._visual_span()
+        c = self._editor.textCursor()
+        if self._visual_caret.position() >= self._visual_anchor:
+            c.setPosition(start)
+            c.setPosition(end, _MoveMode.KeepAnchor)
+        else:
+            c.setPosition(end)
+            c.setPosition(start, _MoveMode.KeepAnchor)
+        self._editor.setTextCursor(c)
+        self._visual_shown = (c.anchor(), c.position())
+
+    def _sync_visual(self):
+        """Adopt a selection changed behind the handler's back (a mouse drag):
+        its last character becomes the caret, its first the anchor."""
+        c = self._editor.textCursor()
+        if self._visual_caret is None:
+            self._visual_caret = QTextCursor(self._editor.document())
+        elif (c.anchor(), c.position()) == self._visual_shown:
+            return
+        if c.position() > c.anchor():
+            anchor, caret = c.anchor(), c.position() - 1
+        elif c.position() < c.anchor():
+            anchor, caret = c.anchor() - 1, c.position()
+        else:
+            anchor = caret = c.position()
+        self._visual_anchor = anchor
+        self._visual_caret.setPosition(caret)
+        self._show_visual()
 
     def _handle_visual(self, event: QKeyEvent) -> bool:
         key = event.key()
@@ -726,6 +793,7 @@ class VimKeyHandler:
         mods = event.modifiers()
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         ctrl = bool(mods & _CTRL_MOD)
+        self._sync_visual()
 
         if self._pending_find:
             cmd, self._pending_find = self._pending_find, None
@@ -759,6 +827,15 @@ class VimKeyHandler:
             self._clear_visual()
             return True
 
+        # o — swap the ends: the caret jumps to the anchor and motions now
+        # move the other side of the selection.
+        if key == Qt.Key.Key_O and not shift and not ctrl:
+            caret = self._visual_caret.position()
+            self._visual_caret.setPosition(self._visual_anchor)
+            self._visual_anchor = caret
+            self._show_visual()
+            return True
+
         # Multi-key motions and text objects extend the selection too.
         if not ctrl and txt in ("f", "F", "t", "T"):
             self._pending_find = txt
@@ -787,13 +864,15 @@ class VimKeyHandler:
             self._visual_paste()
             return True
 
-        # ── Everything else that resolves is a motion, extending the anchor ──
+        # ── Everything else that resolves is a motion, moving the caret ──
         motion = self._motion_for(key, txt, shift, ctrl, count, has_count)
         if motion is not None:
             if key == Qt.Key.Key_J and not shift:
-                self._move(_MoveOp.Down, count, keep=True)
+                self._visual_caret.movePosition(_MoveOp.Down, n=count)
+                self._show_visual()
             elif key == Qt.Key.Key_K and not shift:
-                self._move(_MoveOp.Up, count, keep=True)
+                self._visual_caret.movePosition(_MoveOp.Up, n=count)
+                self._show_visual()
             else:
                 self._extend_to(motion)
             return True
@@ -801,16 +880,17 @@ class VimKeyHandler:
         return True  # consume anything else while selecting
 
     def _extend_to(self, motion: Motion):
-        c = self._editor.textCursor()
-        target = motion.pos + 1 if motion.inclusive else motion.pos
-        c.setPosition(max(0, min(target, len(self._editor.toPlainText()))),
-                      _MoveMode.KeepAnchor)
-        self._editor.setTextCursor(c)
+        """Move the caret end to where ``motion`` lands. Inclusive or not, the
+        caret sits on that character, which the selection then covers."""
+        n = len(self._editor.toPlainText())
+        self._visual_caret.setPosition(max(0, min(motion.pos, n)))
+        self._show_visual()
 
     def _select_object(self, kind: str, ch: str, count: int):
-        """``viw`` and friends — the object replaces the selection outright."""
+        """``viw`` and friends — the object replaces the selection outright,
+        with the caret on its last character."""
         text = self._editor.toPlainText()
-        pos = self._editor.textCursor().position()
+        pos = self._caret()
         inner = kind == "i"
         span = None
         if ch in ("w", "W"):
@@ -824,10 +904,9 @@ class VimKeyHandler:
             span = vm.paragraph_object(text, pos, inner=inner)
         if span is None:
             return
-        c = self._editor.textCursor()
-        c.setPosition(span[0])
-        c.setPosition(span[1], _MoveMode.KeepAnchor)
-        self._editor.setTextCursor(c)
+        self._visual_anchor = span[0]
+        self._visual_caret.setPosition(max(span[0], span[1] - 1))
+        self._show_visual()
 
     def _visual_paste(self):
         """``p`` over a selection — the register replaces what was selected.
@@ -836,12 +915,14 @@ class VimKeyHandler:
         than being spliced into the middle of one, so ``vip`` then ``p`` swaps
         one paragraph for another cleanly.
         """
-        c = self._editor.textCursor()
-        if not c.hasSelection() or not self._register:
-            self._set_mode(VimMode.NORMAL)
+        start, end = self._visual_span()
+        if end <= start or not self._register:
+            self._clear_visual()
             return
         payload = self._register
-        start = c.selectionStart()
+        c = self._editor.textCursor()
+        c.setPosition(start)
+        c.setPosition(end, _MoveMode.KeepAnchor)
         c.beginEditBlock()
         c.removeSelectedText()
         if self._register_linewise:
@@ -854,32 +935,35 @@ class VimKeyHandler:
         self._set_mode(VimMode.NORMAL)
 
     def _clear_visual(self):
-        c = self._editor.textCursor()
-        c.clearSelection()
-        self._editor.setTextCursor(c)
+        """Back to NORMAL with the caret where VISUAL left it — on a character,
+        so a ``v$`` that reached the line break steps back onto the last one."""
+        caret = self._visual_caret.position()
         self._set_mode(VimMode.NORMAL)
+        self._set_position(
+            min(caret, self._last_column(self._editor.toPlainText(), caret)))
 
     def _visual_op(self, *, to_insert: bool):
         """d/x delete the selection (→ NORMAL); c deletes it then enters INSERT.
         Either way the removed text lands in the register (char-wise)."""
-        c = self._editor.textCursor()
-        if c.hasSelection():
-            self._set_register_text(
-                c.selectedText().replace(_PARA_SEP, "\n"), False)
-            c.removeSelectedText()
-            self._editor.setTextCursor(c)
+        start, end = self._visual_span()
+        if end > start:
+            self._set_register_text(self._editor.toPlainText()[start:end], False)
+            self._remove(start, end)
         self._set_mode(VimMode.INSERT if to_insert else VimMode.NORMAL)
+        if not to_insert:
+            # Like `x`: a deletion that took the line's tail leaves the caret
+            # on the new last character, not past it.
+            self._set_position(
+                min(start, self._last_column(self._editor.toPlainText(), start)))
 
     def _visual_yank(self):
         """y copies the selection (char-wise) and drops back to NORMAL with the
         caret at the selection start, the way vim leaves it."""
-        c = self._editor.textCursor()
-        if c.hasSelection():
-            self._set_register_text(
-                c.selectedText().replace(_PARA_SEP, "\n"), False)
-            c.setPosition(c.selectionStart())
-            self._editor.setTextCursor(c)
+        start, end = self._visual_span()
+        if end > start:
+            self._set_register_text(self._editor.toPlainText()[start:end], False)
         self._set_mode(VimMode.NORMAL)
+        self._set_position(start)
 
     # ── Helpers ──
 

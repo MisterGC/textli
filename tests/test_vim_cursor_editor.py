@@ -115,9 +115,11 @@ def test_d_dollar_and_dl_still_take_the_last_character(tmp_path):
 
 
 def test_visual_dollar_still_selects_the_last_character(tmp_path):
+    # vim's `v$` reaches past the last character onto the line break, so `d`
+    # takes the line together with its newline.
     ed = _editor("abc\n", tmp_path, pos=0)
     _type(ed, "v$d")
-    assert ed._editor.toPlainText() == "\n"
+    assert ed._editor.toPlainText() == ""
 
 
 def test_cw_on_a_one_letter_word_changes_only_that_word(tmp_path):
