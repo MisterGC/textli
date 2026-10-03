@@ -293,11 +293,58 @@ def test_undo_lands_the_caret_where_the_change_began():
 def test_undo_lands_the_caret_where_the_change_began_in_repeated_text():
     # The restored text repeats what follows it, so the first character that
     # differs comes after the change — the caret still goes back to where the
-    # command began.
+    # change began.
     assert _type("- item one\n- item two\n", "ddu")[1] == 0
     assert _type("p\n\n\nq\n", "jddu")[1] == 2
     assert _type("abc\n", "onew" + _ESC + "u") == ("abc\n", 0, VimMode.NORMAL)
     assert _type("aaa", "xu", pos=1)[1] == 1
+
+
+# Each row was checked against vim 9.2: text, caret, keys, then where vim puts
+# the caret after them.
+_UNDO_CARETS = [
+    # A change reaching left of the caret: back to the start of what it took.
+    ("abcdef", 3, "Xu", 2),
+    ("abc def", 5, "dbu", 4),
+    ("abc def", 6, "d0u", 0),
+    ("one two three", 12, "d2bu", 4),
+    ("abc def", 6, "cbX" + _ESC + "u", 4),
+    ("abcdef", 4, "vhhdu", 2),
+    # An insert that moved first: back to where the typing went in.
+    ("abc def", 1, "Afoo" + _ESC + "u", 6),
+    ("abc def", 2, "Ifoo" + _ESC + "u", 0),
+    ("abc def", 2, "afoo" + _ESC + "u", 3),
+    # `o`, `O` and `J` change away from the caret, which stays.
+    ("abc\nxyz\n", 2, "onew" + _ESC + "u", 2),
+    ("abc\nxyz\n", 5, "Onew" + _ESC + "u", 5),
+    ("ab\ncd\nef\n", 1, "Ju", 1),
+    # Line-wise: `dd` and `cc` to the first non-blank, `dj`/`dk` keep the column.
+    ("  abc\ndef\n", 3, "ddu", 2),
+    ("abc\ndef\n", 5, "kddu", 0),
+    ("  abc\n", 4, "ccx" + _ESC + "u", 2),
+    ("  ab\ncd\n", 3, "dju", 3),
+    ("ab\n  cd\nef\n", 5, "dku", 1),
+    # Redo lands in the same place, kept on the line.
+    ("abc def", 4, "dbu0U", 0),
+    ("abcdef", 3, "XuU", 2),
+    ("abc def", 1, "Afoo" + _ESC + "0uU", 7),
+    ("  abc\ndef\n", 3, "dduU", 2),
+]
+
+
+def test_undo_and_redo_land_the_caret_where_vim_does():
+    for text, pos, keys, caret in _UNDO_CARETS:
+        assert _type(text, keys, pos)[1] == caret, (text, pos, keys)
+
+
+def test_two_inserts_in_a_row_are_two_changes():
+    # Qt would fold `bar` into the `foo` typing step, since it carries on
+    # where `foo` ended; vim takes them back one at a time.
+    keys = "ifoo" + _ESC + "abar" + _ESC
+    assert _type("abc def", keys + "u") == ("fooabc def", 3, VimMode.NORMAL)
+    assert _doc("abc def", keys + "uu") == "abc def"
+    assert _doc("abc def", keys + "uuU") == "fooabc def"
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "abar" + _ESC + "u") == "foo bbb"
 
 
 def test_an_undone_change_overwritten_by_new_edits_is_not_replayed():

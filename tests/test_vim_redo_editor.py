@@ -1,7 +1,7 @@
 """Undo and redo in the full editor: `U` redoes in the write view, because ⌃R
 belongs to the reading/write toggle and reaches vim never (#76); one `u` takes
 back one whole change, its insert leg included, and leaves the caret where the
-change began (#79).
+change began (#79) — with the editor's highlighter and filter in the loop.
 
 Driven through ``ZenMarkdownEditor`` rather than ``VimKeyHandler`` alone: keys
 go to the write view as events, so the editor's filter sees them first — the
@@ -96,3 +96,39 @@ def test_dw_then_u_leaves_the_caret_where_the_change_began(tmp_path):
     _send(ed, Qt.Key.Key_U, "u")
     assert ed._editor.toPlainText() == "a b c\n"
     assert ed._editor.textCursor().position() == 0
+
+
+def _keys(ed, keys, pos):
+    cur = ed._editor.textCursor()
+    cur.setPosition(pos)
+    ed._editor.setTextCursor(cur)
+    for ch in keys:
+        if ch == "\x1b":
+            _send(ed, Qt.Key.Key_Escape)
+        elif ch.isupper():
+            _send(ed, getattr(Qt.Key, f"Key_{ch}"), ch,
+                  Qt.KeyboardModifier.ShiftModifier)
+        elif ch.isdigit():
+            _send(ed, getattr(Qt.Key, f"Key_{ch}"), ch)
+        else:
+            _send(ed, getattr(Qt.Key, f"Key_{ch.upper()}"), ch)
+    return ed._editor.toPlainText(), ed._editor.textCursor().position()
+
+
+def test_undo_puts_the_caret_where_a_leftward_change_began(tmp_path):
+    # Carets checked against vim 9.2.
+    for text, pos, keys, want in [
+        ("abcdef\n", 3, "Xu", ("abcdef\n", 2)),
+        ("abc def\n", 5, "dbu", ("abc def\n", 4)),
+        ("abcdef\n", 4, "vhhdu", ("abcdef\n", 2)),
+        ("abc def\n", 1, "Afoo\x1bu", ("abc def\n", 6)),
+        ("# abc def\n", 4, "dbu", ("# abc def\n", 2)),
+    ]:
+        assert _keys(_editor(text, tmp_path), keys, pos) == want, keys
+
+
+def test_two_inserts_in_a_row_undo_one_at_a_time(tmp_path):
+    ed = _editor("abc def\n", tmp_path)
+    assert _keys(ed, "ifoo\x1babar\x1bu", 0) == ("fooabc def\n", 3)
+    _send(ed, Qt.Key.Key_U, "u")
+    assert ed._editor.toPlainText() == "abc def\n"
