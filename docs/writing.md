@@ -37,9 +37,12 @@ to be learned as separate commands:
   become the one `.` repeats.
 - **Undo / redo** — `u` undoes the last change, `U` redoes it. Vim's `⌃r`
   is taken by the reading-view toggle, and vim's line-undo `U` isn't kept.
-- **VISUAL** — `v` starts a selection that the motions extend; text objects
-  work here too (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or
-  replace it with the register.
+- **VISUAL** — `v` starts a selection that the motions extend. As in vim it
+  includes the character under the caret at both ends, so `vd` deletes one
+  character and `vlld` three; `v$` reaches the line break too. `o` swaps the
+  ends, so the motions move the other side. Text objects work here too
+  (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or replace it with
+  the register.
 - **Yank & paste** — `y` with any motion or object fills the register, as does
   every delete, so `dd` then `p` moves a line. `p` / `P` paste after / before,
   on their own lines when the register holds whole ones.
