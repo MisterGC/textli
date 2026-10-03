@@ -111,6 +111,15 @@ class VimKeyHandler:
         self._revision = 0
         self._repeatable = True
         self._replaying = False
+        # `u` / `U` — one per command. Qt records a command as however many
+        # undo steps its edits happened to make (`cwfoo<Esc>` is a removal,
+        # then a typing run), so each command's span of the undo stack is kept
+        # as ``(first, last)`` step indices and undone or redone whole. A span
+        # is only trusted while the stack still holds it (see _prune_undo).
+        self._undo_spans: list[tuple[int, int]] = []
+        self._undo_base = 0
+        self._undoing = False
+        editor.document().undoCommandAdded.connect(self._prune_undo)
         # VISUAL keeps vim's own ends: the anchor, and a caret cursor that sits
         # *on* a character. Qt's selection is exclusive, so it is only the
         # rendering of the span between them — one character wider than the
@@ -156,6 +165,8 @@ class VimKeyHandler:
             self._buffer = []
             self._revision = self._editor.document().revision()
             self._repeatable = True
+            self._undo_base = self._editor.document().availableUndoSteps()
+            self._undoing = False
         self._buffer.append(
             (event.key(), event.text(), event.modifiers()))
         consumed = self._dispatch(event)
@@ -164,7 +175,45 @@ class VimKeyHandler:
                     and self._editor.document().revision() != self._revision):
                 self._last_change = list(self._buffer)
             self._buffer = []
+            steps = self._editor.document().availableUndoSteps()
+            if not self._undoing and steps - self._undo_base > 1:
+                self._undo_spans.append((self._undo_base, steps))
         return consumed
+
+    def _prune_undo(self):
+        """Forget the spans a new undo step has made stale. A step added after
+        an undo drops the redo branch, and loading a file clears the stack;
+        either way a span reaching past the new top would otherwise be replayed
+        over steps that belong to some other edit. The stack grows one step at
+        a time, so checking on every added step catches a span before the stack
+        can climb back to it. (``availableRedoSteps`` can't stand in for this:
+        Qt undercounts it after a merged typing run.)"""
+        top = self._editor.document().availableUndoSteps()
+        self._undo_spans = [s for s in self._undo_spans if s[1] <= top]
+
+    def _undo(self, *, redo: bool):
+        """``u`` / ``U`` — step back (or forward) over one whole command, then
+        put the caret where the change began, the way vim does, rather than
+        where Qt leaves it (after the restored text)."""
+        self._undoing = True
+        at = self._editor.document().availableUndoSteps()
+        steps = 1
+        for first, last in self._undo_spans:
+            if (first if redo else last) == at:
+                steps = last - first
+        before = self._editor.toPlainText()
+        for _ in range(steps):
+            if redo:
+                self._editor.redo()
+            else:
+                self._editor.undo()
+        after = self._editor.toPlainText()
+        if after == before:
+            return
+        pos = 0
+        while pos < min(len(before), len(after)) and before[pos] == after[pos]:
+            pos += 1
+        self._set_position(min(pos, self._last_column(after, pos)))
 
     def _in_command(self) -> bool:
         """True while a command is still being typed — mid-sequence, mid-count,
@@ -572,11 +621,10 @@ class VimKeyHandler:
             self._enter_visual()
             return True
 
-        # u / U — undo / redo, riding the editor's native undo stack
-        # (Qt restores the caret to the change site, the way vim leaves you
-        # there). So a NORMAL-mode edit is reversible without dropping to
-        # INSERT for the platform ⌘Z. Never repeatable: `.` after an undo
-        # repeats the change that was undone, not the undo.
+        # u / U — undo / redo one command, riding the editor's native undo
+        # stack (see _undo). So a NORMAL-mode edit is reversible without
+        # dropping to INSERT for the platform ⌘Z. Never repeatable: `.` after
+        # an undo repeats the change that was undone, not the undo.
         # Redo is `U`, not vim's Ctrl-r: textli's write view gives Ctrl-r to
         # the reading-view toggle before vim sees it, and vim's line-undo `U`
         # isn't kept. Ctrl-r still redoes where no host claims it (the
@@ -584,13 +632,13 @@ class VimKeyHandler:
         if key == Qt.Key.Key_U and not shift and not ctrl:
             self._repeatable = False
             for _ in range(count):
-                self._editor.undo()
+                self._undo(redo=False)
             return True
         if (key == Qt.Key.Key_U and shift and not ctrl) or (
                 key == Qt.Key.Key_R and ctrl):
             self._repeatable = False
             for _ in range(count):
-                self._editor.redo()
+                self._undo(redo=True)
             return True
 
         # ── Enter insert mode ──
