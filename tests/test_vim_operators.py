@@ -278,6 +278,32 @@ def test_visual_paste_replaces_the_selection():
     assert _doc("word here\n", "yiwwviwp") == "word word\n"
 
 
+def test_visual_includes_the_character_under_the_caret():
+    # Qt's selection is exclusive; vim's covers both ends (#77).
+    assert _doc("abcdef", "vd") == "bcdef"
+    assert _doc("abcdef", "vlld") == "def"
+    assert _doc("abc", "vllyP") == "abcabc"
+    assert _doc("abc def", "ved") == " def"
+    assert _doc("abc\ndef", "vjd", 1) == "af"
+
+
+def test_visual_l_stops_on_the_last_character_and_dollar_takes_the_newline():
+    assert _doc("ab\ncd", "vllllld") == "\ncd"
+    assert _doc("ab\ncd", "v$d") == "cd"
+
+
+def test_visual_o_swaps_the_ends():
+    assert _doc("abcdef", "vllohd", 1) == "ef"
+    # Backward, then swapped back: the anchor end stays included.
+    assert _doc("abcdef", "vhhold", 3) == "af"
+
+
+def test_leaving_visual_keeps_the_caret_where_it_was():
+    assert _type("abcdef", "vll" + _ESC) == ("abcdef", 2, VimMode.NORMAL)
+    # `v$` reaches the line break; Esc steps back onto the last character.
+    assert _type("abc\ndef", "v$" + _ESC) == ("abc\ndef", 2, VimMode.NORMAL)
+
+
 # ── The pending-key contract the host relies on ──
 
 def test_has_pending_covers_the_new_sequences():
