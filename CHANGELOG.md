@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Redo is `U` in the write view** (#76) — `⌃r` never reached vim there,
+  because the reading/write toggle takes it first, yet the docs listed it as
+  redo. NORMAL-mode `U` now redoes what `u` undid; vim's line-undo `U` isn't
+  kept. The F1 help and the docs say `U`.
+
 - **PySide6 floor raised to 6.8** — Qt 6.8 is where the Markdown reader parks
   frontmatter in the document's metadata instead of rendering it as prose,
   which is what makes the status readable rather than a block of raw text at

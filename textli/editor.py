@@ -839,7 +839,7 @@ def editor_help_html() -> str:
         ("x X · D C · s S", "Delete char forward/back · to line end (change) · substitute char / line"),
         ("r x · ~ · J", "Replace the char with x · toggle case · join this line with the next"),
         (".", "Repeat the last vim change — including what was typed in INSERT, arrow keys too; comments and gs are never repeated"),
-        ("u · ⌃r", "Undo · redo the last change"),
+        ("u · U", "Undo · redo the last change (⌃R toggles the reading view, so redo is U)"),
         ("v", "VISUAL — extend with the motions, take a text object (viw), then d / y / c / p"),
         ("p / P", "Paste after / before (line-wise when the register holds whole lines)"),
         ("2j · 3dd · 2d3w", "A leading count repeats the next motion or edit, and multiplies across both"),
