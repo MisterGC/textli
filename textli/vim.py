@@ -114,15 +114,22 @@ class VimKeyHandler:
         # `u` / `U` — one per command. Qt records a command as however many
         # undo steps its edits happened to make (`cwfoo<Esc>` is a removal,
         # then a typing run), so each command's span of the undo stack is kept
-        # as ``(first, last, caret)`` — step indices, undone or redone whole,
-        # and where the caret stood when the command began, which is where vim
-        # puts it back. A span is only trusted while the stack still holds it
-        # (see _prune_undo).
+        # as ``(first, last, caret)`` — stack positions, undone or redone
+        # whole, and where the caret stood when the command began, which is
+        # where vim puts it back. A position is ``availableUndoSteps()``, which
+        # is Qt's index into its raw item list rather than a step count: an
+        # edit block advances it by several, and so does the first step after
+        # an undo. So positions are only compared, never counted, and a span is
+        # only trusted while the stack still holds it (see _prune_undo).
+        doc = editor.document()
         self._undo_spans: list[tuple[int, int, int]] = []
         self._undo_base = 0
         self._undo_caret = 0
+        self._undo_depth = doc.availableUndoSteps()
         self._undoing = False
-        editor.document().undoCommandAdded.connect(self._prune_undo)
+        doc.undoCommandAdded.connect(self._prune_undo)
+        doc.contentsChange.connect(self._track_undo_depth)
+        doc.redoAvailable.connect(self._forget_cleared_undo)
         # VISUAL keeps vim's own ends: the anchor, and a caret cursor that sits
         # *on* a character. Qt's selection is exclusive, so it is only the
         # rendering of the span between them — one character wider than the
@@ -186,15 +193,27 @@ class VimKeyHandler:
         return consumed
 
     def _prune_undo(self):
-        """Forget the spans a new undo step has made stale. A step added after
-        an undo drops the redo branch, and loading a file clears the stack;
-        either way a span reaching past the new top would otherwise be replayed
-        over steps that belong to some other edit. The stack grows one step at
-        a time, so checking on every added step catches a span before the stack
-        can climb back to it. (``availableRedoSteps`` can't stand in for this:
-        Qt undercounts it after a merged typing run.)"""
-        top = self._editor.document().availableUndoSteps()
-        self._undo_spans = [s for s in self._undo_spans if s[1] <= top]
+        """Forget the spans a new undo step has made stale. The step replaces
+        everything above the position the stack stood at just before it — the
+        redo branch after an undo — so only a span ending at or below that
+        position still describes its own steps. Qt fires this before the
+        step's ``contentsChange``, so ``_undo_depth`` still holds that
+        position, and it fires for every new step (a typing run merged into
+        the previous one is not new). (``availableRedoSteps`` can't stand in
+        for this: Qt undercounts it after a merged typing run.)"""
+        self._undo_spans = [
+            s for s in self._undo_spans if s[1] <= self._undo_depth]
+
+    def _track_undo_depth(self, *_):
+        """Note where the stack stands after every change — an edit, an undo
+        or redo from any source, a reload — for the next _prune_undo."""
+        self._undo_depth = self._editor.document().availableUndoSteps()
+
+    def _forget_cleared_undo(self, available: bool):
+        """A stack with nothing left to undo or redo has been cleared — a file
+        load or a live reload (``setPlainText``) — so no span describes it."""
+        if not available and not self._editor.document().isUndoAvailable():
+            self._undo_spans = []
 
     def _undo(self, *, redo: bool):
         """``u`` / ``U`` — step back (or forward) over one whole command, then
@@ -203,15 +222,23 @@ class VimKeyHandler:
         isn't a vim command's — a host edit — is taken alone, and Qt's caret
         is kept for it."""
         self._undoing = True
-        at = self._editor.document().availableUndoSteps()
+        doc = self._editor.document()
+        if not (doc.isRedoAvailable() if redo else doc.isUndoAvailable()):
+            return
+        at = doc.availableUndoSteps()
         span = next((s for s in self._undo_spans
                      if (s[0] if redo else s[1]) == at), None)
-        steps = span[1] - span[0] if span else 1
-        for _ in range(steps):
+        target = (span[1] if redo else span[0]) if span else None
+        while True:
+            before = doc.availableUndoSteps()
             if redo:
                 self._editor.redo()
             else:
                 self._editor.undo()
+            now = doc.availableUndoSteps()
+            if (target is None or now == before
+                    or (now >= target if redo else now <= target)):
+                break
         if span is not None:
             text = self._editor.toPlainText()
             caret = min(span[2], len(text))
