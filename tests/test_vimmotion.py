@@ -157,3 +157,33 @@ def test_shift_indent_moves_by_four_columns_and_writes_spaces():
     assert vm.shift_indent("  \ta", -1) == "a"          # ... to the next stop
     assert vm.shift_indent("", 1) == ""
     assert vm.shift_indent("   ", 1) == "   "            # blank lines stay
+
+
+def test_continue_line_carries_the_list_marker_and_indent():
+    assert vm.continue_line("- item") == "- "
+    assert vm.continue_line("  * b") == "  * "
+    assert vm.continue_line("1. a") == "2. "
+    assert vm.continue_line("9) z") == "10) "
+    assert vm.continue_line("    - [x] done") == "    - [ ] "   # unchecked
+    assert vm.continue_line("  ab") == "  "                    # just indent
+    assert vm.continue_line("plain") == ""
+
+
+def test_continue_line_above_keeps_the_items_number():
+    assert vm.continue_line("2. b", above=True) == "2. "
+    assert vm.continue_line("- [ ] x", above=True) == "- [ ] "
+
+
+def test_only_a_marker_followed_by_a_blank_is_a_list_item():
+    assert vm.item_head("*emphasis*") == ""
+    assert vm.item_head("---") == ""
+    assert vm.item_head("-") == ""
+    assert vm.item_head("  - [ ] x") == "  - [ ] "
+
+
+def test_an_item_with_nothing_after_its_head_is_empty():
+    assert vm.is_empty_item("- ")
+    assert vm.is_empty_item("  1. ")
+    assert vm.is_empty_item("- [ ]")
+    assert not vm.is_empty_item("- a")
+    assert not vm.is_empty_item("   ")
