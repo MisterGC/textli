@@ -290,6 +290,16 @@ def test_undo_lands_the_caret_where_the_change_began():
     assert _type("abcdef", "xu", pos=3)[1] == 3
 
 
+def test_undo_lands_the_caret_where_the_change_began_in_repeated_text():
+    # The restored text repeats what follows it, so the first character that
+    # differs comes after the change — the caret still goes back to where the
+    # command began.
+    assert _type("- item one\n- item two\n", "ddu")[1] == 0
+    assert _type("p\n\n\nq\n", "jddu")[1] == 2
+    assert _type("abc\n", "onew" + _ESC + "u") == ("abc\n", 0, VimMode.NORMAL)
+    assert _type("aaa", "xu", pos=1)[1] == 1
+
+
 def test_an_undone_change_overwritten_by_new_edits_is_not_replayed():
     # After `u`, two new deletes reach the stack depth the undone `cw` once
     # spanned; one `u` must still take back only the last `x`.
