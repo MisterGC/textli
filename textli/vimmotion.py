@@ -137,6 +137,24 @@ def word_end(text: str, pos: int, count: int = 1, big: bool = False) -> int:
     return min(pos, max(0, n - 1))
 
 
+def change_word_end(text: str, pos: int, count: int = 1,
+                    big: bool = False) -> int:
+    """Where ``cw`` / ``cW`` stops on a non-blank — the end of the word the caret
+    is *in*, not of the next one. Unlike ``e``, a caret already on a word's last
+    character stays put for the first count, so ``cw`` on the ``a`` of ``a b``
+    changes ``a`` and leaves ``b`` alone. Inclusive, like ``e``."""
+    n = len(text)
+    if n == 0:
+        return 0
+    pos = max(0, min(pos, n - 1))
+    cls = char_class(text[pos], big)
+    if pos + 1 < n and char_class(text[pos + 1], big) == cls:
+        pos = word_end(text, pos, 1, big)
+    if count > 1:
+        pos = word_end(text, pos, count - 1, big)
+    return pos
+
+
 def word_backward(text: str, pos: int, count: int = 1, big: bool = False) -> int:
     """``b`` / ``B`` — the start of the current or previous word."""
     for _ in range(count):

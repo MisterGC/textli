@@ -207,7 +207,10 @@ class VimKeyHandler:
     def _handle_insert(self, event: QKeyEvent) -> bool:
         if event.key() == Qt.Key.Key_Escape:
             self._set_mode(VimMode.NORMAL)
-            self._move(_MoveOp.Left)
+            # Vim steps back onto the last typed character, but never across a
+            # line break: `o<Esc>` stays on the line it opened.
+            if not self._editor.textCursor().atBlockStart():
+                self._move(_MoveOp.Left)
             return True
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             # Insert the newline ourselves rather than passing through. On
@@ -263,9 +266,10 @@ class VimKeyHandler:
             # ``2d3w`` — the operator's count multiplies the motion's.
             count *= self._op_count
 
-        # Esc — abandon a pending operator, else save and close.
+        # Esc — abandon a pending operator or a count, else save and close.
+        # `3<Esc>` only drops the count, the way vim beeps it away.
         if key == Qt.Key.Key_Escape:
-            if self._op:
+            if self._op or has_count:
                 self._abort_operator()
                 return True
             if shift:
@@ -336,7 +340,7 @@ class VimKeyHandler:
         if key == Qt.Key.Key_H and not shift:
             return Motion(max(vm.line_start(text, pos), pos - count))
         if key == Qt.Key.Key_L and not shift:
-            return Motion(min(vm.line_end(text, pos), pos + count))
+            return Motion(min(self._last_column(text, pos), pos + count))
         if key == Qt.Key.Key_J and not shift:
             return Motion(self._line_offset(text, pos, count), linewise=True)
         if key == Qt.Key.Key_K and not shift:
@@ -348,7 +352,7 @@ class VimKeyHandler:
         if key == Qt.Key.Key_W:
             if self._op == "c" and pos < len(text) \
                     and vm.char_class(text[pos]) != vm.BLANK:
-                return Motion(vm.word_end(text, pos, count, shift),
+                return Motion(vm.change_word_end(text, pos, count, shift),
                               inclusive=True)
             target = vm.word_forward(text, pos, count, shift)
             if self._op:
@@ -371,7 +375,7 @@ class VimKeyHandler:
         if txt == "^":
             return Motion(vm.first_non_blank(text, pos))
         if txt == "$":
-            return Motion(vm.line_end(text, pos))
+            return Motion(self._last_column(text, pos))
         if txt == "}":
             # Exclusive, not line-wise: `d}` from the top of a paragraph takes
             # the paragraph and leaves the blank line, which falls out of the
@@ -396,6 +400,16 @@ class VimKeyHandler:
                 else vm.goto_line(text, text.count("\n") + 1)
             return Motion(target, linewise=True)
         return None
+
+    def _last_column(self, text: str, pos: int) -> int:
+        """The furthest a motion may take the caret on this line. NORMAL rests
+        *on* the last character, never past it, so ``$x`` deletes that
+        character; an operator (``d$``, ``dl``) or VISUAL still reaches the
+        line's end, which is what lets them take the last character too."""
+        start, end = vm.line_bounds(text, pos)
+        if self._op or self._mode != VimMode.NORMAL:
+            return end
+        return max(start, end - 1)
 
     def _line_offset(self, text: str, pos: int, delta: int) -> int:
         """A position on the line ``delta`` lines from ``pos`` (clamped)."""
@@ -899,6 +913,10 @@ class VimKeyHandler:
             return
         self._set_register_text(text[pos:end], False)
         self._remove(pos, end)
+        # `x` on the last character leaves the caret on the new last one,
+        # not past the end of the line.
+        text = self._editor.toPlainText()
+        self._set_position(min(pos, self._last_column(text, pos)))
 
     def _delete_chars_back(self, count: int = 1):
         text = self._editor.toPlainText()
