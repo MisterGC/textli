@@ -28,7 +28,8 @@ to be learned as separate commands:
   delete or change), `s` / `S` (substitute a character / the line), `rx`
   (replace one character), `~` (toggle case), `J` (join with the next line).
 - **Entering INSERT** — `i a` (before/after the caret), `I A` (line
-  start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
+  start/end), `o O` (new line below/above). `Esc` returns to NORMAL on the
+  last character typed, and never steps back onto the line above.
 - **Repeat** — `.` replays the last change, the text you typed in INSERT
   included: `ciwword` `Esc`, then `.` on the next word rewrites that one too.
   An arrow key moved mid-insert is repeated with the rest (vim would repeat
@@ -46,8 +47,8 @@ to be learned as separate commands:
   `2dd`, `4x`. An operator and its motion each take one and they multiply, so
   `2d3w` deletes six words.
 
-A half-typed operator is not a trap: `Esc` abandons `d` or `c` without
-touching the text (and without closing the editor).
+A half-typed operator or count is not a trap: `Esc` abandons `d`, `c` or a
+`3` without touching the text (and without closing the editor).
 
 In NORMAL mode `Esc` saves and closes the editor; `⇧Esc` cancels and
 discards pending changes.

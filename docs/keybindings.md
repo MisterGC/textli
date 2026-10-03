@@ -27,11 +27,11 @@ The complete reference — the same content the editor shows on `F1`.
 | --- | --- |
 | `h j k l` | Move left / down / up / right |
 | `w b e` · `W B E` | Next word / previous word / word end · the same by WORD (whitespace-delimited) |
-| `0 ^ $` · `gg G` | Line start / first non-blank / line end · document start / end |
+| `0 ^ $` · `gg G` | Line start / first non-blank / last character · document start / end |
 | `{ }` · `%` | Previous / next blank line · jump to the matching bracket |
 | `fx` · `tx` · `Fx` · `Tx` | Jump to the next `x` / just before it · the same backwards; `;` and `,` repeat the last one |
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
-| `Esc` | Back to NORMAL mode (also abandons a half-typed operator) |
+| `Esc` | Back to NORMAL mode, on the last typed character but never onto the line above (also abandons a half-typed operator or count) |
 | `d` `c` `y` + motion | Delete / change / yank over **any** motion — `de`, `d$`, `dG`, `d}`, `dfx`, `c2w` |
 | `dd` `cc` `yy` | The line-wise form of each operator (`2dd` — two lines) |
 | `diw` · `ci"` · `da(` | Operate on a text object: `i`/`a` plus `w` `W` `p`, a quote, or a bracket |
