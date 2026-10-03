@@ -36,6 +36,14 @@ def test_word_end_is_the_last_character_of_the_word():
     assert vm.word_end(LINE, 0, big=True) == 7  # end of foo(bar)
 
 
+def test_change_word_end_stays_in_the_current_word():
+    assert vm.change_word_end("a b", 0) == 0        # one-letter word
+    assert vm.change_word_end("ab cd", 1) == 1      # already on its end
+    assert vm.change_word_end("abc def", 1) == 2    # mid-word, like `e`
+    assert vm.change_word_end("ab cd", 1, 2) == 4   # a count reaches on
+    assert vm.change_word_end("ab\ncd", 1) == 1     # never across the line
+
+
 def test_word_backward():
     assert vm.word_backward(LINE, 11) == 9
     assert vm.word_backward(LINE, 9) == 7
