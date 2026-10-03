@@ -36,6 +36,7 @@ class VimMode(enum.Enum):
     NORMAL = "NORMAL"
     INSERT = "INSERT"
     VISUAL = "VISUAL"
+    REPLACE = "REPLACE"
 
 
 _MoveOp = QTextCursor.MoveOperation
@@ -103,6 +104,17 @@ class VimKeyHandler:
         self._pending_find: str | None = None     # "f" / "F" / "t" / "T"
         self._pending_object: str | None = None   # "i" / "a"
         self._pending_replace = False
+        # An insert leg entered with a count (``3ihi<Esc>``, ``2oitem<Esc>``,
+        # ``3Rab<Esc>``) is typed once and replayed ``count - 1`` more times on
+        # Esc, each copy after ``_insert_prefix`` — the line break ``o``/``O``
+        # open. ``_insert_keys`` are the leg's keystrokes, replayed rather than
+        # diffed out of the text for the same reason `.` replays (Backspace).
+        self._insert_count = 1
+        self._insert_prefix = ""
+        self._insert_keys: list[tuple] = []
+        # REPLACE — what each typed character overwrote (None where it went
+        # past the line's end or broke the line), so Backspace puts it back.
+        self._replaced: list[str | None] = []
         self._last_find: tuple[str, str] | None = None   # (cmd, char) for ; and ,
         # Single unnamed register shared by yank, delete and paste. A line-wise
         # yank/delete (``yy``/``dd``) pastes on its own line; a char-wise one
@@ -280,7 +292,7 @@ class VimKeyHandler:
         return self._mode != VimMode.NORMAL or self.has_pending
 
     def _dispatch(self, event: QKeyEvent) -> bool:
-        if self._mode == VimMode.INSERT:
+        if self._mode in (VimMode.INSERT, VimMode.REPLACE):
             return self._handle_insert(event)
         if self._mode == VimMode.VISUAL:
             return self._handle_visual(event)
@@ -306,18 +318,44 @@ class VimKeyHandler:
         self._replaying = True
         try:
             for _ in range(count):
-                for key, text, mods in self._last_change:
-                    ev = QKeyEvent(QKeyEvent.Type.KeyPress, key, mods, text)
-                    if not self._dispatch(ev) and self._mode == VimMode.INSERT:
-                        QPlainTextEdit.keyPressEvent(self._editor, ev)
+                self._feed(self._last_change)
         finally:
             self._replaying = False
             self._set_mode(VimMode.NORMAL)
 
+    def _feed(self, keys: list[tuple]):
+        """Dispatch recorded keystrokes, handing a typing key the handler
+        leaves alone to the widget, as the host would (see
+        _repeat_last_change)."""
+        for key, text, mods in keys:
+            ev = QKeyEvent(QKeyEvent.Type.KeyPress, key, mods, text)
+            if not self._dispatch(ev) and self._mode in (
+                    VimMode.INSERT, VimMode.REPLACE):
+                QPlainTextEdit.keyPressEvent(self._editor, ev)
+
     # ── Insert mode ──
 
+    def _begin_insert(self, count: int = 1, *, prefix: str = "",
+                      mode: VimMode = VimMode.INSERT):
+        """Enter INSERT (or REPLACE) for ``i a I A o O R``, whose count repeats
+        what is typed — ``3ihi<Esc>`` leaves ``hihihi``."""
+        self._insert_count = count
+        self._insert_prefix = prefix
+        self._insert_keys = []
+        self._replaced = []
+        self._set_mode(mode)
+
     def _handle_insert(self, event: QKeyEvent) -> bool:
+        """INSERT and REPLACE: REPLACE only differs in what a typed character
+        does to the one under the caret, and in what Backspace puts back."""
         if event.key() == Qt.Key.Key_Escape:
+            keys, count = self._insert_keys, self._insert_count
+            self._insert_keys, self._insert_count = [], 1
+            for _ in range(count - 1):
+                if self._insert_prefix:
+                    self._editor.textCursor().insertText(self._insert_prefix)
+                self._feed(keys)
+            self._insert_keys, self._replaced = [], []
             self._set_mode(VimMode.NORMAL)
             # Vim steps back onto the last typed character, but never across a
             # line break: `o<Esc>` stays on the line it opened.
@@ -330,9 +368,50 @@ class VimKeyHandler:
             # bare Return so the default handler never inserts a line break
             # — only Shift+Return got through. Handling it here makes Enter
             # work everywhere and keeps behaviour identical across platforms.
+            self._insert_keys.append(
+                (event.key(), event.text(), event.modifiers()))
             self._editor.textCursor().insertText("\n")
+            if self._mode == VimMode.REPLACE:
+                self._replaced.append(None)      # vim's R breaks, never eats
             return True
+        self._insert_keys.append((event.key(), event.text(), event.modifiers()))
+        if self._mode == VimMode.REPLACE:
+            return self._replace_key(event)
         return False  # pass through to editor
+
+    def _replace_key(self, event: QKeyEvent) -> bool:
+        """``R`` — a typed character overwrites the one under the caret (past
+        the line's end it is appended), and Backspace steps back restoring
+        what was overwritten, the way vim's REPLACE does. Any other key goes
+        to the widget, and the caret it may move leaves nothing to restore."""
+        c = self._editor.textCursor()
+        if event.key() == Qt.Key.Key_Backspace:
+            if self._replaced:
+                original = self._replaced.pop()
+                c.movePosition(_MoveOp.Left)
+                c.movePosition(_MoveOp.Right, _MoveMode.KeepAnchor)
+                if original is None:
+                    c.removeSelectedText()
+                else:
+                    c.insertText(original)
+                    c.movePosition(_MoveOp.Left)
+            elif not c.atBlockStart():
+                c.movePosition(_MoveOp.Left)
+            self._editor.setTextCursor(c)
+            return True
+        txt = event.text()
+        if not (txt and txt.isprintable()):
+            self._replaced = []
+            return False
+        for ch in txt:
+            original = None
+            if not c.atBlockEnd():
+                c.movePosition(_MoveOp.Right, _MoveMode.KeepAnchor)
+                original = c.selectedText()
+            c.insertText(ch)
+            self._replaced.append(original)
+        self._editor.setTextCursor(c)
+        return True
 
     # ── Normal mode ──
 
@@ -669,6 +748,11 @@ class VimKeyHandler:
             self._set_mode(VimMode.INSERT)       # s is cl
             return True
 
+        # R — REPLACE: type over the line until Esc.
+        if key == Qt.Key.Key_R and shift and not ctrl:
+            self._begin_insert(count, mode=VimMode.REPLACE)
+            return True
+
         # r — replace the character(s) under the caret, staying in NORMAL.
         if key == Qt.Key.Key_R and not shift and not ctrl:
             self._pending_replace = True
@@ -722,20 +806,22 @@ class VimKeyHandler:
             return True
 
         # ── Enter insert mode ──
+        # A count repeats what is typed (see _begin_insert); each copy `o` or
+        # `O` repeats goes on a line of its own.
         if key == Qt.Key.Key_I and not shift:
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_A and not shift:
             self._move(_MoveOp.Right)
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_A and shift:
             self._move(_MoveOp.EndOfBlock)
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_I and shift:
             self._set_position(vm.first_non_blank(text, pos))
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_O and not shift:
             self._mark_change(pos)
@@ -743,7 +829,7 @@ class VimKeyHandler:
             c = self._editor.textCursor()
             c.insertText("\n")
             self._editor.setTextCursor(c)
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count, prefix="\n")
             return True
         if key == Qt.Key.Key_O and shift:
             self._mark_change(pos)
@@ -752,7 +838,7 @@ class VimKeyHandler:
             c.insertText("\n")
             c.movePosition(_MoveOp.Up)
             self._editor.setTextCursor(c)
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count, prefix="\n")
             return True
 
         return True  # consume unknown keys in normal mode
