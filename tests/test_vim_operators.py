@@ -306,6 +306,60 @@ def test_an_undone_change_overwritten_by_new_edits_is_not_replayed():
     assert _doc("aaa bbb", "cwfoo" + _ESC + "uxxu") == "aa bbb"
 
 
+def test_a_change_replacing_an_undone_one_is_undone_and_redone_whole():
+    # The undone `x` ended at the depth the new `cw` starts from; its span must
+    # not stand in for the `cw`'s, or `U` redoes only the removal.
+    assert _doc("aaa bbb", "xu" + "cwfoo" + _ESC + "uU") == "foo bbb"
+    # Nor may it hand its caret to a later change at the same depth.
+    assert _type("aaa bbb ccc", "xwxuu" + "ww" + "xu")[1] == 8
+
+
+def test_undo_takes_back_one_command_built_from_edit_blocks():
+    # `J` is one edit block, which moves Qt's stack position by more than one;
+    # `u` must still stop at the command's start, not count steps past it.
+    assert _doc("a\nb\nc\n", "J.u") == "a b\nc\n"
+    assert _doc("a\nb\nc\n", "J.uu") == "a\nb\nc\n"
+    assert _doc("a\nb\nc\n", "J.uuUU") == "a b c\n"
+
+
+def test_a_reload_forgets_the_undo_history():
+    # textli reloads a file changed on disk with `setPlainText`, which clears
+    # Qt's undo stack; nothing recorded before it may steer `u` or `U` after.
+    _app()
+    editor = QPlainTextEdit("aaa bbb")
+    handler = VimKeyHandler(
+        editor=editor, mode_changed=lambda m: None,
+        close_save=lambda: None, close_cancel=lambda: None)
+
+    def press(ch, mods=Qt.KeyboardModifier.NoModifier):
+        key = (Qt.Key.Key_Escape if ch == _ESC
+               else getattr(Qt.Key, f"Key_{ch.upper()}"))
+        event = QKeyEvent(QEvent.Type.KeyPress, key, mods, ch)
+        if not handler.handle_key(event):
+            QPlainTextEdit.keyPressEvent(editor, event)
+
+    def reload(text, caret):
+        editor.setPlainText(text)
+        cur = editor.textCursor()
+        cur.setPosition(caret)
+        editor.setTextCursor(cur)
+
+    press("x")
+    reload("xxx yyy zzz", 4)
+    press("x")
+    press("u")
+    assert (editor.toPlainText(), editor.textCursor().position()) == (
+        "xxx yyy zzz", 4)
+
+    reload("aaa bbb", 0)
+    for ch in "cwfoo" + _ESC + "u":
+        press(ch)
+    reload("one two three", 8)
+    press("U", Qt.KeyboardModifier.ShiftModifier)
+    assert (editor.toPlainText(), editor.textCursor().position()) == (
+        "one two three", 8)
+
+
 # ── VISUAL mode shares the motions and objects ──
 
 def test_visual_takes_text_objects_and_find_motions():
