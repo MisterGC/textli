@@ -28,6 +28,7 @@ _SPECIAL = {
     "]": Qt.Key.Key_BracketRight, '"': Qt.Key.Key_QuoteDbl,
     "'": Qt.Key.Key_Apostrophe, " ": Qt.Key.Key_Space,
     "!": Qt.Key.Key_Exclam, "-": Qt.Key.Key_Minus,
+    ">": Qt.Key.Key_Greater, "<": Qt.Key.Key_Less,
 }
 _ESC = "\x1b"
 _BS = "\x08"
@@ -149,6 +150,74 @@ def test_doubled_operators_are_linewise():
     assert text == "\nsecond two\nthird three\n\nafter blank\n"
     assert mode == VimMode.INSERT           # cc keeps the line, empties it
     assert _doc(PARAS, "yyp") == "first one\nfirst one\nsecond two\nthird three\n\nafter blank\n"
+
+
+# ── > and < shift lines; gu, gU and g~ change case ──
+
+def test_shift_operators_indent_and_outdent_whole_lines():
+    text, pos, _mode = _type("one\ntwo\n", ">>", 2)
+    assert text == "    one\ntwo\n"
+    assert pos == 4                          # on the first non-blank
+    assert _doc("    one\ntwo\n", "<<") == "one\ntwo\n"
+    assert _doc("a\nb\nc\nd\n", "3>>") == "    a\n    b\n    c\nd\n"
+    assert _doc("a\nb\nc\nd\n", ">j") == "    a\n    b\nc\nd\n"
+    # A motion within the line still shifts the whole line.
+    assert _doc("one two\n", ">w") == "    one two\n"
+
+
+def test_shift_takes_a_text_object_and_skips_blank_lines():
+    assert _doc("a\nb\n\nc\n", ">ip", 2) == "    a\n    b\n\nc\n"
+    assert _doc("a\n\nb\n", ">2j") == "    a\n\n    b\n"
+
+
+def test_outdent_stops_at_column_zero_and_reads_a_tab_as_four_columns():
+    assert _doc("  a\n", "<<") == "a\n"
+    assert _doc("\ta\n", "<<") == "a\n"
+    assert _doc("\t  a\n", "<<") == "  a\n"
+    assert _doc("a\n", "<<") == "a\n"
+
+
+def test_shift_repeats_with_dot_and_leaves_the_register_alone():
+    assert _doc("a\n", ">>.") == "        a\n"
+    assert _doc("a\nb\n", "yy>>jp") == "    a\nb\na\n"
+
+
+def test_case_operators_take_motions_and_text_objects():
+    text, pos, _mode = _type("hello world\n", "gUiw", 2)
+    assert text == "HELLO world\n" and pos == 0
+    assert _doc("HELLO World\n", "guw") == "hello World\n"
+    assert _doc("Hello World\n", "g~w") == "hELLO World\n"
+    assert _doc("one two\n", "gU$") == "ONE TWO\n"
+    assert _doc("one two\n", "gUe", 4) == "one TWO\n"
+
+
+def test_case_operators_take_counts():
+    assert _doc("one two three\n", "gU2w") == "ONE TWO three\n"
+    assert _doc("one two three\n", "2gUw") == "ONE TWO three\n"
+    assert _doc("ab\ncd\nef\n", "2gUU") == "AB\nCD\nef\n"
+
+
+def test_doubled_case_operators_take_the_line():
+    text, pos, _mode = _type("ab cd\nef\n", "gUU", 3)
+    assert text == "AB CD\nef\n" and pos == 0
+    assert _doc("ab\nef\n", "gUgU") == "AB\nef\n"
+    assert _doc("AB\nef\n", "guu") == "ab\nef\n"
+    assert _doc("AB\nef\n", "gugu") == "ab\nef\n"
+    assert _doc("Ab\nef\n", "g~~") == "aB\nef\n"
+    assert _doc("Ab\nef\n", "g~g~") == "aB\nef\n"
+
+
+def test_case_operators_repeat_with_dot_and_undo_whole():
+    assert _doc("ab cd\n", "gUiww.") == "AB CD\n"
+    # gUU changes from the line's start, so that is where `u` lands.
+    text, pos, _mode = _type("ab cd\n", "gUU" + "u", 3)
+    assert text == "ab cd\n" and pos == 0
+
+
+def test_a_mismatched_operator_pair_abandons_both():
+    assert _doc("ab\n", "dgU") == "ab\n"
+    assert _doc("ab\n", "gUd") == "ab\n"
+    assert _doc("ab\n", "><") == "ab\n"
 
 
 # ── Text objects ──
@@ -473,6 +542,17 @@ def test_has_pending_covers_the_new_sequences():
     press(Qt.Key.Key_R, "r")                 # r awaits its replacement char
     assert handler.has_pending
     press(Qt.Key.Key_Z, "z")
+    assert not handler.has_pending
+
+    press(Qt.Key.Key_Greater, ">")           # > awaits its motion
+    assert handler.has_pending
+    press(Qt.Key.Key_Greater, ">")
+    assert not handler.has_pending
+
+    press(Qt.Key.Key_G, "g")                 # gU awaits its motion
+    press(Qt.Key.Key_U, "U")
+    assert handler.has_pending
+    press(Qt.Key.Key_W, "w")
     assert not handler.has_pending
 
     press(Qt.Key.Key_2, "2")                 # a count is building

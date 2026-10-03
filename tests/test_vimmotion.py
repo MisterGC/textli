@@ -146,3 +146,14 @@ def test_paragraph_object():
         "first one\nsecond two"
     assert DOC[slice(*vm.paragraph_object(DOC, 0, inner=False))] == \
         "first one\nsecond two\n"
+
+
+def test_shift_indent_moves_by_four_columns_and_writes_spaces():
+    assert vm.shift_indent("a", 1) == "    a"
+    assert vm.shift_indent("  a", 1) == "      a"
+    assert vm.shift_indent("      a", -1) == "  a"
+    assert vm.shift_indent("  a", -1) == "a"
+    assert vm.shift_indent("\ta", 1) == "        a"     # a tab is four columns
+    assert vm.shift_indent("  \ta", -1) == "a"          # ... to the next stop
+    assert vm.shift_indent("", 1) == ""
+    assert vm.shift_indent("   ", 1) == "   "            # blank lines stay
