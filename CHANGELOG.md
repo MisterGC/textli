@@ -69,6 +69,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is what makes the status readable rather than a block of raw text at
   the top of the page.
 
+### Fixed
+
+- **The caret stays where vim keeps it** (#78) — `Esc` from INSERT at column 0
+  jumped onto the end of the line above, so `o<Esc>` left its new line; it now
+  stays put. In NORMAL, `$` and `l` stop on the last character rather than past
+  it, so `$x` deletes that character. `cw` on a word's last character, or on a
+  one-letter word, changes just that word instead of reaching into the next.
+  `Esc` after a count (`3<Esc>`) drops the count instead of closing the editor.
+
 ## [0.8.0] - 2026-08-15
 
 ### Added
