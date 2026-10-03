@@ -65,7 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged. Enter on an item with nothing after its marker removes the
   marker and ends the list, and Enter inside a line's indent or marker
   breaks the line as it stands. `cc` and `S` empty the line but leave its
-  indent, as vim's `autoindent` does.
+  indent, as vim's `autoindent` does. As in vim, an indent or marker nothing
+  is typed after comes back off on `Esc`, so `o<Esc>` and `cc<Esc>` leave an
+  empty line.
 
 - **The write view scrolls and jumps like vim: `H M L`, `⌃d ⌃u ⌃f ⌃b ⌃e
   ⌃y`, `zz zt zb`** (#82) — until now only the reading view scrolled from the

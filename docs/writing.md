@@ -49,7 +49,8 @@ to be learned as separate commands:
   unchecked `- [ ] `. `O` opens the same item above, number unchanged.
   `Enter` on an item with nothing after its marker removes the marker and
   ends the list. `cc` and `S` keep the line's indent, as vim's `autoindent`
-  does.
+  does — and like vim, `Esc` with nothing typed takes the indent and marker
+  back off, so `cc` `Esc` or `o` `Esc` leaves an empty line.
 - **REPLACE** — `R` types over the line, one character per key, until `Esc`;
   past the line's end it appends, and `⌫` steps back putting the overwritten
   character back. A count repeats it, like INSERT's.
