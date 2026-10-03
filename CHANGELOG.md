@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's undo stack. `gs` is a reading-view gesture: in the write view the
   frontmatter is on screen already.
 
+- **`V` selects whole lines, `gv` reselects, and a selection takes `> < ~ u
+  U J r`** (#81) — `V` is vim's VISUAL LINE: `d`, `y`, `c` and `p` act on the
+  selected lines the way `dd`, `yy` and `cc` do, so `Vjd` deletes two lines and
+  `Vy` then `p` pastes the line below. `v` and `V` switch between the two
+  kinds. `gv` selects the last selection again, following the lines an edit
+  moved (`Vj>` then `gv>` shifts the same two lines twice); inside VISUAL it
+  swaps with the last one. Over either kind, `>` and `<` shift the lines it
+  touches, `~`, `u` and `U` toggle, lower and upper its case, `J` joins its
+  lines and `rx` turns every selected character into `x`.
+
 - **`>` `<` and `gu` `gU` `g~` are operators, `R` replaces, and counts work
   on `i a I A o O`** (#80) — `>` and `<` indent and outdent the lines any
   motion or text object covers (`>>`, `3>>`, `>ip`, `>j`), four spaces a level
