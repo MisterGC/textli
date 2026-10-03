@@ -52,7 +52,13 @@ to be learned as separate commands:
   character and `vlld` three; `v$` reaches the line break too. `o` swaps the
   ends, so the motions move the other side. Text objects work here too
   (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or replace it with
-  the register.
+  the register. `V` selects whole lines instead, so those act line-wise like
+  `dd` and `yy`: `Vjd` deletes two lines, and `Vy` then `p` pastes the line
+  below. `v` and `V` switch between the two, and `gv` selects the last
+  selection again. Over either kind, `>` / `<` shift the lines it touches,
+  `~` / `u` / `U` toggle, lower or upper its case (in NORMAL `u` and `U`
+  stay undo and redo), `J` joins its lines and `rx` turns every selected
+  character into `x`.
 - **Yank & paste** — `y` with any motion or object fills the register, as does
   every delete, so `dd` then `p` moves a line. `p` / `P` paste after / before,
   on their own lines when the register holds whole ones.
