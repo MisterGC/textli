@@ -114,10 +114,13 @@ class VimKeyHandler:
         # `u` / `U` — one per command. Qt records a command as however many
         # undo steps its edits happened to make (`cwfoo<Esc>` is a removal,
         # then a typing run), so each command's span of the undo stack is kept
-        # as ``(first, last)`` step indices and undone or redone whole. A span
-        # is only trusted while the stack still holds it (see _prune_undo).
-        self._undo_spans: list[tuple[int, int]] = []
+        # as ``(first, last, caret)`` — step indices, undone or redone whole,
+        # and where the caret stood when the command began, which is where vim
+        # puts it back. A span is only trusted while the stack still holds it
+        # (see _prune_undo).
+        self._undo_spans: list[tuple[int, int, int]] = []
         self._undo_base = 0
+        self._undo_caret = 0
         self._undoing = False
         editor.document().undoCommandAdded.connect(self._prune_undo)
         # VISUAL keeps vim's own ends: the anchor, and a caret cursor that sits
@@ -166,6 +169,7 @@ class VimKeyHandler:
             self._revision = self._editor.document().revision()
             self._repeatable = True
             self._undo_base = self._editor.document().availableUndoSteps()
+            self._undo_caret = self._editor.textCursor().position()
             self._undoing = False
         self._buffer.append(
             (event.key(), event.text(), event.modifiers()))
@@ -176,8 +180,9 @@ class VimKeyHandler:
                 self._last_change = list(self._buffer)
             self._buffer = []
             steps = self._editor.document().availableUndoSteps()
-            if not self._undoing and steps - self._undo_base > 1:
-                self._undo_spans.append((self._undo_base, steps))
+            if not self._undoing and steps > self._undo_base:
+                self._undo_spans.append(
+                    (self._undo_base, steps, self._undo_caret))
         return consumed
 
     def _prune_undo(self):
@@ -193,27 +198,24 @@ class VimKeyHandler:
 
     def _undo(self, *, redo: bool):
         """``u`` / ``U`` — step back (or forward) over one whole command, then
-        put the caret where the change began, the way vim does, rather than
-        where Qt leaves it (after the restored text)."""
+        put the caret where it stood when the command began, the way vim does,
+        rather than where Qt leaves it (after the restored text). A step that
+        isn't a vim command's — a host edit — is taken alone, and Qt's caret
+        is kept for it."""
         self._undoing = True
         at = self._editor.document().availableUndoSteps()
-        steps = 1
-        for first, last in self._undo_spans:
-            if (first if redo else last) == at:
-                steps = last - first
-        before = self._editor.toPlainText()
+        span = next((s for s in self._undo_spans
+                     if (s[0] if redo else s[1]) == at), None)
+        steps = span[1] - span[0] if span else 1
         for _ in range(steps):
             if redo:
                 self._editor.redo()
             else:
                 self._editor.undo()
-        after = self._editor.toPlainText()
-        if after == before:
-            return
-        pos = 0
-        while pos < min(len(before), len(after)) and before[pos] == after[pos]:
-            pos += 1
-        self._set_position(min(pos, self._last_column(after, pos)))
+        if span is not None:
+            text = self._editor.toPlainText()
+            caret = min(span[2], len(text))
+            self._set_position(min(caret, self._last_column(text, caret)))
 
     def _in_command(self) -> bool:
         """True while a command is still being typed — mid-sequence, mid-count,
