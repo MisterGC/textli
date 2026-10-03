@@ -118,10 +118,10 @@ def test_a_counted_o_numbers_each_copy(tmp_path):
     assert _text(ed) == "1. a\n2. x\n3. x\n4. x\n"
 
 
-def test_a_counted_o_with_nothing_typed_opens_every_item(tmp_path):
+def test_a_counted_o_with_nothing_typed_opens_empty_lines(tmp_path):
     ed = _editor("- a\n", tmp_path)
     _keys(ed, "3o" + _ESC)
-    assert _text(ed) == "- a\n- \n- \n- \n"
+    assert _text(ed) == "- a\n\n\n\n"
 
 
 def test_dot_repeats_o_with_the_next_number(tmp_path):

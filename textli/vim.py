@@ -132,6 +132,10 @@ class VimKeyHandler:
         # diffed out of the text for the same reason `.` replays (Backspace).
         self._insert_count = 1
         self._insert_opens = False
+        # The line ``o``/``O``/Enter/``cc`` started for you — (block number,
+        # the indent and marker put there) — so Esc can take them back off
+        # when nothing was typed after them, as vim does with autoindent.
+        self._auto_head: tuple[int, str] | None = None
         self._insert_keys: list[tuple] = []
         # REPLACE — what each typed character overwrote (None where it went
         # past the line's end or broke the line), so Backspace puts it back.
@@ -383,10 +387,12 @@ class VimKeyHandler:
         if event.key() == Qt.Key.Key_Escape:
             keys, count = self._insert_keys, self._insert_count
             self._insert_keys, self._insert_count = [], 1
+            self._drop_untyped_head()
             for _ in range(count - 1):
                 if self._insert_opens:
                     self._break_line(ends_list=False)
                 self._feed(keys)
+                self._drop_untyped_head()
             self._insert_keys, self._replaced = [], []
             self._set_mode(VimMode.NORMAL)
             # Vim steps back onto the last typed character, but never across a
@@ -432,7 +438,36 @@ class VimKeyHandler:
         elif column < len(vm.item_head(line) or vm.indent_of(line)):
             c.insertText("\n")
         else:
-            c.insertText("\n" + vm.continue_line(line))
+            head = vm.continue_line(line)
+            # An indent nothing was typed after doesn't stay behind on the
+            # line Enter leaves — vim's autoindent takes it back.
+            self._drop_untyped_head()
+            c = self._editor.textCursor()
+            c.insertText("\n" + head)
+            self._editor.setTextCursor(c)
+            self._mark_auto_head(head)
+            return
+        self._editor.setTextCursor(c)
+
+    def _mark_auto_head(self, head: str):
+        """Remember that the caret's line holds just ``head``, put there for
+        you — see _drop_untyped_head."""
+        c = self._editor.textCursor()
+        self._auto_head = (c.blockNumber(), head) if head else None
+
+    def _drop_untyped_head(self):
+        """Empty the caret's line if it still holds only the indent and
+        marker ``o``/``O``/Enter/``cc`` put there. Vim removes an autoindent
+        nothing was typed after on Esc or Enter; with markdown's settings it
+        never adds a marker, so ``o<Esc>`` on ``- item`` leaves an empty
+        line there, and this matches that."""
+        auto, self._auto_head = self._auto_head, None
+        c = self._editor.textCursor()
+        if auto is None or auto != (c.blockNumber(), c.block().text()):
+            return
+        c.movePosition(_MoveOp.StartOfBlock)
+        c.movePosition(_MoveOp.EndOfBlock, _MoveMode.KeepAnchor)
+        c.removeSelectedText()
         self._editor.setTextCursor(c)
 
     def _replace_key(self, event: QKeyEvent) -> bool:
@@ -913,6 +948,7 @@ class VimKeyHandler:
             c = self._editor.textCursor()
             c.insertText("\n" + vm.continue_line(line))
             self._editor.setTextCursor(c)
+            self._mark_auto_head(vm.continue_line(line))
             self._begin_insert(count, opens=True)
             return True
         if key == Qt.Key.Key_O and shift:
@@ -924,6 +960,7 @@ class VimKeyHandler:
             c.insertText(head + "\n")
             c.movePosition(_MoveOp.Left)
             self._editor.setTextCursor(c)
+            self._mark_auto_head(head)
             self._begin_insert(count, opens=True)
             return True
 
@@ -1018,6 +1055,9 @@ class VimKeyHandler:
             if linewise:
                 start = vm.first_non_blank(text, start)
             self._remove(start, end)
+            if linewise:
+                self._mark_auto_head(vm.indent_of(
+                    self._editor.textCursor().block().text()))
             self._set_mode(VimMode.INSERT)
             return
         if linewise:
