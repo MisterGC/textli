@@ -1029,6 +1029,21 @@ class VimKeyHandler:
         self._last_visual = (
             anchor, QTextCursor(self._visual_caret), self._mode)
 
+    def _keep_visual_lines(self, rewrite: Callable[[], None]):
+        """Run ``rewrite`` — an edit that swaps whole runs of text but keeps
+        every line (a shift, a case change, ``r``) — and put the `gv` ends
+        back on their lines and columns afterwards. Left to themselves the
+        cursors would collapse with the text they sat in."""
+        text = self._editor.toPlainText()
+        ends = [(vm.line_number(text, c.position()),
+                 c.position() - vm.line_start(text, c.position()))
+                for c in self._last_visual[:2]]
+        rewrite()
+        text = self._editor.toPlainText()
+        for cursor, (line, column) in zip(self._last_visual[:2], ends):
+            start = vm.line_start(text, vm.goto_line(text, line))
+            cursor.setPosition(min(start + column, vm.line_end(text, start)))
+
     def _reselect_visual(self):
         """``gv`` — select the last selection again, in its own mode. Inside
         VISUAL it swaps the current selection with the last one, as vim's
@@ -1098,6 +1113,13 @@ class VimKeyHandler:
         ctrl = bool(mods & _CTRL_MOD)
         self._sync_visual()
 
+        if self._pending_replace:
+            # `rx` — every selected character becomes x. Anything but a
+            # printable character abandons the r and keeps the selection.
+            self._pending_replace = False
+            if txt and txt.isprintable():
+                self._visual_replace(txt)
+            return True
         if self._pending_find:
             cmd, self._pending_find = self._pending_find, None
             if txt and txt.isprintable():
@@ -1176,6 +1198,23 @@ class VimKeyHandler:
             return True
         if key == Qt.Key.Key_P and not ctrl:
             self._visual_paste()
+            return True
+        if not ctrl and txt in (">", "<"):
+            self._visual_shift(count if txt == ">" else -count)
+            return True
+        # ~ / u / U change the case of the selection. In NORMAL `u` and `U`
+        # are undo and redo; over a selection they are vim's case keys.
+        if txt == "~":
+            self._visual_case(str.swapcase)
+            return True
+        if key == Qt.Key.Key_U and not ctrl:
+            self._visual_case(str.upper if shift else str.lower)
+            return True
+        if key == Qt.Key.Key_J and shift and not ctrl:
+            self._visual_join()
+            return True
+        if key == Qt.Key.Key_R and not shift and not ctrl:
+            self._pending_replace = True
             return True
 
         # ── Everything else that resolves is a motion, moving the caret ──
@@ -1299,6 +1338,54 @@ class VimKeyHandler:
             self._set_register_text(self._editor.toPlainText()[start:end], False)
         self._set_mode(VimMode.NORMAL)
         self._set_position(start)
+
+    def _visual_lines(self) -> tuple[int, int]:
+        """The first and last line number the selection touches."""
+        text = self._editor.toPlainText()
+        lo = min(self._visual_anchor, self._visual_caret.position())
+        hi = max(self._visual_anchor, self._visual_caret.position())
+        return vm.line_number(text, lo), vm.line_number(text, hi)
+
+    def _visual_shift(self, levels: int):
+        """``>`` / ``<`` — shift every line the selection touches, char-wise
+        or not; a count shifts that many levels (``3>``)."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        self._keep_visual_lines(
+            lambda: self._shift_lines(start, max(start + 1, end), levels))
+
+    def _visual_case(self, change: Callable[[str], str]):
+        """``~`` / ``u`` / ``U`` — swap, lower or upper the selection's case,
+        leaving the caret on its start the way vim does."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        text = self._editor.toPlainText()
+        self._keep_visual_lines(
+            lambda: self._replace_span(start, end, change(text[start:end])))
+        self._set_position(min(start, self._last_column(text, start)))
+
+    def _visual_join(self):
+        """``J`` — join the selected lines; a selection within one line joins
+        it with the next, as ``J`` would."""
+        first, last = self._visual_lines()
+        text = self._editor.toPlainText()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        self._set_position(vm.goto_line(text, first))
+        self._join_lines(max(2, last - first + 1))
+
+    def _visual_replace(self, ch: str):
+        """``r`` — overwrite every selected character with ``ch``. Line
+        breaks stay, so a selection across lines keeps its lines."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        text = self._editor.toPlainText()
+        self._keep_visual_lines(lambda: self._replace_span(start, end, "".join(
+            c if c == "\n" else ch for c in text[start:end])))
+        self._set_position(min(start, self._last_column(text, start)))
 
     # ── Helpers ──
 
