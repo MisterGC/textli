@@ -28,7 +28,7 @@ _SPECIAL = {
     "]": Qt.Key.Key_BracketRight, '"': Qt.Key.Key_QuoteDbl,
     "'": Qt.Key.Key_Apostrophe, " ": Qt.Key.Key_Space,
     "!": Qt.Key.Key_Exclam, "-": Qt.Key.Key_Minus,
-    ">": Qt.Key.Key_Greater, "<": Qt.Key.Key_Less,
+    ">": Qt.Key.Key_Greater, "<": Qt.Key.Key_Less, "\n": Qt.Key.Key_Return,
 }
 _ESC = "\x1b"
 _BS = "\x08"
@@ -291,6 +291,78 @@ def test_replace_toggle_case_and_join():
     assert _doc(LINE, "~") == "Foo(bar) baz\n"
     assert _doc("one\n  two\nthree\n", "J") == "one two\nthree\n"
     assert _doc("one\n  two\nthree\n", "3J") == "one two three\n"
+
+
+# ── R overwrites until Esc ──
+
+def test_R_overwrites_one_character_per_key():
+    text, pos, mode = _type("abcdef\n", "Rxy" + _ESC)
+    assert text == "xycdef\n"
+    assert pos == 1 and mode == VimMode.NORMAL     # on the last typed char
+
+
+def test_R_is_its_own_mode_until_esc():
+    assert _type("abc\n", "Rx")[2] == VimMode.REPLACE
+
+
+def test_R_appends_past_the_end_of_the_line():
+    assert _doc("abc\nde\n", "Rwxyz" + _ESC) == "wxyz\nde\n"
+
+
+def test_R_backspace_puts_back_what_was_overwritten():
+    assert _doc("abc\n", "Rxy" + _BS + _BS + _ESC) == "abc\n"
+    assert _doc("abcd\n", "Rxy" + _BS + "q" + _ESC) == "xqcd\n"
+    assert _doc("ab\n", "Rxyz" + _BS + _ESC) == "xy\n"   # appended: removed
+
+
+def test_R_breaks_the_line_on_enter_without_eating_a_character():
+    assert _doc("ab\n", "Rx\ny" + _ESC) == "x\ny\n"
+    assert _doc("ab\n", "Rx\ny" + _BS + _BS + _ESC) == "xb\n"
+
+
+def test_R_takes_a_count_and_repeats_with_dot():
+    assert _doc("abcdefghi\n", "3Rxy" + _ESC) == "xyxyxyghi\n"
+    assert _doc("abcdef\n", "Rxy" + _ESC + "l.") == "xyxyef\n"
+
+
+def test_one_u_undoes_a_whole_replace():
+    text, pos, _mode = _type("abc\n", "Rxy" + _ESC + "u", 1)
+    assert text == "abc\n" and pos == 1
+
+
+# ── A count repeats what i a I A o O type ──
+
+def test_a_count_repeats_an_insert():
+    text, pos, mode = _type("abc\n", "3ihi" + _ESC)
+    assert text == "hihihiabc\n"
+    assert pos == 5 and mode == VimMode.NORMAL
+    assert _doc("ab\n", "3ahi" + _ESC) == "ahihihib\n"
+    assert _doc("  ab\n", "2Ix" + _ESC, 4) == "  xxab\n"
+    assert _doc("ab\n", "2Ax" + _ESC) == "abxx\n"
+
+
+def test_a_count_on_o_and_O_opens_that_many_lines():
+    text, pos, _mode = _type("a\nb\n", "3oz" + _ESC)
+    assert text == "a\nz\nz\nz\nb\n" and pos == 6
+    assert _doc("a\nb\n", "2Oz" + _ESC, 2) == "a\nz\nz\nb\n"
+
+
+def test_a_counted_insert_repeats_what_was_left_after_backspace():
+    assert _doc("\n", "3iab" + _BS + "c" + _ESC) == "acacac\n"
+
+
+def test_a_counted_insert_keeps_its_line_breaks():
+    assert _doc("\n", "2ia\nb" + _ESC) == "a\nba\nb\n"
+
+
+def test_a_counted_insert_repeats_with_dot_and_undoes_whole():
+    assert _doc("\n\n", "2ix" + _ESC + "j.") == "xx\nxx\n"
+    assert _doc("abc\n", "3ihi" + _ESC + "u") == "abc\n"
+
+
+def test_a_change_ignores_the_count_on_its_insert_leg():
+    # `2cw` changes two words; what is typed goes in once.
+    assert _doc("aa bb cc\n", "2cwX" + _ESC) == "X cc\n"
 
 
 # ── `.` repeats the last change ──
