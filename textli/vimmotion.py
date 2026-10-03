@@ -427,3 +427,26 @@ def paragraph_object(text: str, pos: int,
             break
         start = ps
     return start, end
+
+
+# ── Indent ──
+
+# vim's own Markdown style (``g:markdown_recommended_style``): four columns a
+# level, spaces rather than tabs — tabs in Markdown render differently in
+# every tool that reads the file.
+SHIFT_WIDTH = 4
+
+
+def shift_indent(line: str, levels: int, width: int = SHIFT_WIDTH) -> str:
+    """``>>`` / ``<<`` on one line: move its indent ``levels`` shift widths in
+    (positive) or out (negative), never below column 0. The indent is measured
+    in columns, a tab reaching the next multiple of ``width``, and rewritten as
+    spaces, the way vim's ``expandtab`` does. A blank line stays as it is —
+    vim never indents an empty line."""
+    body = line.lstrip(_BLANKS)
+    if not body:
+        return line
+    cols = 0
+    for ch in line[:len(line) - len(body)]:
+        cols = (cols // width + 1) * width if ch == "\t" else cols + 1
+    return " " * max(0, cols + levels * width) + body

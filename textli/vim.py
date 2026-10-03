@@ -1,11 +1,12 @@
 """Vim-style key handler for the zen markdown editor.
 
 Built around vim's own grammar rather than a table of key pairs: a **count**, an
-optional **operator** (``d`` / ``c`` / ``y``), and a **motion** or **text
-object** that says what the operator acts on. So ``d`` composes with every
-motion the handler knows — ``de``, ``d$``, ``dG``, ``d}``, ``dfx``, ``diw`` —
-instead of each pair having to be written out, and a motion added once is
-immediately available to all three operators and to VISUAL mode.
+optional **operator** (``d`` / ``c`` / ``y``, the shifts ``>`` / ``<``, the
+case changes ``gu`` / ``gU`` / ``g~``), and a **motion** or **text object**
+that says what the operator acts on. So ``d`` composes with every motion the
+handler knows — ``de``, ``d$``, ``dG``, ``d}``, ``dfx``, ``diw`` — instead of
+each pair having to be written out, and a motion added once is immediately
+available to every operator and to VISUAL mode.
 
 Where a motion *lands* is pure text logic and lives in :mod:`textli.vimmotion`;
 this module is the Qt half — it reads the caret, asks for a position or a span,
@@ -39,6 +40,10 @@ class VimMode(enum.Enum):
 
 _MoveOp = QTextCursor.MoveOperation
 _MoveMode = QTextCursor.MoveMode
+
+# The case operators. Each takes two keys, so its doubled, line-wise form
+# repeats the second (``gUU``) — or both, ``gUgU``, which _complete_g sees.
+_CASE = {"gu": str.lower, "gU": str.upper, "g~": str.swapcase}
 
 # The bracket text objects, keyed by every character vim accepts for each pair.
 _BRACKETS = {
@@ -386,7 +391,15 @@ class VimKeyHandler:
             return True
 
         # ── Operators ──
-        if not ctrl and txt in ("d", "c", "y") and not shift:
+        if self._op in _CASE and not ctrl and txt == self._op[1]:
+            # gUU / guu / g~~ — the case operators' line-wise form.
+            op, self._op = self._op, None
+            self._operate_lines(op, count)
+            return True
+        # ``>`` / ``<`` are shifted keys on most layouts, so only d/c/y need
+        # Shift to be up.
+        if not ctrl and (txt in (">", "<") or (
+                txt in ("d", "c", "y") and not shift)):
             if self._op == txt:
                 # dd / cc / yy — the doubled operator is the line-wise form.
                 op = self._op
@@ -600,6 +613,19 @@ class VimKeyHandler:
             else:
                 self._set_position(motion.pos)
             return True
+        txt = event.text()
+        if "g" + txt in _CASE:
+            op = "g" + txt
+            if self._op == op:
+                # gUgU / gugu / g~g~ — the long spelling of gUU.
+                self._op = None
+                self._operate_lines(op, count)
+            elif self._op:
+                self._abort_operator()
+            else:
+                self._op = op
+                self._op_count = count
+            return True
         if self._op:
             self._abort_operator()
             return True
@@ -781,7 +807,8 @@ class VimKeyHandler:
         self._operate_span(op, start, end, linewise=False)
 
     def _operate_lines(self, op: str, count: int):
-        """``dd`` / ``cc`` / ``yy`` — the line-wise form of each operator."""
+        """``dd`` / ``cc`` / ``yy`` / ``>>`` / ``gUU`` — the line-wise form of
+        each operator."""
         text = self._editor.toPlainText()
         pos = self._editor.textCursor().position()
         start = vm.line_start(text, pos)
@@ -794,6 +821,16 @@ class VimKeyHandler:
         text = self._editor.toPlainText()
         start = max(0, min(start, len(text)))
         end = max(start, min(end, len(text)))
+        if op in (">", "<"):
+            self._shift_lines(start, end, 1 if op == ">" else -1)
+            return
+        if op in _CASE:
+            # The register is left alone: a case change isn't a yank. The
+            # caret lands on the start of what changed — a line-wise span
+            # starts at column 0.
+            self._replace_span(start, end, _CASE[op](text[start:end]))
+            self._set_position(start)
+            return
         payload = text[start:end]
         if linewise:
             payload += "\n"
@@ -812,6 +849,29 @@ class VimKeyHandler:
             self._remove_lines(start, end)
         else:
             self._remove(start, end)
+
+    def _shift_lines(self, start: int, end: int, levels: int):
+        """``>`` / ``<`` — shift every line the span touches, whatever the
+        motion: shifting is always line-wise in vim, so ``>w`` shifts the line.
+        The caret lands on the first line's first non-blank, as vim's does."""
+        text = self._editor.toPlainText()
+        first = vm.line_start(text, start)
+        last = vm.line_end(text, max(start, end - 1))
+        lines = text[first:last].split("\n")
+        self._replace_span(first, last, "\n".join(
+            vm.shift_indent(line, levels) for line in lines))
+        self._set_position(
+            vm.first_non_blank(self._editor.toPlainText(), first))
+
+    def _replace_span(self, start: int, end: int, new: str):
+        """Swap ``[start, end)`` for ``new`` as one undo step, leaving the
+        text alone when nothing would change."""
+        if self._editor.toPlainText()[start:end] == new:
+            return
+        c = self._editor.textCursor()
+        c.setPosition(start)
+        c.setPosition(end, _MoveMode.KeepAnchor)
+        c.insertText(new)
 
     def _remove(self, start: int, end: int):
         c = self._editor.textCursor()
