@@ -248,10 +248,8 @@ def test_dot_does_not_repeat_a_motion_or_an_undo():
     # A motion changes nothing, so `.` still repeats the delete before it.
     assert _doc("abcdef\n", "xll.") == "bcef\n"
     # And `.` after an undo repeats the change, never the undo itself: the
-    # document ends up shorter, not restored twice over. (Where the caret sits
-    # afterwards is Qt's call — its undo returns it to the end of the text it
-    # put back, rather than to the start of the change as vim would.)
-    assert len(_doc("abcdef\n", "xu.")) == len("abcdef\n") - 1
+    # undo puts the caret back where the `x` was, and `.` takes it again.
+    assert _doc("abcdef\n", "xu.") == "bcdef\n"
 
 
 def test_dot_repeats_a_text_object_change():
@@ -264,6 +262,38 @@ def test_dot_repeats_what_the_insert_leg_left_not_every_key_typed():
     # so `.` has to leave "ac" too, not "abc".
     assert _doc("one\ntwo\n", "iab" + _BS + "c" + _ESC + "j0.") == "acone\nactwo\n"
     assert _doc("one\ntwo\n", "ia" + _DEL + _ESC + "j0.") == "ane\nawo\n"
+
+
+# ── `u` / `U` take one command at a time ──
+
+def test_one_u_undoes_a_change_with_its_insert_leg():
+    # `cw` removes, then typing inserts: two steps on Qt's undo stack, one
+    # change to vim.
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "u") == "aaa bbb"
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "uU") == "foo bbb"
+
+
+def test_u_steps_back_one_command_at_a_time():
+    keys = "cwfoo" + _ESC + "wcwbar" + _ESC
+    assert _doc("aaa bbb", keys) == "foo bar"
+    assert _doc("aaa bbb", keys + "u") == "foo bbb"
+    assert _doc("aaa bbb", keys + "uu") == "aaa bbb"
+    assert _doc("aaa bbb", keys + "uuUU") == "foo bar"
+    # A `.` that replays a change undoes as one change too.
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "w.u") == "foo bbb"
+
+
+def test_undo_lands_the_caret_where_the_change_began():
+    assert _type("a b c", "dwu") == ("a b c", 0, VimMode.NORMAL)
+    assert _type("a b c", "dwuU") == ("b c", 0, VimMode.NORMAL)
+    assert _type("aaa bbb", "cwfoo" + _ESC + "u")[1] == 0
+    assert _type("abcdef", "xu", pos=3)[1] == 3
+
+
+def test_an_undone_change_overwritten_by_new_edits_is_not_replayed():
+    # After `u`, two new deletes reach the stack depth the undone `cw` once
+    # spanned; one `u` must still take back only the last `x`.
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "uxxu") == "aa bbb"
 
 
 # ── VISUAL mode shares the motions and objects ──
