@@ -33,13 +33,14 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌃d ⌃u` · `⌃f ⌃b` · `⌃e ⌃y` | Scroll half a view · a page (less two lines) · one line, down / up; the caret rides along, and stays put on `⌃e ⌃y` until it would leave the view (`3⌃d` sets the half-page to three lines) |
 | `zz zt zb` | Scroll the caret line to the middle / top / bottom of the view (`30zt` — line 30 to the top) |
 | `fx` · `tx` · `Fx` · `Tx` | Jump to the next `x` / just before it · the same backwards; `;` and `,` repeat the last one |
-| `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above; a count repeats what you type (`3ihi` `Esc` → `hihihi`, `3o` opens three lines) |
+| `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above, keeping the indent and continuing a list (`- `, `2. `, `- [ ] `); a count repeats what you type (`3ihi` `Esc` → `hihihi`, `3o` opens three lines) |
+| `Enter` (INSERT) | New line with this line's indent and, on a list item, the next marker; on an empty item it removes the marker and ends the list |
 | `R` | REPLACE — type over the line until `Esc`; `⌫` puts back what was overwritten; a count repeats it |
 | `Esc` | Back to NORMAL mode, on the last typed character but never onto the line above (also abandons a half-typed operator or count) |
 | `d` `c` `y` + motion | Delete / change / yank over **any** motion — `de`, `d$`, `dG`, `d}`, `dfx`, `c2w` |
 | `>` `<` + motion | Indent / outdent the lines a motion covers by four spaces — `>ip`, `>j`; `>>` `<<` take this line (`3>>` — three lines) |
 | `gU` `gu` `g~` + motion | Uppercase / lowercase / toggle the case of any motion or object — `gUiw`, `guw`, `g~$`; `gUU` `guu` `g~~` take the line |
-| `dd` `cc` `yy` | The line-wise form of each operator (`2dd` — two lines) |
+| `dd` `cc` `yy` | The line-wise form of each operator (`2dd` — two lines); `cc` and `S` keep the indent |
 | `diw` · `ci"` · `da(` | Operate on a text object: `i`/`a` plus `w` `W` `p`, a quote, or a bracket |
 | `x` `X` · `D` `C` · `s` `S` | Delete char forward / back · to line end (and change) · substitute char / line |
 | `rx` · `~` · `J` | Replace the char with `x` · toggle case · join this line with the next |

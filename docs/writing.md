@@ -43,6 +43,13 @@ to be learned as separate commands:
   last character typed, and never steps back onto the line above. A count
   repeats what you typed when you press `Esc`: `3ihi` `Esc` leaves `hihihi`,
   and `3o` gives each copy a line of its own.
+- **Lists and indent** — `o`, `O` and `Enter` (in INSERT) start the new line
+  the way the caret's line starts: its indent, and on a list item the next
+  item's marker — `- ` stays `- `, `1. a` opens `2. `, a task `- [x]` opens an
+  unchecked `- [ ] `. `O` opens the same item above, number unchanged.
+  `Enter` on an item with nothing after its marker removes the marker and
+  ends the list. `cc` and `S` keep the line's indent, as vim's `autoindent`
+  does.
 - **REPLACE** — `R` types over the line, one character per key, until `Esc`;
   past the line's end it appends, and `⌫` steps back putting the overwritten
   character back. A count repeats it, like INSERT's.
