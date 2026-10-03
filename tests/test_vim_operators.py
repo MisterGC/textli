@@ -586,6 +586,87 @@ def test_leaving_visual_keeps_the_caret_where_it_was():
     assert _type("abc\ndef", "v$" + _ESC) == ("abc\ndef", 2, VimMode.NORMAL)
 
 
+# ── VISUAL LINE and gv (#81) ──
+
+def test_V_deletes_yanks_and_changes_whole_lines():
+    assert _type("a\nb\nc\n", "Vd", 0) == ("b\nc\n", 0, VimMode.NORMAL)
+    assert _doc("a\nb\nc\n", "Vjd") == "c\n"
+    assert _doc("ab\ncd\nef", "Vkd", 4) == "ef"
+    assert _type("ab\ncd\n", "Vjc") == ("\n", 0, VimMode.INSERT)
+
+
+def test_V_yank_pastes_on_a_line_of_its_own():
+    assert _doc("a\nb\nc\n", "Vyp") == "a\na\nb\nc\n"
+    assert _doc("a\nb\nc", "VjyGp") == "a\nb\nc\na\nb"
+    assert _doc("one\n\ntwo", "jVyP") == "one\n\n\ntwo"     # a blank line too
+
+
+def test_V_paste_replaces_the_lines():
+    assert _doc("x\ny\nz", "yyjVjp") == "x\nx"
+    assert _doc("x\n\nz", "yyjVp") == "x\nx\nz"          # a blank line too
+
+
+def test_v_and_V_switch_between_char_and_line_wise():
+    assert _doc("ab\ncd", "vVd") == "cd"
+    assert _doc("ab\ncd", "Vvd") == "b\ncd"
+    assert _type("ab\ncd", "V" + _ESC) == ("ab\ncd", 0, VimMode.NORMAL)
+    assert _type("ab\ncd", "VV") == ("ab\ncd", 0, VimMode.NORMAL)
+
+
+def test_gv_reselects_the_last_selection():
+    assert _doc("abc def", "viw" + _ESC + "0gvd", 4) == "abc "
+    assert _doc("a\nb\nc\nd", "Vj" + _ESC + "Ggvd") == "c\nd"
+    # In VISUAL it swaps with the last selection, keeping each one's mode.
+    assert _doc("a\nb\nc", "Vj" + _ESC + "Gvgvd") == "c"
+    assert _doc("abc", "gvd") == "abc"                      # none yet
+
+
+def test_gv_follows_the_lines_an_edit_moved():
+    assert _doc("a\nb\nc", "Vj>gv>") == "        a\n        b\nc"
+    assert _doc("x\na\nb", "jVj" + _ESC + "ggddgvd") == ""
+    assert _doc("abc def", "veUgvd") == " def"
+
+
+# ── > < ~ u U J r over a selection (#81) ──
+
+def test_visual_shift_takes_every_line_touched():
+    assert _doc("a\nb\nc", "vj>") == "    a\n    b\nc"
+    assert _doc("a\nb\nc", "Vj>") == "    a\n    b\nc"
+    assert _type("a\nb", "V2>") == ("        a\nb", 8, VimMode.NORMAL)
+    assert _doc("    a\n    b", "vl<", 4) == "a\n    b"
+    assert _doc("    a\n    b", "Vj<") == "a\nb"
+
+
+def test_visual_case_keys():
+    assert _type("abc def", "vl~") == ("ABc def", 0, VimMode.NORMAL)
+    assert _doc("abc def", "veU") == "ABC def"
+    assert _doc("ABC DEF", "veu") == "abc DEF"
+    assert _doc("abc\ndef", "Vj~") == "ABC\nDEF"
+    assert _doc("abc\nDEF", "VjU") == "ABC\nDEF"
+    assert _type("ABC\nDEF", "Vu", 5) == ("ABC\ndef", 4, VimMode.NORMAL)
+
+
+def test_visual_u_and_U_are_case_not_undo():
+    # Back in NORMAL `u` undoes the case change whole.
+    assert _doc("abc", "vlUu") == "abc"
+    assert _doc("abc", "vlUuU") == "ABc"
+
+
+def test_visual_J_joins_the_selected_lines():
+    assert _doc("a\nb\nc", "VJ") == "a b\nc"             # one line joins two
+    assert _doc("a\n  b\nc", "VjJ") == "a b\nc"
+    assert _doc("a\nb\nc\nd", "vjjJ") == "a b c\nd"
+
+
+def test_visual_r_replaces_every_selected_character():
+    assert _type("abcd", "vlrx", 1) == ("axxd", 1, VimMode.NORMAL)
+    assert _doc("ab\ncd", "vjrx") == "xx\nxd"              # line breaks stay
+    assert _doc("ab\ncd\nef", "Vjrx") == "xx\nxx\nef"
+    # Esc abandons the r and keeps the selection.
+    assert _type("abc", "vlr" + _ESC)[0::2] == ("abc", VimMode.VISUAL)
+    assert _doc("abc", "vlr" + _ESC + "d") == "c"
+
+
 # ── The pending-key contract the host relies on ──
 
 def test_has_pending_covers_the_new_sequences():
