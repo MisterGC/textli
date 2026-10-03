@@ -115,8 +115,8 @@ class VimKeyHandler:
         # undo steps its edits happened to make (`cwfoo<Esc>` is a removal,
         # then a typing run), so each command's span of the undo stack is kept
         # as ``(first, last, caret)`` — stack positions, undone or redone
-        # whole, and where the caret stood when the command began, which is
-        # where vim puts it back. A position is ``availableUndoSteps()``, which
+        # whole, and where the change began (see _mark_change), which is where
+        # vim puts the caret back. A position is ``availableUndoSteps()``, which
         # is Qt's index into its raw item list rather than a step count: an
         # edit block advances it by several, and so does the first step after
         # an undo. So positions are only compared, never counted, and a span is
@@ -124,7 +124,7 @@ class VimKeyHandler:
         doc = editor.document()
         self._undo_spans: list[tuple[int, int, int]] = []
         self._undo_base = 0
-        self._undo_caret = 0
+        self._undo_caret: int | None = None
         self._undo_depth = doc.availableUndoSteps()
         self._undoing = False
         doc.undoCommandAdded.connect(self._prune_undo)
@@ -175,9 +175,17 @@ class VimKeyHandler:
             self._buffer = []
             self._revision = self._editor.document().revision()
             self._repeatable = True
-            self._undo_base = self._editor.document().availableUndoSteps()
-            self._undo_caret = self._editor.textCursor().position()
+            doc = self._editor.document()
+            self._undo_base = doc.availableUndoSteps()
+            self._undo_caret = None
             self._undoing = False
+            # Qt folds a typing run into the step before it when it carries
+            # on where that one ended — `ifoo<Esc>` then `abar<Esc>` would
+            # be one step, and one `u` would take back two changes. Qt only
+            # merges into a modified document, so clearing the flag here
+            # starts every command on a fresh step. (textli never reads the
+            # flag; autosave compares against the file on disk.)
+            doc.setModified(False)
         self._buffer.append(
             (event.key(), event.text(), event.modifiers()))
         consumed = self._dispatch(event)
@@ -188,9 +196,24 @@ class VimKeyHandler:
             self._buffer = []
             steps = self._editor.document().availableUndoSteps()
             if not self._undoing and steps > self._undo_base:
-                self._undo_spans.append(
-                    (self._undo_base, steps, self._undo_caret))
+                caret = self._undo_caret
+                self._undo_spans.append((
+                    self._undo_base, steps,
+                    self._editor.textCursor().position()
+                    if caret is None else caret))
         return consumed
+
+    def _mark_change(self, pos: int):
+        """Record where the command in flight began changing the document —
+        where vim's cursor stood when it saved the change for undo, and so
+        where `u` and `U` put the caret. Only the first mark counts. Edits
+        mark themselves (see _track_undo_depth): an operator's edit starts at
+        its span's start, an insert at the caret. A command that edits away
+        from where vim's cursor stands marks first — `o`, `O` and `J` keep
+        the caret where it was, `dd` and `cc` go to the first non-blank, and
+        `dj`/`dk` keep the caret's column on the span's first line."""
+        if self._undo_caret is None:
+            self._undo_caret = pos
 
     def _prune_undo(self):
         """Forget the spans a new undo step has made stale. The step replaces
@@ -204,10 +227,12 @@ class VimKeyHandler:
         self._undo_spans = [
             s for s in self._undo_spans if s[1] <= self._undo_depth]
 
-    def _track_undo_depth(self, *_):
+    def _track_undo_depth(self, position: int, *_):
         """Note where the stack stands after every change — an edit, an undo
-        or redo from any source, a reload — for the next _prune_undo."""
+        or redo from any source, a reload — for the next _prune_undo, and
+        mark where the command in flight first changed the document."""
         self._undo_depth = self._editor.document().availableUndoSteps()
+        self._mark_change(position)
 
     def _forget_cleared_undo(self, available: bool):
         """A stack with nothing left to undo or redo has been cleared — a file
@@ -217,8 +242,8 @@ class VimKeyHandler:
 
     def _undo(self, *, redo: bool):
         """``u`` / ``U`` — step back (or forward) over one whole command, then
-        put the caret where it stood when the command began, the way vim does,
-        rather than where Qt leaves it (after the restored text). A step that
+        put the caret where the change began, the way vim does, rather than
+        where Qt leaves it (after the restored text). A step that
         isn't a vim command's — a host edit — is taken alone, and Qt's caret
         is kept for it."""
         self._undoing = True
@@ -687,6 +712,7 @@ class VimKeyHandler:
             self._set_mode(VimMode.INSERT)
             return True
         if key == Qt.Key.Key_O and not shift:
+            self._mark_change(pos)
             self._move(_MoveOp.EndOfBlock)
             c = self._editor.textCursor()
             c.insertText("\n")
@@ -694,6 +720,7 @@ class VimKeyHandler:
             self._set_mode(VimMode.INSERT)
             return True
         if key == Qt.Key.Key_O and shift:
+            self._mark_change(pos)
             self._move(_MoveOp.StartOfBlock)
             c = self._editor.textCursor()
             c.insertText("\n")
@@ -744,9 +771,12 @@ class VimKeyHandler:
                 if start <= vm.first_non_blank(text, start):
                     linewise = True
         if linewise:
+            first = vm.line_start(text, start)
+            column = pos - vm.line_start(text, pos)
+            if op != "y":
+                self._mark_change(min(first + column, vm.line_end(text, first)))
             self._operate_span(
-                op, vm.line_start(text, start), vm.line_end(text, end),
-                linewise=True)
+                op, first, vm.line_end(text, end), linewise=True)
             return
         self._operate_span(op, start, end, linewise=False)
 
@@ -756,6 +786,8 @@ class VimKeyHandler:
         pos = self._editor.textCursor().position()
         start = vm.line_start(text, pos)
         end = vm.line_end(text, self._line_offset(text, pos, count - 1))
+        if op != "y":
+            self._mark_change(vm.first_non_blank(text, start))
         self._operate_span(op, start, end, linewise=True)
 
     def _operate_span(self, op: str, start: int, end: int, *, linewise: bool):
@@ -1119,6 +1151,7 @@ class VimKeyHandler:
         """``J`` — pull the next line onto this one, collapsing the indent to a
         single space the way vim does. ``3J`` joins three lines."""
         c = self._editor.textCursor()
+        self._mark_change(c.position())
         c.beginEditBlock()
         for _ in range(max(1, count - 1)):
             text = self._editor.toPlainText()
