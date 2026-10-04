@@ -31,6 +31,9 @@ to be learned as separate commands:
   start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
 - **Repeat** — `.` replays the last change, the text you typed in INSERT
   included: `ciwword` `Esc`, then `.` on the next word rewrites that one too.
+  An arrow key moved mid-insert is repeated with the rest (vim would repeat
+  only what followed it); comments and `gs` are not vim changes and never
+  become the one `.` repeats.
 - **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
 - **VISUAL** — `v` starts a selection that the motions extend; text objects
   work here too (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or

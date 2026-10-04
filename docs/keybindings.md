@@ -37,7 +37,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `diw` · `ci"` · `da(` | Operate on a text object: `i`/`a` plus `w` `W` `p`, a quote, or a bracket |
 | `x` `X` · `D` `C` · `s` `S` | Delete char forward / back · to line end (and change) · substitute char / line |
 | `rx` · `~` · `J` | Replace the char with `x` · toggle case · join this line with the next |
-| `.` | Repeat the last change — including whatever was typed in INSERT |
+| `.` | Repeat the last vim change — including whatever was typed in INSERT, arrow keys too (unlike vim, an arrow doesn't split the change); comments and `gs` are never repeated |
 | `u` · `⌃r` | Undo · redo the last change |
 | `v` | VISUAL — extend with the motions, take a text object (`viw`), then `d` / `y` / `c` / `p` |
 | `p` / `P` | Paste after / before (line-wise when the register holds whole lines) |
