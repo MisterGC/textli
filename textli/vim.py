@@ -126,11 +126,16 @@ class VimKeyHandler:
         self._scroll_lines = 0
         # An insert leg entered with a count (``3ihi<Esc>``, ``2oitem<Esc>``,
         # ``3Rab<Esc>``) is typed once and replayed ``count - 1`` more times on
-        # Esc, each copy after ``_insert_prefix`` — the line break ``o``/``O``
-        # open. ``_insert_keys`` are the leg's keystrokes, replayed rather than
+        # Esc, each copy on a line of its own when ``_insert_opens`` — the
+        # line ``o``/``O`` open, continuing the list the way they do.
+        # ``_insert_keys`` are the leg's keystrokes, replayed rather than
         # diffed out of the text for the same reason `.` replays (Backspace).
         self._insert_count = 1
-        self._insert_prefix = ""
+        self._insert_opens = False
+        # The line ``o``/``O``/Enter/``cc`` started for you — (block number,
+        # the indent and marker put there) — so Esc can take them back off
+        # when nothing was typed after them, as vim does with autoindent.
+        self._auto_head: tuple[int, str] | None = None
         self._insert_keys: list[tuple] = []
         # REPLACE — what each typed character overwrote (None where it went
         # past the line's end or broke the line), so Backspace puts it back.
@@ -366,12 +371,12 @@ class VimKeyHandler:
 
     # ── Insert mode ──
 
-    def _begin_insert(self, count: int = 1, *, prefix: str = "",
+    def _begin_insert(self, count: int = 1, *, opens: bool = False,
                       mode: VimMode = VimMode.INSERT):
         """Enter INSERT (or REPLACE) for ``i a I A o O R``, whose count repeats
         what is typed — ``3ihi<Esc>`` leaves ``hihihi``."""
         self._insert_count = count
-        self._insert_prefix = prefix
+        self._insert_opens = opens
         self._insert_keys = []
         self._replaced = []
         self._set_mode(mode)
@@ -382,10 +387,12 @@ class VimKeyHandler:
         if event.key() == Qt.Key.Key_Escape:
             keys, count = self._insert_keys, self._insert_count
             self._insert_keys, self._insert_count = [], 1
+            self._drop_untyped_head()
             for _ in range(count - 1):
-                if self._insert_prefix:
-                    self._editor.textCursor().insertText(self._insert_prefix)
+                if self._insert_opens:
+                    self._break_line(ends_list=False)
                 self._feed(keys)
+                self._drop_untyped_head()
             self._insert_keys, self._replaced = [], []
             self._set_mode(VimMode.NORMAL)
             # Vim steps back onto the last typed character, but never across a
@@ -401,14 +408,67 @@ class VimKeyHandler:
             # work everywhere and keeps behaviour identical across platforms.
             self._insert_keys.append(
                 (event.key(), event.text(), event.modifiers()))
-            self._editor.textCursor().insertText("\n")
             if self._mode == VimMode.REPLACE:
+                self._editor.textCursor().insertText("\n")
                 self._replaced.append(None)      # vim's R breaks, never eats
+            else:
+                self._break_line()
             return True
         self._insert_keys.append((event.key(), event.text(), event.modifiers()))
         if self._mode == VimMode.REPLACE:
             return self._replace_key(event)
         return False  # pass through to editor
+
+    def _break_line(self, *, ends_list: bool = True):
+        """Enter in INSERT: break the line and start the new one the way the
+        caret's line starts — its indent, and on a list item the next item's
+        marker. On an item with nothing typed after its marker, Enter ends the
+        list instead: the marker goes and the line is left empty. With the
+        caret inside a line's head (its indent or marker) the break is plain,
+        so Enter there pushes the line down as it stands. A counted ``o``
+        replays with ``ends_list`` off: ``3o<Esc>`` opens three items."""
+        c = self._editor.textCursor()
+        line = c.block().text()
+        column = c.positionInBlock()
+        if (ends_list and vm.is_empty_item(line)
+                and column >= len(vm.item_head(line))):
+            c.movePosition(_MoveOp.StartOfBlock)
+            c.movePosition(_MoveOp.EndOfBlock, _MoveMode.KeepAnchor)
+            c.removeSelectedText()
+        elif column < len(vm.item_head(line) or vm.indent_of(line)):
+            c.insertText("\n")
+        else:
+            head = vm.continue_line(line)
+            # An indent nothing was typed after doesn't stay behind on the
+            # line Enter leaves — vim's autoindent takes it back.
+            self._drop_untyped_head()
+            c = self._editor.textCursor()
+            c.insertText("\n" + head)
+            self._editor.setTextCursor(c)
+            self._mark_auto_head(head)
+            return
+        self._editor.setTextCursor(c)
+
+    def _mark_auto_head(self, head: str):
+        """Remember that the caret's line holds just ``head``, put there for
+        you — see _drop_untyped_head."""
+        c = self._editor.textCursor()
+        self._auto_head = (c.blockNumber(), head) if head else None
+
+    def _drop_untyped_head(self):
+        """Empty the caret's line if it still holds only the indent and
+        marker ``o``/``O``/Enter/``cc`` put there. Vim removes an autoindent
+        nothing was typed after on Esc or Enter; with markdown's settings it
+        never adds a marker, so ``o<Esc>`` on ``- item`` leaves an empty
+        line there, and this matches that."""
+        auto, self._auto_head = self._auto_head, None
+        c = self._editor.textCursor()
+        if auto is None or auto != (c.blockNumber(), c.block().text()):
+            return
+        c.movePosition(_MoveOp.StartOfBlock)
+        c.movePosition(_MoveOp.EndOfBlock, _MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        self._editor.setTextCursor(c)
 
     def _replace_key(self, event: QKeyEvent) -> bool:
         """``R`` — a typed character overwrites the one under the caret (past
@@ -879,22 +939,29 @@ class VimKeyHandler:
             self._set_position(vm.first_non_blank(text, pos))
             self._begin_insert(count)
             return True
+        # The opened line continues this one: its indent, and on a list
+        # item the next item's marker (see vimmotion.continue_line).
         if key == Qt.Key.Key_O and not shift:
             self._mark_change(pos)
+            line = self._editor.textCursor().block().text()
             self._move(_MoveOp.EndOfBlock)
             c = self._editor.textCursor()
-            c.insertText("\n")
+            c.insertText("\n" + vm.continue_line(line))
             self._editor.setTextCursor(c)
-            self._begin_insert(count, prefix="\n")
+            self._mark_auto_head(vm.continue_line(line))
+            self._begin_insert(count, opens=True)
             return True
         if key == Qt.Key.Key_O and shift:
             self._mark_change(pos)
+            line = self._editor.textCursor().block().text()
+            head = vm.continue_line(line, above=True)
             self._move(_MoveOp.StartOfBlock)
             c = self._editor.textCursor()
-            c.insertText("\n")
-            c.movePosition(_MoveOp.Up)
+            c.insertText(head + "\n")
+            c.movePosition(_MoveOp.Left)
             self._editor.setTextCursor(c)
-            self._begin_insert(count, prefix="\n")
+            self._mark_auto_head(head)
+            self._begin_insert(count, opens=True)
             return True
 
         return True  # consume unknown keys in normal mode
@@ -983,8 +1050,14 @@ class VimKeyHandler:
             return
         if op == "c":
             # Never _remove_lines: a line-wise change empties the line and
-            # leaves you on it, so the newline itself has to stay.
+            # leaves you on it, so the newline itself has to stay — and so
+            # does the first line's indent, as with vim's autoindent.
+            if linewise:
+                start = vm.first_non_blank(text, start)
             self._remove(start, end)
+            if linewise:
+                self._mark_auto_head(vm.indent_of(
+                    self._editor.textCursor().block().text()))
             self._set_mode(VimMode.INSERT)
             return
         if linewise:

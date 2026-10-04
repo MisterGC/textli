@@ -57,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's undo stack. `gs` is a reading-view gesture: in the write view the
   frontmatter is on screen already.
 
+- **`o`, `O` and Enter continue a Markdown list and keep its indent; `cc`
+  and `S` keep the indent too** (#83) — a new line starts the way the line it
+  came from starts: its indent, and on a list item the next item's marker.
+  `o` or Enter on `- item` opens `- `, on `1. a` opens `2. `, and on a task
+  opens an unchecked `- [ ] `; `O` opens the same item above, its number
+  unchanged. Enter on an item with nothing after its marker removes the
+  marker and ends the list, and Enter inside a line's indent or marker
+  breaks the line as it stands. `cc` and `S` empty the line but leave its
+  indent, as vim's `autoindent` does. As in vim, an indent or marker nothing
+  is typed after comes back off on `Esc`, so `o<Esc>` and `cc<Esc>` leave an
+  empty line.
+
 - **The write view scrolls and jumps like vim: `H M L`, `⌃d ⌃u ⌃f ⌃b ⌃e
   ⌃y`, `zz zt zb`** (#82) — until now only the reading view scrolled from the
   keyboard. `H`, `M` and `L` go to the top, middle and bottom line on screen,
