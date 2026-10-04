@@ -57,6 +57,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's undo stack. `gs` is a reading-view gesture: in the write view the
   frontmatter is on screen already.
 
+- **The write view scrolls and jumps like vim: `H M L`, `⌃d ⌃u ⌃f ⌃b ⌃e
+  ⌃y`, `zz zt zb`** (#82) — until now only the reading view scrolled from the
+  keyboard. `H`, `M` and `L` go to the top, middle and bottom line on screen,
+  a count on `H` or `L` counting in from that edge, and they are line-wise
+  motions, so `dL` deletes to the bottom of the screen and `VH` selects to the
+  top. `⌃d` and `⌃u` scroll half a view and carry the caret along (a count
+  sets how far and is kept for the next), `⌃f` and `⌃b` a page less two
+  lines, `⌃e` and `⌃y` one line, keeping the caret on screen. `zz`, `zt` and
+  `zb` scroll the caret line to the middle, top or bottom. All of them count
+  the rows on screen, so a wrapped paragraph is many lines, as it is for `j`
+  and `k`. The view doesn't scroll past the text's ends, so near them `zt` and
+  `zb` place the line as far as it goes.
+
 - **`V` selects whole lines, `gv` reselects, and a selection takes `> < ~ u
   U J r`** (#81) — `V` is vim's VISUAL LINE: `d`, `y`, `c` and `p` act on the
   selected lines the way `dd`, `yy` and `cc` do, so `Vjd` deletes two lines and

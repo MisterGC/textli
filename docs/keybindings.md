@@ -29,6 +29,9 @@ The complete reference — the same content the editor shows on `F1`.
 | `w b e` · `W B E` | Next word / previous word / word end · the same by WORD (whitespace-delimited) |
 | `0 ^ $` · `gg G` | Line start / first non-blank / last character · document start / end |
 | `{ }` · `%` | Previous / next blank line · jump to the matching bracket |
+| `H M L` | Top / middle / bottom line on screen (`3H` — third from the top); they are motions too, so `dL` deletes to the bottom of the screen and `VH` selects to the top |
+| `⌃d ⌃u` · `⌃f ⌃b` · `⌃e ⌃y` | Scroll half a view · a page (less two lines) · one line, down / up; the caret rides along, and stays put on `⌃e ⌃y` until it would leave the view (`3⌃d` sets the half-page to three lines) |
+| `zz zt zb` | Scroll the caret line to the middle / top / bottom of the view (`30zt` — line 30 to the top) |
 | `fx` · `tx` · `Fx` · `Tx` | Jump to the next `x` / just before it · the same backwards; `;` and `,` repeat the last one |
 | `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above; a count repeats what you type (`3ihi` `Esc` → `hihihi`, `3o` opens three lines) |
 | `R` | REPLACE — type over the line until `Esc`; `⌫` puts back what was overwritten; a count repeats it |

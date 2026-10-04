@@ -16,7 +16,15 @@ to be learned as separate commands:
 - **Motions** — `h j k l`, `w b e` (and `W B E` by whitespace-delimited WORD),
   `0 ^ $`, `{ }` for the blank line before/after, `gg G`, `%` to the matching
   bracket, and `fx` / `tx` / `Fx` / `Tx` to a character on this line (`;` and
-  `,` repeat the last one).
+  `,` repeat the last one). `H M L` go to the top, middle and bottom line on
+  screen, and a count on `H` or `L` counts in from that edge (`3H`).
+- **Scrolling** — `⌃d` / `⌃u` scroll half a view down / up and take the
+  caret along (a count sets how far, and the next one remembers it), `⌃f` /
+  `⌃b` a page less two lines, `⌃e` / `⌃y` a single line, the caret staying
+  put until it would leave the view. `zz`, `zt` and `zb` scroll the caret
+  line to the middle, top or bottom. All of them, and `H M L`, count the rows
+  you see, so a long paragraph that wraps is many lines here, the way `j` and
+  `k` move through it.
 - **Operators** — `d` delete, `c` change, `y` yank, `>` indent and `<`
   outdent, `gU` uppercase, `gu` lowercase and `g~` toggle case. Each one takes
   any motion above: `de`, `d$`, `dG`, `d}`, `dfx`, `c2w`, `>j`, `gUw`. Doubling

@@ -16,6 +16,12 @@ and turns the answer into a cursor move or an undoable edit.
 buffered as they arrive and kept if the document's revision moved by the time
 the handler is back in NORMAL mode with nothing pending — which is what makes
 ``cwword<Esc>`` repeatable without the handler having to model what ``c`` did.
+
+The screen-relative keys — ``H M L``, the scrolls ``⌃d ⌃u ⌃f ⌃b ⌃e ⌃y`` and
+``zz zt zb`` — count in *display* lines, the rows the view actually shows,
+the same way ``j``/``k`` move on soft-wrapped prose: a paragraph is one line
+to vim but many on screen, and a half page of one line would be no half page
+at all.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ import enum
 from dataclasses import dataclass
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
 
@@ -55,6 +61,13 @@ _BRACKETS = {
     "<": ("<", ">"), ">": ("<", ">"),
 }
 _QUOTES = ("\"", "'", "`")
+
+# ⌃d ⌃u ⌃f ⌃b ⌃e ⌃y — the keys that scroll the view (see _scroll).
+_SCROLLS = (Qt.Key.Key_D, Qt.Key.Key_U, Qt.Key.Key_F, Qt.Key.Key_B,
+            Qt.Key.Key_E, Qt.Key.Key_Y)
+
+# zt / zz / zb — how far down the view each puts the caret line.
+_Z_PLACES = {"t": 0.0, "z": 0.5, "b": 1.0}
 
 
 @dataclass(frozen=True)
@@ -105,6 +118,12 @@ class VimKeyHandler:
         self._pending_find: str | None = None     # "f" / "F" / "t" / "T"
         self._pending_object: str | None = None   # "i" / "a"
         self._pending_replace = False
+        # `z` awaiting t/z/b: None when not pending, else the count typed
+        # before it (0 for none) — `5zt` puts line 5 at the top.
+        self._pending_z: int | None = None
+        # How many lines ⌃d / ⌃u scroll: 0 for half the view, else the
+        # count last given to one of them, which vim keeps for the next.
+        self._scroll_lines = 0
         # An insert leg entered with a count (``3ihi<Esc>``, ``2oitem<Esc>``,
         # ``3Rab<Esc>``) is typed once and replayed ``count - 1`` more times on
         # Esc, each copy after ``_insert_prefix`` — the line break ``o``/``O``
@@ -182,7 +201,8 @@ class VimKeyHandler:
         must not step to the next search hit."""
         return bool(
             self._count or self._op or self._pending_g or self._pending_find
-            or self._pending_object or self._pending_replace)
+            or self._pending_object or self._pending_replace
+            or self._pending_z is not None)
 
     def _set_mode(self, mode: VimMode):
         if mode == self._mode:
@@ -455,6 +475,10 @@ class VimKeyHandler:
         if self._pending_g:
             self._pending_g = False
             return self._complete_g(event)
+        if self._pending_z is not None:
+            line, self._pending_z = self._pending_z, None
+            self._complete_z(txt, line)
+            return True
 
         # ── Count prefix ──
         # Digits accumulate (``3``, ``12``). A bare ``0`` is the start-of-line
@@ -535,7 +559,8 @@ class VimKeyHandler:
             self._abort_operator()
             return True
 
-        return self._normal_command(event, key, txt, shift, ctrl, count)
+        return self._normal_command(
+            event, key, txt, shift, ctrl, count, has_count)
 
     def _motion_for(self, key, txt, shift, ctrl, count,
                     has_count=False) -> Motion | None:
@@ -556,6 +581,12 @@ class VimKeyHandler:
             return Motion(self._line_offset(text, pos, count), linewise=True)
         if key == Qt.Key.Key_K and not shift:
             return Motion(self._line_offset(text, pos, -count), linewise=True)
+
+        # H / M / L — the top, middle or bottom line on screen; a count on H
+        # and L counts in from that edge. Line-wise, so `dL` takes whole lines.
+        if shift and key in (Qt.Key.Key_H, Qt.Key.Key_M, Qt.Key.Key_L):
+            target = self._screen_line(key, count)
+            return None if target is None else Motion(target, linewise=True)
 
         # w / b / e and their WORD forms. `cw` is vim's one deliberate
         # irregularity: on a non-blank it behaves like `ce`, so changing a word
@@ -730,8 +761,17 @@ class VimKeyHandler:
             return True
         return True  # unknown g-sequence, consume
 
-    def _normal_command(self, event, key, txt, shift, ctrl, count) -> bool:
-        """Everything that isn't a motion: edits, mode changes, paste, repeat."""
+    def _normal_command(self, event, key, txt, shift, ctrl, count,
+                        has_count=False) -> bool:
+        """Everything that isn't a motion: edits, mode changes, paste, repeat,
+        and the scrolls, which move the view rather than name a span."""
+        if ctrl and not shift and key in _SCROLLS:
+            self._scroll(key, count, has_count)
+            return True
+        if txt == "z" and not ctrl:
+            self._pending_z = count if has_count else 0
+            return True
+
         # x / X — delete forward / backward characters (charwise `dl` / `dh`).
         if key == Qt.Key.Key_X and not shift and not ctrl:
             self._delete_chars(count)
@@ -1141,6 +1181,10 @@ class VimKeyHandler:
                 self._reselect_visual()
             self._op_count = 1
             return True
+        if self._pending_z is not None:
+            line, self._pending_z = self._pending_z, None
+            self._complete_z(txt, line)
+            return True
 
         if txt.isdigit() and (txt != "0" or self._count):
             self._count += txt
@@ -1184,6 +1228,12 @@ class VimKeyHandler:
         if key == Qt.Key.Key_G and not shift and not ctrl:
             self._pending_g = True
             self._op_count = count
+            return True
+        if txt == "z" and not ctrl:
+            self._pending_z = count if has_count else 0
+            return True
+        if ctrl and not shift and key in _SCROLLS:
+            self._scroll(key, count, has_count)
             return True
 
         # ── Operators act on the selection, then drop back ──
@@ -1386,6 +1436,161 @@ class VimKeyHandler:
         self._keep_visual_lines(lambda: self._replace_span(start, end, "".join(
             c if c == "\n" else ch for c in text[start:end])))
         self._set_position(min(start, self._last_column(text, start)))
+
+    # ── The view: H M L, scrolling, zz zt zb ──
+    #
+    # Each works on the vim caret — Qt's in NORMAL, ``_visual_caret`` while
+    # selecting — so in VISUAL a scroll that moves the caret extends the
+    # selection, as vim's does.
+
+    def _caret_cursor(self) -> QTextCursor:
+        if self._in_visual and self._visual_caret is not None:
+            return self._visual_caret
+        return self._editor.textCursor()
+
+    def _place_caret(self, pos: int):
+        """Put the vim caret on ``pos`` — never past a line's last character
+        in NORMAL; in VISUAL the selection follows."""
+        if self._in_visual:
+            self._visual_caret.setPosition(pos)
+            self._show_visual()
+        else:
+            self._set_position(
+                min(pos, self._last_column(self._editor.toPlainText(), pos)))
+
+    def _screen_lines(self) -> list[tuple[int, float, float]]:
+        """The display lines on screen, top to bottom, as ``(position, top,
+        height)`` in viewport pixels. Only whole lines count, the way vim's
+        window never shows half of one; a line taller than the view is all
+        there is when nothing fits whole."""
+        ed = self._editor
+        bottom = ed.viewport().height()
+        block = ed.firstVisibleBlock()
+        top = ed.blockBoundingGeometry(block).translated(
+            ed.contentOffset()).top()
+        whole, cut = [], []
+        while block.isValid() and top < bottom:
+            # Asking for the block's height lays it out, which Qt otherwise
+            # leaves until it paints — an unpainted block has no lines yet.
+            height = ed.blockBoundingRect(block).height()
+            if block.isVisible():
+                layout = block.layout()
+                for i in range(layout.lineCount()):
+                    line = layout.lineAt(i)
+                    y = top + line.y()
+                    entry = (block.position() + line.textStart(),
+                             y, line.height())
+                    if y >= -0.5 and y + line.height() <= bottom + 0.5:
+                        whole.append(entry)
+                    elif y + line.height() > 0 and y < bottom:
+                        cut.append(entry)
+            top += height
+            block = block.next()
+        return whole or cut
+
+    def _screen_line(self, key, count: int) -> int | None:
+        """Where ``H`` / ``M`` / ``L`` land: the first non-blank of the
+        chosen line, or the start of a wrapped line's continuation row."""
+        lines = self._screen_lines()
+        if not lines:
+            return None
+        if key == Qt.Key.Key_H:
+            row = min(count, len(lines)) - 1
+        elif key == Qt.Key.Key_L:
+            row = max(0, len(lines) - count)
+        else:
+            # M — the middle of what the view shows, which is the middle of
+            # the text when the text is shorter than the view.
+            row = (len(lines) - 1) // 2
+        start = lines[row][0]
+        text = self._editor.toPlainText()
+        if start == vm.line_start(text, start):
+            return vm.first_non_blank(text, start)
+        return start
+
+    def _caret_to_row(self, row: tuple[int, float, float], x: float):
+        """Put the caret on a screen row, as near column ``x`` as it goes.
+        ``x`` is the caret's left edge, a character boundary; aiming a pixel
+        to its right keeps a boundary truncated to whole pixels from
+        rounding back onto the character before."""
+        self._place_caret(self._editor.cursorForPosition(
+            QPoint(int(x) + 1, int(row[1] + row[2] / 2))).position())
+
+    def _scroll(self, key, count: int, has_count: bool):
+        """``⌃d ⌃u`` scroll half a view and take the caret along by as many
+        lines (a count sets how many, kept for the next one, as vim's
+        'scroll' option does). ``⌃f ⌃b`` scroll a view less two lines, ``⌃e
+        ⌃y`` one line; the caret stays put unless it would leave the view,
+        and then sits on the edge row it would have left by. A count scrolls
+        that many pages or lines. When the view can't go further, ``⌃f`` and
+        ``⌃b`` still take the caret to the last or first row, where vim's
+        end up once the last page is up."""
+        bar = self._editor.verticalScrollBar()
+        down = key in (Qt.Key.Key_D, Qt.Key.Key_F, Qt.Key.Key_E)
+        rows = len(self._screen_lines()) or 1
+        if key in (Qt.Key.Key_D, Qt.Key.Key_U):
+            if has_count:
+                self._scroll_lines = count
+            n = self._scroll_lines or max(1, rows // 2)
+            bar.setValue(bar.value() + (n if down else -n))
+            caret = QTextCursor(self._caret_cursor())
+            caret.movePosition(_MoveOp.Down if down else _MoveOp.Up, n=n)
+            self._place_caret(caret.position())
+            return
+        n = max(1, rows - 2) * count if key in (
+            Qt.Key.Key_F, Qt.Key.Key_B) else count
+        before = bar.value()
+        bar.setValue(before + (n if down else -n))
+        lines = self._screen_lines()
+        if not lines:
+            return
+        rect = self._editor.cursorRect(self._caret_cursor())
+        if bar.value() == before and key in (Qt.Key.Key_F, Qt.Key.Key_B):
+            self._caret_to_row(lines[-1 if down else 0], rect.left())
+        elif rect.center().y() < lines[0][1]:
+            self._caret_to_row(lines[0], rect.left())
+        elif rect.center().y() > lines[-1][1] + lines[-1][2]:
+            self._caret_to_row(lines[-1], rect.left())
+
+    def _complete_z(self, txt: str, line: int):
+        """``zt`` / ``zz`` / ``zb`` — scroll so the caret's line sits at the
+        top, middle or bottom of the view; with a count, that line first
+        (on its first non-blank). The caret doesn't move otherwise. The
+        view can't scroll past the text's ends, so near them the line goes
+        as far as the view lets it."""
+        place = _Z_PLACES.get(txt)
+        if place is None:
+            return
+        if line:
+            text = self._editor.toPlainText()
+            self._place_caret(vm.first_non_blank(text, vm.goto_line(text, line)))
+        ed = self._editor
+        cursor = self._caret_cursor()
+        block = cursor.block()
+        ed.blockBoundingRect(block)      # lay it out (see _screen_lines)
+        caret_line = block.layout().lineForTextPosition(cursor.positionInBlock())
+        if not caret_line.isValid():
+            return
+        # How far above the caret line the view's top may sit. Walk up the
+        # display lines from it until one sits further than that; the last
+        # that didn't is the new top. Heights are measured, not assumed, so
+        # a heading's taller rows count for what they are.
+        room = (ed.viewport().height() - caret_line.height()) * place
+        top = block.firstLineNumber() + caret_line.lineNumber()
+        b, base = block, 0.0
+        while b.isValid():
+            layout = b.layout()
+            last = (caret_line.lineNumber() if b == block
+                    else layout.lineCount() - 1)
+            for i in range(last, -1, -1):
+                if caret_line.y() - (base + layout.lineAt(i).y()) > room:
+                    ed.verticalScrollBar().setValue(top)
+                    return
+                top = b.firstLineNumber() + i
+            b = b.previous()
+            if b.isValid():
+                base -= ed.blockBoundingRect(b).height()
+        ed.verticalScrollBar().setValue(top)
 
     # ── Helpers ──
 
