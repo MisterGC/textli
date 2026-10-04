@@ -844,6 +844,8 @@ def editor_help_html() -> str:
         (".", "Repeat the last vim change — including what was typed in INSERT, arrow keys too; comments and gs are never repeated"),
         ("u · U", "Undo · redo the last change, typed text included (⌃R toggles the reading view, so redo is U)"),
         ("v · o", "VISUAL — covers the char under the caret, extend with the motions or a text object (viw), o swaps the ends, then d / y / c / p"),
+        ("V · gv", "VISUAL LINE — whole lines, so d / y / c / p act line-wise (Vy then p pastes below) · gv reselects the last selection"),
+        ("> < · ~ u U · J · r x", "Over a v or V selection: indent / outdent its lines · toggle / lower / upper its case · join its lines · replace every char with x"),
         ("p / P", "Paste after / before (line-wise when the register holds whole lines)"),
         ("2j · 3dd · 2d3w", "A leading count repeats the next motion or edit, and multiplies across both"),
         ("↵", "Follow the link under the caret — web/mail in the browser, <span style='font-family:monospace'>#heading</span> jumps there (NORMAL mode)"),

@@ -87,6 +87,7 @@ complete key reference, or see the
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
 | `d` `c` `y` | Operators over any motion or text object — `dw`, `d}`, `ci"`, `daw`; `.` repeats the last change |
 | `>` `<` · `gU` `gu` `g~` | Indent / outdent and change case, as operators — `>>`, `>ip`, `gUiw`, `g~~` |
+| `v` · `V` · `gv` | Select characters / whole lines, then `d` `y` `c` `p` `>` `<` `~` `u` `U` `J` `r`; `gv` reselects the last selection |
 | `F1` | Full help |
 
 ## Embed

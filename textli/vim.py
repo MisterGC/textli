@@ -36,6 +36,7 @@ class VimMode(enum.Enum):
     NORMAL = "NORMAL"
     INSERT = "INSERT"
     VISUAL = "VISUAL"
+    VISUAL_LINE = "VISUAL LINE"
     REPLACE = "REPLACE"
 
 
@@ -154,6 +155,10 @@ class VimKeyHandler:
         self._visual_anchor = 0
         self._visual_caret: QTextCursor | None = None
         self._visual_shown: tuple[int, int] | None = None
+        # `gv` — the last selection's ends and mode. Kept as cursors rather
+        # than offsets so they ride along with later edits, the way vim's
+        # `'<` / `'>` marks do: `Vj>` then `gv` reselects the shifted lines.
+        self._last_visual: tuple[QTextCursor, QTextCursor, VimMode] | None = None
         # Block cursor everywhere but INSERT (NORMAL and VISUAL show it); the
         # caret only thins out while typing. Callers that open in INSERT (inline
         # editing) pass ``initial_mode``; the zen editor keeps the NORMAL default.
@@ -162,6 +167,12 @@ class VimKeyHandler:
     @property
     def mode(self) -> VimMode:
         return self._mode
+
+    @property
+    def _in_visual(self) -> bool:
+        """VISUAL or VISUAL LINE — both share the handler and the motions;
+        they differ only in how much of the text the selection covers."""
+        return self._mode in (VimMode.VISUAL, VimMode.VISUAL_LINE)
 
     @property
     def has_pending(self) -> bool:
@@ -294,7 +305,7 @@ class VimKeyHandler:
     def _dispatch(self, event: QKeyEvent) -> bool:
         if self._mode in (VimMode.INSERT, VimMode.REPLACE):
             return self._handle_insert(event)
-        if self._mode == VimMode.VISUAL:
+        if self._in_visual:
             return self._handle_visual(event)
         return self._handle_normal(event)
 
@@ -609,7 +620,7 @@ class VimKeyHandler:
         so ``l`` stops on the last character there as well; only ``$`` goes on
         to the line break, which vim's ``v$`` selects along with the line."""
         start, end = vm.line_bounds(text, pos)
-        if self._op or (self._mode == VimMode.VISUAL and past_end):
+        if self._op or (self._in_visual and past_end):
             return end
         return max(start, end - 1)
 
@@ -708,6 +719,9 @@ class VimKeyHandler:
         if self._op:
             self._abort_operator()
             return True
+        if txt == "v":
+            self._reselect_visual()
+            return True
         if key == Qt.Key.Key_O and self._open_file is not None:
             self._open_file()
             return True
@@ -780,9 +794,11 @@ class VimKeyHandler:
             self._paste(after=not shift, count=count)
             return True
 
-        # v — enter VISUAL, selecting from here as the motions extend
-        if key == Qt.Key.Key_V and not shift and not ctrl:
-            self._enter_visual()
+        # v / V — enter VISUAL, selecting from here as the motions extend;
+        # V selects whole lines.
+        if key == Qt.Key.Key_V and not ctrl:
+            self._enter_visual(
+                VimMode.VISUAL_LINE if shift else VimMode.VISUAL)
             return True
 
         # u / U — undo / redo one command, riding the editor's native undo
@@ -991,29 +1007,76 @@ class VimKeyHandler:
 
     def _caret(self) -> int:
         """Where motions start from: the vim caret in VISUAL, else Qt's."""
-        if self._mode == VimMode.VISUAL and self._visual_caret is not None:
+        if self._in_visual and self._visual_caret is not None:
             return self._visual_caret.position()
         return self._editor.textCursor().position()
 
-    def _enter_visual(self):
+    def _enter_visual(self, mode: VimMode, anchor: int | None = None,
+                      caret: int | None = None):
         pos = self._editor.textCursor().position()
-        self._visual_anchor = pos
+        self._visual_anchor = pos if anchor is None else anchor
         self._visual_caret = QTextCursor(self._editor.document())
-        self._visual_caret.setPosition(pos)
-        self._set_mode(VimMode.VISUAL)
+        self._visual_caret.setPosition(pos if caret is None else caret)
+        self._set_mode(mode)
         self._show_visual()
 
-    def _visual_span(self) -> tuple[int, int]:
-        """The selected run as ``[start, end)``: both ends included."""
+    def _remember_visual(self):
+        """Keep this selection for `gv`. Called as VISUAL is left — before
+        an operator edits, so the kept cursors follow that edit."""
+        anchor = QTextCursor(self._editor.document())
+        anchor.setPosition(
+            min(self._visual_anchor, len(self._editor.toPlainText())))
+        self._last_visual = (
+            anchor, QTextCursor(self._visual_caret), self._mode)
+
+    def _keep_visual_lines(self, rewrite: Callable[[], None]):
+        """Run ``rewrite`` — an edit that swaps whole runs of text but keeps
+        every line (a shift, a case change, ``r``) — and put the `gv` ends
+        back on their lines and columns afterwards. Left to themselves the
+        cursors would collapse with the text they sat in."""
+        text = self._editor.toPlainText()
+        ends = [(vm.line_number(text, c.position()),
+                 c.position() - vm.line_start(text, c.position()))
+                for c in self._last_visual[:2]]
+        rewrite()
+        text = self._editor.toPlainText()
+        for cursor, (line, column) in zip(self._last_visual[:2], ends):
+            start = vm.line_start(text, vm.goto_line(text, line))
+            cursor.setPosition(min(start + column, vm.line_end(text, start)))
+
+    def _reselect_visual(self):
+        """``gv`` — select the last selection again, in its own mode. Inside
+        VISUAL it swaps the current selection with the last one, as vim's
+        does. Ends an edit has pushed past the text are clamped back in."""
+        if self._last_visual is None:
+            return
+        anchor, caret, mode = self._last_visual
+        if self._in_visual:
+            self._remember_visual()
         n = len(self._editor.toPlainText())
-        lo = min(self._visual_anchor, self._visual_caret.position())
-        hi = max(self._visual_anchor, self._visual_caret.position())
-        return min(lo, n), min(hi + 1, n)
+        self._enter_visual(mode, min(anchor.position(), n),
+                           min(caret.position(), n))
+
+    def _visual_span(self) -> tuple[int, int]:
+        """The selected run as ``[start, end)``: both ends included. VISUAL
+        LINE widens it to the whole lines, line break of the last left out
+        — the same span ``dd`` takes."""
+        text = self._editor.toPlainText()
+        n = len(text)
+        lo = min(self._visual_anchor, self._visual_caret.position(), n)
+        hi = min(max(self._visual_anchor, self._visual_caret.position()), n)
+        if self._mode == VimMode.VISUAL_LINE:
+            return vm.line_start(text, lo), vm.line_end(text, hi)
+        return lo, min(hi + 1, n)
 
     def _show_visual(self):
         """Render the span as Qt's selection, its moving end on the caret's
-        side so the view scrolls to follow the caret."""
+        side so the view scrolls to follow the caret. VISUAL LINE shows the
+        last line's break too, so a selected blank line is visible."""
         start, end = self._visual_span()
+        if (self._mode == VimMode.VISUAL_LINE
+                and end < len(self._editor.toPlainText())):
+            end += 1
         c = self._editor.textCursor()
         if self._visual_caret.position() >= self._visual_anchor:
             c.setPosition(start)
@@ -1050,6 +1113,13 @@ class VimKeyHandler:
         ctrl = bool(mods & _CTRL_MOD)
         self._sync_visual()
 
+        if self._pending_replace:
+            # `rx` — every selected character becomes x. Anything but a
+            # printable character abandons the r and keeps the selection.
+            self._pending_replace = False
+            if txt and txt.isprintable():
+                self._visual_replace(txt)
+            return True
         if self._pending_find:
             cmd, self._pending_find = self._pending_find, None
             if txt and txt.isprintable():
@@ -1067,6 +1137,8 @@ class VimKeyHandler:
             if key == Qt.Key.Key_G:
                 self._extend_to(Motion(
                     vm.goto_line(self._editor.toPlainText(), self._op_count)))
+            elif txt == "v":
+                self._reselect_visual()
             self._op_count = 1
             return True
 
@@ -1076,10 +1148,19 @@ class VimKeyHandler:
         has_count = bool(self._count)
         count = self._take_count()
 
-        # Leave VISUAL — Esc or a second v — clearing the selection.
-        if key == Qt.Key.Key_Escape or (
-                key == Qt.Key.Key_V and not shift and not ctrl):
+        # Leave VISUAL — Esc, or the key that entered it (v in VISUAL, V in
+        # VISUAL LINE) — clearing the selection. The other key switches
+        # between char-wise and line-wise, keeping both ends.
+        if key == Qt.Key.Key_Escape:
             self._clear_visual()
+            return True
+        if key == Qt.Key.Key_V and not ctrl:
+            mode = VimMode.VISUAL_LINE if shift else VimMode.VISUAL
+            if mode == self._mode:
+                self._clear_visual()
+            else:
+                self._set_mode(mode)
+                self._show_visual()
             return True
 
         # o — swap the ends: the caret jumps to the anchor and motions now
@@ -1117,6 +1198,23 @@ class VimKeyHandler:
             return True
         if key == Qt.Key.Key_P and not ctrl:
             self._visual_paste()
+            return True
+        if not ctrl and txt in (">", "<"):
+            self._visual_shift(count if txt == ">" else -count)
+            return True
+        # ~ / u / U change the case of the selection. In NORMAL `u` and `U`
+        # are undo and redo; over a selection they are vim's case keys.
+        if txt == "~":
+            self._visual_case(str.swapcase)
+            return True
+        if key == Qt.Key.Key_U and not ctrl:
+            self._visual_case(str.upper if shift else str.lower)
+            return True
+        if key == Qt.Key.Key_J and shift and not ctrl:
+            self._visual_join()
+            return True
+        if key == Qt.Key.Key_R and not shift and not ctrl:
+            self._pending_replace = True
             return True
 
         # ── Everything else that resolves is a motion, moving the caret ──
@@ -1171,9 +1269,12 @@ class VimKeyHandler:
         one paragraph for another cleanly.
         """
         start, end = self._visual_span()
-        if end <= start or not self._register:
+        linewise = self._mode == VimMode.VISUAL_LINE
+        # A selected blank line is empty yet still a line to replace.
+        if (end <= start and not linewise) or not self._register:
             self._clear_visual()
             return
+        self._remember_visual()
         payload = self._register
         c = self._editor.textCursor()
         c.setPosition(start)
@@ -1184,7 +1285,8 @@ class VimKeyHandler:
             c.insertText(payload.rstrip("\n"))
         else:
             c.insertText(payload)
-        c.setPosition(max(start, c.position() - 1))
+        # Line-wise, the caret lands on the first pasted line, as after `P`.
+        c.setPosition(start if linewise else max(start, c.position() - 1))
         c.endEditBlock()
         self._editor.setTextCursor(c)
         self._set_mode(VimMode.NORMAL)
@@ -1192,6 +1294,7 @@ class VimKeyHandler:
     def _clear_visual(self):
         """Back to NORMAL with the caret where VISUAL left it — on a character,
         so a ``v$`` that reached the line break steps back onto the last one."""
+        self._remember_visual()
         caret = self._visual_caret.position()
         self._set_mode(VimMode.NORMAL)
         self._set_position(
@@ -1199,8 +1302,18 @@ class VimKeyHandler:
 
     def _visual_op(self, *, to_insert: bool):
         """d/x delete the selection (→ NORMAL); c deletes it then enters INSERT.
-        Either way the removed text lands in the register (char-wise)."""
+        Either way the removed text lands in the register — char-wise, or
+        line-wise from VISUAL LINE, which acts like ``dd`` / ``cc`` over the
+        selected lines."""
         start, end = self._visual_span()
+        self._remember_visual()
+        if self._mode == VimMode.VISUAL_LINE:
+            self._set_mode(VimMode.NORMAL)
+            self._mark_change(
+                vm.first_non_blank(self._editor.toPlainText(), start))
+            self._operate_span(
+                "c" if to_insert else "d", start, end, linewise=True)
+            return
         if end > start:
             self._set_register_text(self._editor.toPlainText()[start:end], False)
             self._remove(start, end)
@@ -1212,13 +1325,67 @@ class VimKeyHandler:
                 min(start, self._last_column(self._editor.toPlainText(), start)))
 
     def _visual_yank(self):
-        """y copies the selection (char-wise) and drops back to NORMAL with the
-        caret at the selection start, the way vim leaves it."""
+        """y copies the selection (char-wise, or line-wise from VISUAL LINE, so
+        ``Vy`` then ``p`` pastes on a line of its own) and drops back to NORMAL
+        with the caret at the selection start, the way vim leaves it."""
         start, end = self._visual_span()
+        self._remember_visual()
+        if self._mode == VimMode.VISUAL_LINE:
+            self._set_mode(VimMode.NORMAL)
+            self._operate_span("y", start, end, linewise=True)
+            return
         if end > start:
             self._set_register_text(self._editor.toPlainText()[start:end], False)
         self._set_mode(VimMode.NORMAL)
         self._set_position(start)
+
+    def _visual_lines(self) -> tuple[int, int]:
+        """The first and last line number the selection touches."""
+        text = self._editor.toPlainText()
+        lo = min(self._visual_anchor, self._visual_caret.position())
+        hi = max(self._visual_anchor, self._visual_caret.position())
+        return vm.line_number(text, lo), vm.line_number(text, hi)
+
+    def _visual_shift(self, levels: int):
+        """``>`` / ``<`` — shift every line the selection touches, char-wise
+        or not; a count shifts that many levels (``3>``)."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        self._keep_visual_lines(
+            lambda: self._shift_lines(start, max(start + 1, end), levels))
+
+    def _visual_case(self, change: Callable[[str], str]):
+        """``~`` / ``u`` / ``U`` — swap, lower or upper the selection's case,
+        leaving the caret on its start the way vim does."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        text = self._editor.toPlainText()
+        self._keep_visual_lines(
+            lambda: self._replace_span(start, end, change(text[start:end])))
+        self._set_position(min(start, self._last_column(text, start)))
+
+    def _visual_join(self):
+        """``J`` — join the selected lines; a selection within one line joins
+        it with the next, as ``J`` would."""
+        first, last = self._visual_lines()
+        text = self._editor.toPlainText()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        self._set_position(vm.goto_line(text, first))
+        self._join_lines(max(2, last - first + 1))
+
+    def _visual_replace(self, ch: str):
+        """``r`` — overwrite every selected character with ``ch``. Line
+        breaks stay, so a selection across lines keeps its lines."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        text = self._editor.toPlainText()
+        self._keep_visual_lines(lambda: self._replace_span(start, end, "".join(
+            c if c == "\n" else ch for c in text[start:end])))
+        self._set_position(min(start, self._last_column(text, start)))
 
     # ── Helpers ──
 

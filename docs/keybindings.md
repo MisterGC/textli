@@ -43,6 +43,8 @@ The complete reference — the same content the editor shows on `F1`.
 | `.` | Repeat the last vim change — including whatever was typed in INSERT, arrow keys too (unlike vim, an arrow doesn't split the change); comments and `gs` are never repeated |
 | `u` · `U` | Undo · redo the last change, an insert leg included (`cw…` `Esc` is one), caret back where it began (`⌃R` toggles the reading view, so redo is `U`; vim's line-undo isn't kept) |
 | `v` · `o` | VISUAL — covers the character under the caret; extend with the motions, take a text object (`viw`), `o` swaps the ends, then `d` / `y` / `c` / `p` |
+| `V` · `gv` | VISUAL LINE — selects whole lines, so `d` / `y` / `c` / `p` act line-wise (`Vjd` deletes two lines, `Vy` then `p` pastes below); `v` and `V` switch between the two · `gv` reselects the last selection |
+| `>` `<` · `~` `u` `U` · `J` · `rx` | Over a `v` or `V` selection: indent / outdent the lines it touches (`3>` — three levels) · toggle / lower / upper its case · join its lines · replace every character with `x` |
 | `p` / `P` | Paste after / before (line-wise when the register holds whole lines) |
 | `2j` · `3dd` · `2d3w` | A leading count repeats the next motion or edit, and multiplies across both |
 | `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
