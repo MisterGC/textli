@@ -57,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's undo stack. `gs` is a reading-view gesture: in the write view the
   frontmatter is on screen already.
 
+- **`>` `<` and `gu` `gU` `g~` are operators, `R` replaces, and counts work
+  on `i a I A o O`** (#80) — `>` and `<` indent and outdent the lines any
+  motion or text object covers (`>>`, `3>>`, `>ip`, `>j`), four spaces a level
+  as vim's own Markdown style sets it, leaving blank lines alone and turning a
+  leading tab into spaces. `gU`, `gu` and `g~` upper-, lower- and toggle-case
+  over any motion or object (`gUiw`, `guw`, `g~$`), with `gUU`, `guu`, `g~~`
+  for the line. `R` is REPLACE mode: each key overwrites one character until
+  `Esc`, and Backspace puts back what was overwritten. A count on `i a I A o
+  O R` repeats what was typed — `3ihi<Esc>` leaves `hihihi`, `3oitem<Esc>`
+  opens three lines. REPLACE takes printable keys as they arrive and runs
+  without the input method INSERT enables.
+
 ### Changed
 
 - **Redo is `U` in the write view** (#76) — `⌃r` never reached vim there,

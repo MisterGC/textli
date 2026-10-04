@@ -28,6 +28,7 @@ _SPECIAL = {
     "]": Qt.Key.Key_BracketRight, '"': Qt.Key.Key_QuoteDbl,
     "'": Qt.Key.Key_Apostrophe, " ": Qt.Key.Key_Space,
     "!": Qt.Key.Key_Exclam, "-": Qt.Key.Key_Minus,
+    ">": Qt.Key.Key_Greater, "<": Qt.Key.Key_Less, "\n": Qt.Key.Key_Return,
 }
 _ESC = "\x1b"
 _BS = "\x08"
@@ -151,6 +152,74 @@ def test_doubled_operators_are_linewise():
     assert _doc(PARAS, "yyp") == "first one\nfirst one\nsecond two\nthird three\n\nafter blank\n"
 
 
+# ── > and < shift lines; gu, gU and g~ change case ──
+
+def test_shift_operators_indent_and_outdent_whole_lines():
+    text, pos, _mode = _type("one\ntwo\n", ">>", 2)
+    assert text == "    one\ntwo\n"
+    assert pos == 4                          # on the first non-blank
+    assert _doc("    one\ntwo\n", "<<") == "one\ntwo\n"
+    assert _doc("a\nb\nc\nd\n", "3>>") == "    a\n    b\n    c\nd\n"
+    assert _doc("a\nb\nc\nd\n", ">j") == "    a\n    b\nc\nd\n"
+    # A motion within the line still shifts the whole line.
+    assert _doc("one two\n", ">w") == "    one two\n"
+
+
+def test_shift_takes_a_text_object_and_skips_blank_lines():
+    assert _doc("a\nb\n\nc\n", ">ip", 2) == "    a\n    b\n\nc\n"
+    assert _doc("a\n\nb\n", ">2j") == "    a\n\n    b\n"
+
+
+def test_outdent_stops_at_column_zero_and_reads_a_tab_as_four_columns():
+    assert _doc("  a\n", "<<") == "a\n"
+    assert _doc("\ta\n", "<<") == "a\n"
+    assert _doc("\t  a\n", "<<") == "  a\n"
+    assert _doc("a\n", "<<") == "a\n"
+
+
+def test_shift_repeats_with_dot_and_leaves_the_register_alone():
+    assert _doc("a\n", ">>.") == "        a\n"
+    assert _doc("a\nb\n", "yy>>jp") == "    a\nb\na\n"
+
+
+def test_case_operators_take_motions_and_text_objects():
+    text, pos, _mode = _type("hello world\n", "gUiw", 2)
+    assert text == "HELLO world\n" and pos == 0
+    assert _doc("HELLO World\n", "guw") == "hello World\n"
+    assert _doc("Hello World\n", "g~w") == "hELLO World\n"
+    assert _doc("one two\n", "gU$") == "ONE TWO\n"
+    assert _doc("one two\n", "gUe", 4) == "one TWO\n"
+
+
+def test_case_operators_take_counts():
+    assert _doc("one two three\n", "gU2w") == "ONE TWO three\n"
+    assert _doc("one two three\n", "2gUw") == "ONE TWO three\n"
+    assert _doc("ab\ncd\nef\n", "2gUU") == "AB\nCD\nef\n"
+
+
+def test_doubled_case_operators_take_the_line():
+    text, pos, _mode = _type("ab cd\nef\n", "gUU", 3)
+    assert text == "AB CD\nef\n" and pos == 0
+    assert _doc("ab\nef\n", "gUgU") == "AB\nef\n"
+    assert _doc("AB\nef\n", "guu") == "ab\nef\n"
+    assert _doc("AB\nef\n", "gugu") == "ab\nef\n"
+    assert _doc("Ab\nef\n", "g~~") == "aB\nef\n"
+    assert _doc("Ab\nef\n", "g~g~") == "aB\nef\n"
+
+
+def test_case_operators_repeat_with_dot_and_undo_whole():
+    assert _doc("ab cd\n", "gUiww.") == "AB CD\n"
+    # gUU changes from the line's start, so that is where `u` lands.
+    text, pos, _mode = _type("ab cd\n", "gUU" + "u", 3)
+    assert text == "ab cd\n" and pos == 0
+
+
+def test_a_mismatched_operator_pair_abandons_both():
+    assert _doc("ab\n", "dgU") == "ab\n"
+    assert _doc("ab\n", "gUd") == "ab\n"
+    assert _doc("ab\n", "><") == "ab\n"
+
+
 # ── Text objects ──
 
 def test_word_objects():
@@ -222,6 +291,78 @@ def test_replace_toggle_case_and_join():
     assert _doc(LINE, "~") == "Foo(bar) baz\n"
     assert _doc("one\n  two\nthree\n", "J") == "one two\nthree\n"
     assert _doc("one\n  two\nthree\n", "3J") == "one two three\n"
+
+
+# ── R overwrites until Esc ──
+
+def test_R_overwrites_one_character_per_key():
+    text, pos, mode = _type("abcdef\n", "Rxy" + _ESC)
+    assert text == "xycdef\n"
+    assert pos == 1 and mode == VimMode.NORMAL     # on the last typed char
+
+
+def test_R_is_its_own_mode_until_esc():
+    assert _type("abc\n", "Rx")[2] == VimMode.REPLACE
+
+
+def test_R_appends_past_the_end_of_the_line():
+    assert _doc("abc\nde\n", "Rwxyz" + _ESC) == "wxyz\nde\n"
+
+
+def test_R_backspace_puts_back_what_was_overwritten():
+    assert _doc("abc\n", "Rxy" + _BS + _BS + _ESC) == "abc\n"
+    assert _doc("abcd\n", "Rxy" + _BS + "q" + _ESC) == "xqcd\n"
+    assert _doc("ab\n", "Rxyz" + _BS + _ESC) == "xy\n"   # appended: removed
+
+
+def test_R_breaks_the_line_on_enter_without_eating_a_character():
+    assert _doc("ab\n", "Rx\ny" + _ESC) == "x\ny\n"
+    assert _doc("ab\n", "Rx\ny" + _BS + _BS + _ESC) == "xb\n"
+
+
+def test_R_takes_a_count_and_repeats_with_dot():
+    assert _doc("abcdefghi\n", "3Rxy" + _ESC) == "xyxyxyghi\n"
+    assert _doc("abcdef\n", "Rxy" + _ESC + "l.") == "xyxyef\n"
+
+
+def test_one_u_undoes_a_whole_replace():
+    text, pos, _mode = _type("abc\n", "Rxy" + _ESC + "u", 1)
+    assert text == "abc\n" and pos == 1
+
+
+# ── A count repeats what i a I A o O type ──
+
+def test_a_count_repeats_an_insert():
+    text, pos, mode = _type("abc\n", "3ihi" + _ESC)
+    assert text == "hihihiabc\n"
+    assert pos == 5 and mode == VimMode.NORMAL
+    assert _doc("ab\n", "3ahi" + _ESC) == "ahihihib\n"
+    assert _doc("  ab\n", "2Ix" + _ESC, 4) == "  xxab\n"
+    assert _doc("ab\n", "2Ax" + _ESC) == "abxx\n"
+
+
+def test_a_count_on_o_and_O_opens_that_many_lines():
+    text, pos, _mode = _type("a\nb\n", "3oz" + _ESC)
+    assert text == "a\nz\nz\nz\nb\n" and pos == 6
+    assert _doc("a\nb\n", "2Oz" + _ESC, 2) == "a\nz\nz\nb\n"
+
+
+def test_a_counted_insert_repeats_what_was_left_after_backspace():
+    assert _doc("\n", "3iab" + _BS + "c" + _ESC) == "acacac\n"
+
+
+def test_a_counted_insert_keeps_its_line_breaks():
+    assert _doc("\n", "2ia\nb" + _ESC) == "a\nba\nb\n"
+
+
+def test_a_counted_insert_repeats_with_dot_and_undoes_whole():
+    assert _doc("\n\n", "2ix" + _ESC + "j.") == "xx\nxx\n"
+    assert _doc("abc\n", "3ihi" + _ESC + "u") == "abc\n"
+
+
+def test_a_change_ignores_the_count_on_its_insert_leg():
+    # `2cw` changes two words; what is typed goes in once.
+    assert _doc("aa bb cc\n", "2cwX" + _ESC) == "X cc\n"
 
 
 # ── `.` repeats the last change ──
@@ -473,6 +614,17 @@ def test_has_pending_covers_the_new_sequences():
     press(Qt.Key.Key_R, "r")                 # r awaits its replacement char
     assert handler.has_pending
     press(Qt.Key.Key_Z, "z")
+    assert not handler.has_pending
+
+    press(Qt.Key.Key_Greater, ">")           # > awaits its motion
+    assert handler.has_pending
+    press(Qt.Key.Key_Greater, ">")
+    assert not handler.has_pending
+
+    press(Qt.Key.Key_G, "g")                 # gU awaits its motion
+    press(Qt.Key.Key_U, "U")
+    assert handler.has_pending
+    press(Qt.Key.Key_W, "w")
     assert not handler.has_pending
 
     press(Qt.Key.Key_2, "2")                 # a count is building

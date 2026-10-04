@@ -86,6 +86,7 @@ complete key reference, or see the
 | `gs` | Document status — pick from the values its frontmatter declares; `Enter` sets and saves (reading view) |
 | `/` | Fuzzy in-document search (`n`/`N` next/previous hit; `⇥` to replace) |
 | `d` `c` `y` | Operators over any motion or text object — `dw`, `d}`, `ci"`, `daw`; `.` repeats the last change |
+| `>` `<` · `gU` `gu` `g~` | Indent / outdent and change case, as operators — `>>`, `>ip`, `gUiw`, `g~~` |
 | `F1` | Full help |
 
 ## Embed
