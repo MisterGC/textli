@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Callouts render as tinted, labelled boxes** (#35) — a blockquote opening
+  with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` now
+  reads as a callout instead of an undifferentiated quote: the marker becomes
+  a label on its own line, the run sits on a wash of that kind's accent, and
+  the blockquote's left bar wears the accent too. The colours are existing
+  palette roles, so they follow a theme switch; the wash is block formatting,
+  so it prints. A plain blockquote is untouched, and an unknown `[!X]` falls
+  back to one.
+
+- **`.` repeats the last change** (#71) — NORMAL mode now has vim's repeat
+  command. A change is anything that moved the document: an operator and its
+  motion or text object (`dw`, `d}`, `ciw`, `daw`), a shorthand (`x`, `r`, `~`,
+  `J`, `p`), or a whole insert session, so `cwword<Esc>` and `A!<Esc>` repeat
+  with the text they typed. `3.` applies the repeat three times. Motions and
+  undo never become the thing repeated — after `xu`, `.` deletes again rather
+  than undoing again.
+
+  The repeat replays the change's keystrokes, and the insert leg replays
+  through the widget's own key handling, so Backspace and Delete inside it
+  count: `iab<BS>c<Esc>` puts in `ac` on the repeat, not `abc`.
+
 - **The reading view shows a document's frontmatter status, and `gs` changes
   it** (#69) — Qt keeps YAML frontmatter off the rendered page, so a
   document's `status:` was invisible while reading and could only be changed
@@ -36,12 +57,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's undo stack. `gs` is a reading-view gesture: in the write view the
   frontmatter is on screen already.
 
+- **`o`, `O` and Enter continue a Markdown list and keep its indent; `cc`
+  and `S` keep the indent too** (#83) — a new line starts the way the line it
+  came from starts: its indent, and on a list item the next item's marker.
+  `o` or Enter on `- item` opens `- `, on `1. a` opens `2. `, and on a task
+  opens an unchecked `- [ ] `; `O` opens the same item above, its number
+  unchanged. Enter on an item with nothing after its marker removes the
+  marker and ends the list, and Enter inside a line's indent or marker
+  breaks the line as it stands. `cc` and `S` empty the line but leave its
+  indent, as vim's `autoindent` does. As in vim, an indent or marker nothing
+  is typed after comes back off on `Esc`, so `o<Esc>` and `cc<Esc>` leave an
+  empty line.
+
+- **The write view scrolls and jumps like vim: `H M L`, `⌃d ⌃u ⌃f ⌃b ⌃e
+  ⌃y`, `zz zt zb`** (#82) — until now only the reading view scrolled from the
+  keyboard. `H`, `M` and `L` go to the top, middle and bottom line on screen,
+  a count on `H` or `L` counting in from that edge, and they are line-wise
+  motions, so `dL` deletes to the bottom of the screen and `VH` selects to the
+  top. `⌃d` and `⌃u` scroll half a view and carry the caret along (a count
+  sets how far and is kept for the next), `⌃f` and `⌃b` a page less two
+  lines, `⌃e` and `⌃y` one line, keeping the caret on screen. `zz`, `zt` and
+  `zb` scroll the caret line to the middle, top or bottom. All of them count
+  the rows on screen, so a wrapped paragraph is many lines, as it is for `j`
+  and `k`. The view doesn't scroll past the text's ends, so near them `zt` and
+  `zb` place the line as far as it goes.
+
+- **`V` selects whole lines, `gv` reselects, and a selection takes `> < ~ u
+  U J r`** (#81) — `V` is vim's VISUAL LINE: `d`, `y`, `c` and `p` act on the
+  selected lines the way `dd`, `yy` and `cc` do, so `Vjd` deletes two lines and
+  `Vy` then `p` pastes the line below. `v` and `V` switch between the two
+  kinds. `gv` selects the last selection again, following the lines an edit
+  moved (`Vj>` then `gv>` shifts the same two lines twice); inside VISUAL it
+  swaps with the last one. Over either kind, `>` and `<` shift the lines it
+  touches, `~`, `u` and `U` toggle, lower and upper its case, `J` joins its
+  lines and `rx` turns every selected character into `x`.
+
+- **`>` `<` and `gu` `gU` `g~` are operators, `R` replaces, and counts work
+  on `i a I A o O`** (#80) — `>` and `<` indent and outdent the lines any
+  motion or text object covers (`>>`, `3>>`, `>ip`, `>j`), four spaces a level
+  as vim's own Markdown style sets it, leaving blank lines alone and turning a
+  leading tab into spaces. `gU`, `gu` and `g~` upper-, lower- and toggle-case
+  over any motion or object (`gUiw`, `guw`, `g~$`), with `gUU`, `guu`, `g~~`
+  for the line. `R` is REPLACE mode: each key overwrites one character until
+  `Esc`, and Backspace puts back what was overwritten. A count on `i a I A o
+  O R` repeats what was typed — `3ihi<Esc>` leaves `hihihi`, `3oitem<Esc>`
+  opens three lines. REPLACE takes printable keys as they arrive and runs
+  without the input method INSERT enables.
+
 ### Changed
+
+- **Redo is `U` in the write view** (#76) — `⌃r` never reached vim there,
+  because the reading/write toggle takes it first, yet the docs listed it as
+  redo. NORMAL-mode `U` now redoes what `u` undid; vim's line-undo `U` isn't
+  kept. The F1 help and the docs say `U`.
+
+- **One `u` undoes one change** (#79) — Qt keeps a `cw…<Esc>` as two undo
+  steps, the removal and the typing, so it took two `u` to take back and
+  two `U` to redo. `u` and `U` now step over a whole vim change at a time —
+  what `.` would repeat, a `.` itself included — and the caret lands where the
+  change began rather than after the restored text: `dwu` on `a b c` leaves it
+  on the `a`.
 
 - **PySide6 floor raised to 6.8** — Qt 6.8 is where the Markdown reader parks
   frontmatter in the document's metadata instead of rendering it as prose,
   which is what makes the status readable rather than a block of raw text at
   the top of the page.
+
+### Fixed
+
+- **The caret stays where vim keeps it** (#78) — `Esc` from INSERT at column 0
+  jumped onto the end of the line above, so `o<Esc>` left its new line; it now
+  stays put. In NORMAL, `$` and `l` stop on the last character rather than past
+  it, so `$x` deletes that character. `cw` on a word's last character, or on a
+  one-letter word, changes just that word instead of reaching into the next.
+  `Esc` after a count (`3<Esc>`) drops the count instead of closing the editor.
+- **VISUAL includes the character under the caret** (#77) — the selection
+  stopped one short of vim's, so `vd` deleted nothing and `vlld` on `abcdef`
+  left `cdef`; both ends are now included, so it leaves `def`, and `v$` takes
+  the line break as vim's does. `o` swaps the selection's ends, so the motions
+  move its other side.
 
 ## [0.8.0] - 2026-08-15
 

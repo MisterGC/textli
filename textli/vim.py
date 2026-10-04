@@ -1,14 +1,40 @@
-"""Vim-style key handler for the zen markdown editor."""
+"""Vim-style key handler for the zen markdown editor.
+
+Built around vim's own grammar rather than a table of key pairs: a **count**, an
+optional **operator** (``d`` / ``c`` / ``y``, the shifts ``>`` / ``<``, the
+case changes ``gu`` / ``gU`` / ``g~``), and a **motion** or **text object**
+that says what the operator acts on. So ``d`` composes with every motion the
+handler knows — ``de``, ``d$``, ``dG``, ``d}``, ``dfx``, ``diw`` — instead of
+each pair having to be written out, and a motion added once is immediately
+available to every operator and to VISUAL mode.
+
+Where a motion *lands* is pure text logic and lives in :mod:`textli.vimmotion`;
+this module is the Qt half — it reads the caret, asks for a position or a span,
+and turns the answer into a cursor move or an undoable edit.
+
+``.`` repeats the last change by replaying its keystrokes. A command's keys are
+buffered as they arrive and kept if the document's revision moved by the time
+the handler is back in NORMAL mode with nothing pending — which is what makes
+``cwword<Esc>`` repeatable without the handler having to model what ``c`` did.
+
+The screen-relative keys — ``H M L``, the scrolls ``⌃d ⌃u ⌃f ⌃b ⌃e ⌃y`` and
+``zz zt zb`` — count in *display* lines, the rows the view actually shows,
+the same way ``j``/``k`` move on soft-wrapped prose: a paragraph is one line
+to vim but many on screen, and a half page of one line would be no half page
+at all.
+"""
 
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
 
+from textli import vimmotion as vm
 from textli.constants import _CTRL_MOD
 
 
@@ -16,13 +42,46 @@ class VimMode(enum.Enum):
     NORMAL = "NORMAL"
     INSERT = "INSERT"
     VISUAL = "VISUAL"
+    VISUAL_LINE = "VISUAL LINE"
+    REPLACE = "REPLACE"
 
 
 _MoveOp = QTextCursor.MoveOperation
 _MoveMode = QTextCursor.MoveMode
-# Qt reports line breaks in ``selectedText()`` as U+2029 (paragraph separator);
-# the register keeps real newlines so paste round-trips.
-_PARA_SEP = " "
+
+# The case operators. Each takes two keys, so its doubled, line-wise form
+# repeats the second (``gUU``) — or both, ``gUgU``, which _complete_g sees.
+_CASE = {"gu": str.lower, "gU": str.upper, "g~": str.swapcase}
+
+# The bracket text objects, keyed by every character vim accepts for each pair.
+_BRACKETS = {
+    "(": ("(", ")"), ")": ("(", ")"), "b": ("(", ")"),
+    "[": ("[", "]"), "]": ("[", "]"),
+    "{": ("{", "}"), "}": ("{", "}"), "B": ("{", "}"),
+    "<": ("<", ">"), ">": ("<", ">"),
+}
+_QUOTES = ("\"", "'", "`")
+
+# ⌃d ⌃u ⌃f ⌃b ⌃e ⌃y — the keys that scroll the view (see _scroll).
+_SCROLLS = (Qt.Key.Key_D, Qt.Key.Key_U, Qt.Key.Key_F, Qt.Key.Key_B,
+            Qt.Key.Key_E, Qt.Key.Key_Y)
+
+# zt / zz / zb — how far down the view each puts the caret line.
+_Z_PLACES = {"t": 0.0, "z": 0.5, "b": 1.0}
+
+
+@dataclass(frozen=True)
+class Motion:
+    """Where a motion lands, and how an operator should read the span.
+
+    ``inclusive`` covers the landing character (``e``, ``f``, ``%``);
+    ``linewise`` widens the span to whole lines (``j``, ``G``, ``}``… ), which
+    is also what makes ``dj`` take two lines rather than a column run.
+    """
+
+    pos: int
+    linewise: bool = False
+    inclusive: bool = False
 
 
 class VimKeyHandler:
@@ -48,17 +107,82 @@ class VimKeyHandler:
         self._open_file = open_file
         self._open_headings = open_headings
         self._mode = initial_mode
-        self._pending = ""
-        # Numeric count prefix accumulated before a motion/operator (``3j``,
-        # ``2dd``); ``_pending_count`` carries it across a two-key operator so
-        # ``2dd`` still knows the 2 when the second ``d`` arrives.
+        # Numeric count prefix accumulated before an operator or motion (``3j``,
+        # ``2dd``). ``_op_count`` carries the operator's own count across to the
+        # motion, so ``2d3w`` deletes six words the way vim multiplies them.
         self._count = ""
-        self._pending_count = 1
+        self._op: str | None = None
+        self._op_count = 1
+        # Multi-key sequences still awaiting their next key.
+        self._pending_g = False
+        self._pending_find: str | None = None     # "f" / "F" / "t" / "T"
+        self._pending_object: str | None = None   # "i" / "a"
+        self._pending_replace = False
+        # `z` awaiting t/z/b: None when not pending, else the count typed
+        # before it (0 for none) — `5zt` puts line 5 at the top.
+        self._pending_z: int | None = None
+        # How many lines ⌃d / ⌃u scroll: 0 for half the view, else the
+        # count last given to one of them, which vim keeps for the next.
+        self._scroll_lines = 0
+        # An insert leg entered with a count (``3ihi<Esc>``, ``2oitem<Esc>``,
+        # ``3Rab<Esc>``) is typed once and replayed ``count - 1`` more times on
+        # Esc, each copy on a line of its own when ``_insert_opens`` — the
+        # line ``o``/``O`` open, continuing the list the way they do.
+        # ``_insert_keys`` are the leg's keystrokes, replayed rather than
+        # diffed out of the text for the same reason `.` replays (Backspace).
+        self._insert_count = 1
+        self._insert_opens = False
+        # The line ``o``/``O``/Enter/``cc`` started for you — (block number,
+        # the indent and marker put there) — so Esc can take them back off
+        # when nothing was typed after them, as vim does with autoindent.
+        self._auto_head: tuple[int, str] | None = None
+        self._insert_keys: list[tuple] = []
+        # REPLACE — what each typed character overwrote (None where it went
+        # past the line's end or broke the line), so Backspace puts it back.
+        self._replaced: list[str | None] = []
+        self._last_find: tuple[str, str] | None = None   # (cmd, char) for ; and ,
         # Single unnamed register shared by yank, delete and paste. A line-wise
         # yank/delete (``yy``/``dd``) pastes on its own line; a char-wise one
         # pastes inline.
         self._register = ""
         self._register_linewise = False
+        # `.` — the keystrokes of the last change, and the buffer collecting the
+        # command in flight (see _record_* below).
+        self._last_change: list[tuple] = []
+        self._buffer: list[tuple] = []
+        self._revision = 0
+        self._repeatable = True
+        self._replaying = False
+        # `u` / `U` — one per command. Qt records a command as however many
+        # undo steps its edits happened to make (`cwfoo<Esc>` is a removal,
+        # then a typing run), so each command's span of the undo stack is kept
+        # as ``(first, last, caret)`` — stack positions, undone or redone
+        # whole, and where the change began (see _mark_change), which is where
+        # vim puts the caret back. A position is ``availableUndoSteps()``, which
+        # is Qt's index into its raw item list rather than a step count: an
+        # edit block advances it by several, and so does the first step after
+        # an undo. So positions are only compared, never counted, and a span is
+        # only trusted while the stack still holds it (see _prune_undo).
+        doc = editor.document()
+        self._undo_spans: list[tuple[int, int, int]] = []
+        self._undo_base = 0
+        self._undo_caret: int | None = None
+        self._undo_depth = doc.availableUndoSteps()
+        self._undoing = False
+        doc.undoCommandAdded.connect(self._prune_undo)
+        doc.contentsChange.connect(self._track_undo_depth)
+        doc.redoAvailable.connect(self._forget_cleared_undo)
+        # VISUAL keeps vim's own ends: the anchor, and a caret cursor that sits
+        # *on* a character. Qt's selection is exclusive, so it is only the
+        # rendering of the span between them — one character wider than the
+        # caret on a forward selection (see _show_visual).
+        self._visual_anchor = 0
+        self._visual_caret: QTextCursor | None = None
+        self._visual_shown: tuple[int, int] | None = None
+        # `gv` — the last selection's ends and mode. Kept as cursors rather
+        # than offsets so they ride along with later edits, the way vim's
+        # `'<` / `'>` marks do: `Vj>` then `gv` reselects the shifted lines.
+        self._last_visual: tuple[QTextCursor, QTextCursor, VimMode] | None = None
         # Block cursor everywhere but INSERT (NORMAL and VISUAL show it); the
         # caret only thins out while typing. Callers that open in INSERT (inline
         # editing) pass ``initial_mode``; the zen editor keeps the NORMAL default.
@@ -69,11 +193,21 @@ class VimKeyHandler:
         return self._mode
 
     @property
+    def _in_visual(self) -> bool:
+        """VISUAL or VISUAL LINE — both share the handler and the motions;
+        they differ only in how much of the text the selection covers."""
+        return self._mode in (VimMode.VISUAL, VimMode.VISUAL_LINE)
+
+    @property
     def has_pending(self) -> bool:
-        """True while a multi-key sequence (g…, d…, y…) awaits its second key,
-        or a count prefix is building — the host must not intercept keys that
-        would complete it."""
-        return bool(self._pending) or bool(self._count)
+        """True while a multi-key sequence awaits its next key, or a count is
+        building — the host must not intercept keys that would complete one.
+        ``f/`` has to reach the handler rather than opening search, and ``dn``
+        must not step to the next search hit."""
+        return bool(
+            self._count or self._op or self._pending_g or self._pending_find
+            or self._pending_object or self._pending_replace
+            or self._pending_z is not None)
 
     def _set_mode(self, mode: VimMode):
         if mode == self._mode:
@@ -82,20 +216,189 @@ class VimKeyHandler:
         self._editor.setOverwriteMode(mode != VimMode.INSERT)
         self._mode_changed(mode)
 
+    # ── Entry point & change recording ──
+
     def handle_key(self, event: QKeyEvent) -> bool:
         """Process a key event. Returns True if consumed."""
-        if self._mode == VimMode.INSERT:
+        if self._replaying:
+            return self._dispatch(event)
+        if not self._in_command():
+            # A fresh command starts here: remember where the document stood so
+            # its keys are kept for `.` only if they actually changed something.
+            self._buffer = []
+            self._revision = self._editor.document().revision()
+            self._repeatable = True
+            doc = self._editor.document()
+            self._undo_base = doc.availableUndoSteps()
+            self._undo_caret = None
+            self._undoing = False
+            # Qt folds a typing run into the step before it when it carries
+            # on where that one ended — `ifoo<Esc>` then `abar<Esc>` would
+            # be one step, and one `u` would take back two changes. Qt only
+            # merges into a modified document, so clearing the flag here
+            # starts every command on a fresh step. (textli never reads the
+            # flag; autosave compares against the file on disk.)
+            doc.setModified(False)
+        self._buffer.append(
+            (event.key(), event.text(), event.modifiers()))
+        consumed = self._dispatch(event)
+        if not self._in_command():
+            if (self._repeatable
+                    and self._editor.document().revision() != self._revision):
+                self._last_change = list(self._buffer)
+            self._buffer = []
+            steps = self._editor.document().availableUndoSteps()
+            if not self._undoing and steps > self._undo_base:
+                caret = self._undo_caret
+                self._undo_spans.append((
+                    self._undo_base, steps,
+                    self._editor.textCursor().position()
+                    if caret is None else caret))
+        return consumed
+
+    def _mark_change(self, pos: int):
+        """Record where the command in flight began changing the document —
+        where vim's cursor stood when it saved the change for undo, and so
+        where `u` and `U` put the caret. Only the first mark counts. Edits
+        mark themselves (see _track_undo_depth): an operator's edit starts at
+        its span's start, an insert at the caret. A command that edits away
+        from where vim's cursor stands marks first — `o`, `O` and `J` keep
+        the caret where it was, `dd` and `cc` go to the first non-blank, and
+        `dj`/`dk` keep the caret's column on the span's first line."""
+        if self._undo_caret is None:
+            self._undo_caret = pos
+
+    def _prune_undo(self):
+        """Forget the spans a new undo step has made stale. The step replaces
+        everything above the position the stack stood at just before it — the
+        redo branch after an undo — so only a span ending at or below that
+        position still describes its own steps. Qt fires this before the
+        step's ``contentsChange``, so ``_undo_depth`` still holds that
+        position, and it fires for every new step (a typing run merged into
+        the previous one is not new). (``availableRedoSteps`` can't stand in
+        for this: Qt undercounts it after a merged typing run.)"""
+        self._undo_spans = [
+            s for s in self._undo_spans if s[1] <= self._undo_depth]
+
+    def _track_undo_depth(self, position: int, *_):
+        """Note where the stack stands after every change — an edit, an undo
+        or redo from any source, a reload — for the next _prune_undo, and
+        mark where the command in flight first changed the document."""
+        self._undo_depth = self._editor.document().availableUndoSteps()
+        self._mark_change(position)
+
+    def _forget_cleared_undo(self, available: bool):
+        """A stack with nothing left to undo or redo has been cleared — a file
+        load or a live reload (``setPlainText``) — so no span describes it."""
+        if not available and not self._editor.document().isUndoAvailable():
+            self._undo_spans = []
+
+    def _undo(self, *, redo: bool):
+        """``u`` / ``U`` — step back (or forward) over one whole command, then
+        put the caret where the change began, the way vim does, rather than
+        where Qt leaves it (after the restored text). A step that
+        isn't a vim command's — a host edit — is taken alone, and Qt's caret
+        is kept for it."""
+        self._undoing = True
+        doc = self._editor.document()
+        if not (doc.isRedoAvailable() if redo else doc.isUndoAvailable()):
+            return
+        at = doc.availableUndoSteps()
+        span = next((s for s in self._undo_spans
+                     if (s[0] if redo else s[1]) == at), None)
+        target = (span[1] if redo else span[0]) if span else None
+        while True:
+            before = doc.availableUndoSteps()
+            if redo:
+                self._editor.redo()
+            else:
+                self._editor.undo()
+            now = doc.availableUndoSteps()
+            if (target is None or now == before
+                    or (now >= target if redo else now <= target)):
+                break
+        if span is not None:
+            text = self._editor.toPlainText()
+            caret = min(span[2], len(text))
+            self._set_position(min(caret, self._last_column(text, caret)))
+
+    def _in_command(self) -> bool:
+        """True while a command is still being typed — mid-sequence, mid-count,
+        or inside the INSERT/VISUAL leg of one."""
+        return self._mode != VimMode.NORMAL or self.has_pending
+
+    def _dispatch(self, event: QKeyEvent) -> bool:
+        if self._mode in (VimMode.INSERT, VimMode.REPLACE):
             return self._handle_insert(event)
-        if self._mode == VimMode.VISUAL:
+        if self._in_visual:
             return self._handle_visual(event)
         return self._handle_normal(event)
 
+    def _repeat_last_change(self, count: int):
+        """``.`` — replay the last change's keystrokes.
+
+        Replaying rather than re-running a recorded edit is what makes an insert
+        leg repeat too (``cwfoo<Esc>`` puts ``foo`` in again). An INSERT key the
+        handler doesn't consume is normally left to the widget, which never sees
+        it during a replay — the host's event filter is not in the loop — so the
+        widget's own key handling is invoked here instead. That is the whole
+        default: typing, but also Backspace and Delete, so an insert leg that
+        corrected a typo repeats the corrected text rather than the keystrokes
+        minus their corrections. ``QPlainTextEdit``'s implementation is called
+        rather than ``self._editor``'s, because :class:`InlineVimEditor`
+        overrides ``keyPressEvent`` to route back into this handler, and
+        replaying through that override would recurse.
+        """
+        if not self._last_change:
+            return
+        self._replaying = True
+        try:
+            for _ in range(count):
+                self._feed(self._last_change)
+        finally:
+            self._replaying = False
+            self._set_mode(VimMode.NORMAL)
+
+    def _feed(self, keys: list[tuple]):
+        """Dispatch recorded keystrokes, handing a typing key the handler
+        leaves alone to the widget, as the host would (see
+        _repeat_last_change)."""
+        for key, text, mods in keys:
+            ev = QKeyEvent(QKeyEvent.Type.KeyPress, key, mods, text)
+            if not self._dispatch(ev) and self._mode in (
+                    VimMode.INSERT, VimMode.REPLACE):
+                QPlainTextEdit.keyPressEvent(self._editor, ev)
+
     # ── Insert mode ──
 
+    def _begin_insert(self, count: int = 1, *, opens: bool = False,
+                      mode: VimMode = VimMode.INSERT):
+        """Enter INSERT (or REPLACE) for ``i a I A o O R``, whose count repeats
+        what is typed — ``3ihi<Esc>`` leaves ``hihihi``."""
+        self._insert_count = count
+        self._insert_opens = opens
+        self._insert_keys = []
+        self._replaced = []
+        self._set_mode(mode)
+
     def _handle_insert(self, event: QKeyEvent) -> bool:
+        """INSERT and REPLACE: REPLACE only differs in what a typed character
+        does to the one under the caret, and in what Backspace puts back."""
         if event.key() == Qt.Key.Key_Escape:
+            keys, count = self._insert_keys, self._insert_count
+            self._insert_keys, self._insert_count = [], 1
+            self._drop_untyped_head()
+            for _ in range(count - 1):
+                if self._insert_opens:
+                    self._break_line(ends_list=False)
+                self._feed(keys)
+                self._drop_untyped_head()
+            self._insert_keys, self._replaced = [], []
             self._set_mode(VimMode.NORMAL)
-            self._move(_MoveOp.Left)
+            # Vim steps back onto the last typed character, but never across a
+            # line break: `o<Esc>` stays on the line it opened.
+            if not self._editor.textCursor().atBlockStart():
+                self._move(_MoveOp.Left)
             return True
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             # Insert the newline ourselves rather than passing through. On
@@ -103,263 +406,907 @@ class VimKeyHandler:
             # bare Return so the default handler never inserts a line break
             # — only Shift+Return got through. Handling it here makes Enter
             # work everywhere and keeps behaviour identical across platforms.
-            self._editor.textCursor().insertText("\n")
+            self._insert_keys.append(
+                (event.key(), event.text(), event.modifiers()))
+            if self._mode == VimMode.REPLACE:
+                self._editor.textCursor().insertText("\n")
+                self._replaced.append(None)      # vim's R breaks, never eats
+            else:
+                self._break_line()
             return True
+        self._insert_keys.append((event.key(), event.text(), event.modifiers()))
+        if self._mode == VimMode.REPLACE:
+            return self._replace_key(event)
         return False  # pass through to editor
+
+    def _break_line(self, *, ends_list: bool = True):
+        """Enter in INSERT: break the line and start the new one the way the
+        caret's line starts — its indent, and on a list item the next item's
+        marker. On an item with nothing typed after its marker, Enter ends the
+        list instead: the marker goes and the line is left empty. With the
+        caret inside a line's head (its indent or marker) the break is plain,
+        so Enter there pushes the line down as it stands. A counted ``o``
+        replays with ``ends_list`` off: ``3o<Esc>`` opens three items."""
+        c = self._editor.textCursor()
+        line = c.block().text()
+        column = c.positionInBlock()
+        if (ends_list and vm.is_empty_item(line)
+                and column >= len(vm.item_head(line))):
+            c.movePosition(_MoveOp.StartOfBlock)
+            c.movePosition(_MoveOp.EndOfBlock, _MoveMode.KeepAnchor)
+            c.removeSelectedText()
+        elif column < len(vm.item_head(line) or vm.indent_of(line)):
+            c.insertText("\n")
+        else:
+            head = vm.continue_line(line)
+            # An indent nothing was typed after doesn't stay behind on the
+            # line Enter leaves — vim's autoindent takes it back.
+            self._drop_untyped_head()
+            c = self._editor.textCursor()
+            c.insertText("\n" + head)
+            self._editor.setTextCursor(c)
+            self._mark_auto_head(head)
+            return
+        self._editor.setTextCursor(c)
+
+    def _mark_auto_head(self, head: str):
+        """Remember that the caret's line holds just ``head``, put there for
+        you — see _drop_untyped_head."""
+        c = self._editor.textCursor()
+        self._auto_head = (c.blockNumber(), head) if head else None
+
+    def _drop_untyped_head(self):
+        """Empty the caret's line if it still holds only the indent and
+        marker ``o``/``O``/Enter/``cc`` put there. Vim removes an autoindent
+        nothing was typed after on Esc or Enter; with markdown's settings it
+        never adds a marker, so ``o<Esc>`` on ``- item`` leaves an empty
+        line there, and this matches that."""
+        auto, self._auto_head = self._auto_head, None
+        c = self._editor.textCursor()
+        if auto is None or auto != (c.blockNumber(), c.block().text()):
+            return
+        c.movePosition(_MoveOp.StartOfBlock)
+        c.movePosition(_MoveOp.EndOfBlock, _MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        self._editor.setTextCursor(c)
+
+    def _replace_key(self, event: QKeyEvent) -> bool:
+        """``R`` — a typed character overwrites the one under the caret (past
+        the line's end it is appended), and Backspace steps back restoring
+        what was overwritten, the way vim's REPLACE does. Any other key goes
+        to the widget, and the caret it may move leaves nothing to restore."""
+        c = self._editor.textCursor()
+        if event.key() == Qt.Key.Key_Backspace:
+            if self._replaced:
+                original = self._replaced.pop()
+                c.movePosition(_MoveOp.Left)
+                c.movePosition(_MoveOp.Right, _MoveMode.KeepAnchor)
+                if original is None:
+                    c.removeSelectedText()
+                else:
+                    c.insertText(original)
+                    c.movePosition(_MoveOp.Left)
+            elif not c.atBlockStart():
+                c.movePosition(_MoveOp.Left)
+            self._editor.setTextCursor(c)
+            return True
+        txt = event.text()
+        if not (txt and txt.isprintable()):
+            self._replaced = []
+            return False
+        for ch in txt:
+            original = None
+            if not c.atBlockEnd():
+                c.movePosition(_MoveOp.Right, _MoveMode.KeepAnchor)
+                original = c.selectedText()
+            c.insertText(ch)
+            self._replaced.append(original)
+        self._editor.setTextCursor(c)
+        return True
 
     # ── Normal mode ──
 
     def _handle_normal(self, event: QKeyEvent) -> bool:
         key = event.key()
+        txt = event.text()
         mods = event.modifiers()
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         ctrl = bool(mods & _CTRL_MOD)
 
-        # Handle pending multi-key sequences (they consume the count prefix).
-        if self._pending:
-            return self._handle_pending(event)
+        # ── Sequences awaiting their next key ──
+        if self._pending_replace:
+            self._pending_replace = False
+            count, self._op_count = self._op_count, 1
+            if txt and txt.isprintable():
+                self._replace_chars(txt, count)
+            return True
+        if self._pending_find:
+            cmd, self._pending_find = self._pending_find, None
+            if txt and txt.isprintable():
+                self._last_find = (cmd, txt)
+                self._run_find(cmd, txt, self._op_count)
+            else:
+                self._abort_operator()
+            return True
+        if self._pending_object:
+            kind, self._pending_object = self._pending_object, None
+            self._run_object(kind, txt, self._op_count)
+            return True
+        if self._pending_g:
+            self._pending_g = False
+            return self._complete_g(event)
+        if self._pending_z is not None:
+            line, self._pending_z = self._pending_z, None
+            self._complete_z(txt, line)
+            return True
 
-        # Numeric count prefix — digits accumulate (``3``, ``12``). A bare
-        # ``0`` is the start-of-line motion below; ``0`` is a count digit only
-        # once a count is already building.
-        if event.text().isdigit() and (event.text() != "0" or self._count):
-            self._count += event.text()
+        # ── Count prefix ──
+        # Digits accumulate (``3``, ``12``). A bare ``0`` is the start-of-line
+        # motion; ``0`` is a count digit only once a count is already building.
+        if txt.isdigit() and (txt != "0" or self._count):
+            self._count += txt
             return True
         has_count = bool(self._count)
-        count = self._take_count()   # 1 when no prefix; resets the accumulator
+        count = self._take_count()
+        if self._op:
+            # ``2d3w`` — the operator's count multiplies the motion's.
+            count *= self._op_count
 
-        # Esc in normal mode — save and close
+        # Esc — abandon a pending operator or a count, else save and close.
+        # `3<Esc>` only drops the count, the way vim beeps it away.
         if key == Qt.Key.Key_Escape:
+            if self._op or has_count:
+                self._abort_operator()
+                return True
             if shift:
                 self._close_cancel()
             else:
                 self._close_save()
             return True
 
-        # ── Motion ──
-        if key == Qt.Key.Key_H and not shift:
-            self._move(_MoveOp.Left, count)
+        # ── Operators ──
+        if self._op in _CASE and not ctrl and txt == self._op[1]:
+            # gUU / guu / g~~ — the case operators' line-wise form.
+            op, self._op = self._op, None
+            self._operate_lines(op, count)
             return True
-        if key == Qt.Key.Key_L and not shift:
-            self._move(_MoveOp.Right, count)
-            return True
-        if key == Qt.Key.Key_J and not shift:
-            self._move(_MoveOp.Down, count)
-            return True
-        if key == Qt.Key.Key_K and not shift:
-            self._move(_MoveOp.Up, count)
-            return True
-
-        # w — next word start
-        if key == Qt.Key.Key_W and not shift:
-            self._move(_MoveOp.NextWord, count)
-            return True
-        # b — previous word start
-        if key == Qt.Key.Key_B and not shift:
-            self._move(_MoveOp.PreviousWord, count)
-            return True
-        # e — end of word
-        if key == Qt.Key.Key_E and not shift:
-            self._move(_MoveOp.EndOfWord, count)
+        # ``>`` / ``<`` are shifted keys on most layouts, so only d/c/y need
+        # Shift to be up.
+        if not ctrl and (txt in (">", "<") or (
+                txt in ("d", "c", "y") and not shift)):
+            if self._op == txt:
+                # dd / cc / yy — the doubled operator is the line-wise form.
+                op = self._op
+                self._op = None
+                self._operate_lines(op, count)
+                return True
+            if self._op:
+                self._abort_operator()
+                return True
+            self._op = txt
+            self._op_count = count
             return True
 
-        # 0 — start of line
-        if key == Qt.Key.Key_0:
-            self._move(_MoveOp.StartOfBlock)
-            return True
-        # $ — end of line
-        if event.text() == "$":
-            self._move(_MoveOp.EndOfBlock)
+        # ── Text objects (only meaningful with an operator pending) ──
+        if self._op and not ctrl and txt in ("i", "a"):
+            self._pending_object = txt
+            self._op_count = count
             return True
 
-        # G — end of document, or <count>G — go to that line
-        if key == Qt.Key.Key_G and shift:
-            if has_count:
-                self._goto_line(count)
+        # ── Multi-key motions ──
+        if not ctrl and txt in ("f", "F", "t", "T"):
+            self._pending_find = txt
+            self._op_count = count
+            return True
+        if key == Qt.Key.Key_G and not shift and not ctrl:
+            self._pending_g = True
+            self._op_count = count
+            return True
+
+        # ── Single-key motions ──
+        motion = self._motion_for(key, txt, shift, ctrl, count, has_count)
+        if motion is not None:
+            if self._op:
+                op, self._op = self._op, None
+                self._apply(op, motion)
             else:
-                self._move(_MoveOp.End)
-            return True
-        # g — start pending for gg
-        if key == Qt.Key.Key_G and not shift:
-            self._pending = "g"
-            self._pending_count = count
+                self._move_to(motion, key, count)
             return True
 
-        # d — start pending for dd, dw
-        if key == Qt.Key.Key_D and not shift:
-            self._pending = "d"
-            self._pending_count = count
-            return True
-        # y — start pending for yy, yw
-        if key == Qt.Key.Key_Y and not shift:
-            self._pending = "y"
-            self._pending_count = count
+        # A pending operator only composes with motions and objects; anything
+        # else abandons it rather than acting on a span nobody asked for.
+        if self._op:
+            self._abort_operator()
             return True
 
-        # x — delete char(s) under/after the cursor
-        if key == Qt.Key.Key_X and not shift:
+        return self._normal_command(
+            event, key, txt, shift, ctrl, count, has_count)
+
+    def _motion_for(self, key, txt, shift, ctrl, count,
+                    has_count=False) -> Motion | None:
+        """Resolve a single-key motion to where it lands, or None if this key
+        isn't one. Shared by NORMAL, operator-pending and VISUAL, so a motion
+        added here works in all three at once."""
+        text = self._editor.toPlainText()
+        pos = self._caret()
+        if ctrl:
+            return None
+
+        if key == Qt.Key.Key_H and not shift:
+            return Motion(max(vm.line_start(text, pos), pos - count))
+        if key == Qt.Key.Key_L and not shift:
+            return Motion(min(self._last_column(text, pos, past_end=False),
+                              pos + count))
+        if key == Qt.Key.Key_J and not shift:
+            return Motion(self._line_offset(text, pos, count), linewise=True)
+        if key == Qt.Key.Key_K and not shift:
+            return Motion(self._line_offset(text, pos, -count), linewise=True)
+
+        # H / M / L — the top, middle or bottom line on screen; a count on H
+        # and L counts in from that edge. Line-wise, so `dL` takes whole lines.
+        if shift and key in (Qt.Key.Key_H, Qt.Key.Key_M, Qt.Key.Key_L):
+            target = self._screen_line(key, count)
+            return None if target is None else Motion(target, linewise=True)
+
+        # w / b / e and their WORD forms. `cw` is vim's one deliberate
+        # irregularity: on a non-blank it behaves like `ce`, so changing a word
+        # doesn't swallow the space after it.
+        if key == Qt.Key.Key_W:
+            if self._op == "c" and pos < len(text) \
+                    and vm.char_class(text[pos]) != vm.BLANK:
+                return Motion(vm.change_word_end(text, pos, count, shift),
+                              inclusive=True)
+            target = vm.word_forward(text, pos, count, shift)
+            if self._op:
+                # vim's other `w` special case: when the last word moved over
+                # ends a line, the operator stops there rather than reaching
+                # into the next line — `dw` on a line's last word doesn't join
+                # it to the one below.
+                seg = text[pos:target]
+                nl = seg.find("\n")
+                if nl != -1 and not seg[nl:].strip():
+                    target = pos + nl
+            return Motion(target)
+        if key == Qt.Key.Key_B:
+            return Motion(vm.word_backward(text, pos, count, shift))
+        if key == Qt.Key.Key_E:
+            return Motion(vm.word_end(text, pos, count, shift), inclusive=True)
+
+        if key == Qt.Key.Key_0 and not shift:
+            return Motion(vm.line_start(text, pos))
+        if txt == "^":
+            return Motion(vm.first_non_blank(text, pos))
+        if txt == "$":
+            return Motion(self._last_column(text, pos))
+        if txt == "}":
+            # Exclusive, not line-wise: `d}` from the top of a paragraph takes
+            # the paragraph and leaves the blank line, which falls out of the
+            # exclusive-motion rules applied in _apply.
+            return Motion(vm.paragraph_forward(text, pos, count))
+        if txt == "{":
+            return Motion(vm.paragraph_backward(text, pos, count))
+        if txt == "%":
+            target = vm.matching_bracket(text, pos)
+            return None if target is None else Motion(target, inclusive=True)
+        if txt in (";", ","):
+            if not self._last_find:
+                return None
+            cmd, ch = self._last_find
+            if txt == ",":
+                cmd = {"f": "F", "F": "f", "t": "T", "T": "t"}[cmd]
+            return self._find_motion(cmd, ch, count)
+        if key == Qt.Key.Key_G and shift:
+            # G — the last line, or <count>G — that line. Line-wise, so `dG`
+            # takes whole lines.
+            target = vm.goto_line(text, count) if has_count \
+                else vm.goto_line(text, text.count("\n") + 1)
+            return Motion(target, linewise=True)
+        return None
+
+    def _last_column(self, text: str, pos: int, *, past_end: bool = True) -> int:
+        """The furthest a motion may take the caret on this line. NORMAL rests
+        *on* the last character, never past it, so ``$x`` deletes that
+        character; an operator (``d$``, ``dl``) still reaches the line's end,
+        which is what lets it take the last character too. VISUAL is inclusive,
+        so ``l`` stops on the last character there as well; only ``$`` goes on
+        to the line break, which vim's ``v$`` selects along with the line."""
+        start, end = vm.line_bounds(text, pos)
+        if self._op or (self._in_visual and past_end):
+            return end
+        return max(start, end - 1)
+
+    def _line_offset(self, text: str, pos: int, delta: int) -> int:
+        """A position on the line ``delta`` lines from ``pos`` (clamped)."""
+        return vm.goto_line(text, vm.line_number(text, pos) + delta)
+
+    def _find_motion(self, cmd: str, ch: str, count: int) -> Motion | None:
+        target = vm.find_char(
+            self._editor.toPlainText(), self._caret(),
+            ch, count, forward=cmd in ("f", "t"), till=cmd in ("t", "T"))
+        if target is None:
+            return None
+        # Forward f/t include the landing character; backward F/T never do.
+        return Motion(target, inclusive=cmd in ("f", "t"))
+
+    def _run_find(self, cmd: str, ch: str, count: int):
+        motion = self._find_motion(cmd, ch, count)
+        if motion is None:
+            # A character that isn't on this line is a failed motion: vim moves
+            # nothing and drops the operator.
+            self._abort_operator()
+            return
+        if self._op:
+            op, self._op = self._op, None
+            self._apply(op, motion)
+        else:
+            self._set_position(motion.pos)
+
+    def _run_object(self, kind: str, ch: str, count: int):
+        """``iw`` / ``aw`` / ``i(`` / ``a"`` / ``ip`` … — operate on a span
+        around the caret rather than on a run from it."""
+        op, self._op = self._op, None
+        if not op:
+            return
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        inner = kind == "i"
+        span = None
+        linewise = False
+        if ch in ("w", "W"):
+            span = vm.word_object(text, pos, count, inner=inner, big=ch == "W")
+        elif ch in _BRACKETS:
+            open_, close = _BRACKETS[ch]
+            span = vm.bracket_object(text, pos, open_, close, inner=inner)
+        elif ch in _QUOTES:
+            span = vm.quote_object(text, pos, ch, inner=inner)
+        elif ch == "p":
+            span = vm.paragraph_object(text, pos, inner=inner)
+            linewise = True
+        if span is None:
+            return
+        self._operate_span(op, span[0], span[1], linewise=linewise)
+
+    def _complete_g(self, event: QKeyEvent) -> bool:
+        key = event.key()
+        count = self._op_count
+        self._op_count = 1
+        if key == Qt.Key.Key_G:
+            # gg → first line, <count>gg → that line. Line-wise, so `dgg` takes
+            # whole lines.
+            motion = Motion(vm.goto_line(self._editor.toPlainText(), count),
+                            linewise=True)
+            if self._op:
+                op, self._op = self._op, None
+                self._apply(op, motion)
+            else:
+                self._set_position(motion.pos)
+            return True
+        if key == Qt.Key.Key_E:
+            text = self._editor.toPlainText()
+            pos = self._editor.textCursor().position()
+            # ge — the end of the previous word: step back over this word, then
+            # take the end of the one before it.
+            target = vm.word_end(text, vm.word_backward(text, pos, count) - 1, 1)
+            motion = Motion(max(0, target), inclusive=True)
+            if self._op:
+                op, self._op = self._op, None
+                self._apply(op, motion)
+            else:
+                self._set_position(motion.pos)
+            return True
+        txt = event.text()
+        if "g" + txt in _CASE:
+            op = "g" + txt
+            if self._op == op:
+                # gUgU / gugu / g~g~ — the long spelling of gUU.
+                self._op = None
+                self._operate_lines(op, count)
+            elif self._op:
+                self._abort_operator()
+            else:
+                self._op = op
+                self._op_count = count
+            return True
+        if self._op:
+            self._abort_operator()
+            return True
+        if txt == "v":
+            self._reselect_visual()
+            return True
+        if key == Qt.Key.Key_O and self._open_file is not None:
+            self._open_file()
+            return True
+        if key == Qt.Key.Key_H and self._open_headings is not None:
+            self._open_headings()
+            return True
+        return True  # unknown g-sequence, consume
+
+    def _normal_command(self, event, key, txt, shift, ctrl, count,
+                        has_count=False) -> bool:
+        """Everything that isn't a motion: edits, mode changes, paste, repeat,
+        and the scrolls, which move the view rather than name a span."""
+        if ctrl and not shift and key in _SCROLLS:
+            self._scroll(key, count, has_count)
+            return True
+        if txt == "z" and not ctrl:
+            self._pending_z = count if has_count else 0
+            return True
+
+        # x / X — delete forward / backward characters (charwise `dl` / `dh`).
+        if key == Qt.Key.Key_X and not shift and not ctrl:
             self._delete_chars(count)
+            return True
+        if key == Qt.Key.Key_X and shift and not ctrl:
+            self._delete_chars_back(count)
+            return True
+
+        # D / C / Y / S / s — vim's one-key shorthands for an operator with a
+        # motion already attached.
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        if key == Qt.Key.Key_D and shift and not ctrl:
+            self._apply("d", Motion(vm.line_end(text, pos)))
+            return True
+        if key == Qt.Key.Key_C and shift and not ctrl:
+            self._apply("c", Motion(vm.line_end(text, pos)))
+            return True
+        if key == Qt.Key.Key_Y and shift and not ctrl:
+            self._operate_lines("y", count)      # vim's Y is yy
+            return True
+        if key == Qt.Key.Key_S and shift and not ctrl:
+            self._operate_lines("c", count)      # S is cc
+            return True
+        if key == Qt.Key.Key_S and not shift and not ctrl:
+            self._set_register_text(text[pos:min(len(text), pos + count)], False)
+            self._remove(pos, min(vm.line_end(text, pos), pos + count))
+            self._set_mode(VimMode.INSERT)       # s is cl
+            return True
+
+        # R — REPLACE: type over the line until Esc.
+        if key == Qt.Key.Key_R and shift and not ctrl:
+            self._begin_insert(count, mode=VimMode.REPLACE)
+            return True
+
+        # r — replace the character(s) under the caret, staying in NORMAL.
+        if key == Qt.Key.Key_R and not shift and not ctrl:
+            self._pending_replace = True
+            self._op_count = count
+            return True
+
+        # ~ — toggle the case of the character(s) under the caret.
+        if txt == "~":
+            self._toggle_case(count)
+            return True
+
+        # J — join this line with the next (count lines).
+        if key == Qt.Key.Key_J and shift and not ctrl:
+            self._join_lines(count)
+            return True
+
+        # . — repeat the last change.
+        if txt == "." and not ctrl:
+            self._repeatable = False   # `.` never becomes the change it repeats
+            self._repeat_last_change(count)
             return True
 
         # p / P — paste after / before, count copies
-        if key == Qt.Key.Key_P and not shift:
-            self._paste(after=True, count=count)
-            return True
-        if key == Qt.Key.Key_P and shift:
-            self._paste(after=False, count=count)
+        if key == Qt.Key.Key_P and not ctrl:
+            self._paste(after=not shift, count=count)
             return True
 
-        # v — enter VISUAL, selecting from here as the motions extend
-        if key == Qt.Key.Key_V and not shift and not ctrl:
-            self._set_mode(VimMode.VISUAL)
+        # v / V — enter VISUAL, selecting from here as the motions extend;
+        # V selects whole lines.
+        if key == Qt.Key.Key_V and not ctrl:
+            self._enter_visual(
+                VimMode.VISUAL_LINE if shift else VimMode.VISUAL)
             return True
 
-        # u / Ctrl-r — undo / redo, riding the editor's native undo stack
-        # (Qt restores the caret to the change site, the way vim leaves you
-        # there). So a NORMAL-mode edit is reversible without dropping to
-        # INSERT for the platform ⌘Z.
+        # u / U — undo / redo one command, riding the editor's native undo
+        # stack (see _undo). So a NORMAL-mode edit is reversible without
+        # dropping to INSERT for the platform ⌘Z. Never repeatable: `.` after
+        # an undo repeats the change that was undone, not the undo.
+        # Redo is `U`, not vim's Ctrl-r: textli's write view gives Ctrl-r to
+        # the reading-view toggle before vim sees it, and vim's line-undo `U`
+        # isn't kept. Ctrl-r still redoes where no host claims it (the
+        # embedded InlineVimEditor).
         if key == Qt.Key.Key_U and not shift and not ctrl:
+            self._repeatable = False
             for _ in range(count):
-                self._editor.undo()
+                self._undo(redo=False)
             return True
-        if key == Qt.Key.Key_R and ctrl:
+        if (key == Qt.Key.Key_U and shift and not ctrl) or (
+                key == Qt.Key.Key_R and ctrl):
+            self._repeatable = False
             for _ in range(count):
-                self._editor.redo()
+                self._undo(redo=True)
             return True
 
         # ── Enter insert mode ──
+        # A count repeats what is typed (see _begin_insert); each copy `o` or
+        # `O` repeats goes on a line of its own.
         if key == Qt.Key.Key_I and not shift:
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_A and not shift:
             self._move(_MoveOp.Right)
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_A and shift:
             self._move(_MoveOp.EndOfBlock)
-            self._set_mode(VimMode.INSERT)
+            self._begin_insert(count)
             return True
         if key == Qt.Key.Key_I and shift:
-            self._move(_MoveOp.StartOfBlock)
-            self._set_mode(VimMode.INSERT)
+            self._set_position(vm.first_non_blank(text, pos))
+            self._begin_insert(count)
             return True
+        # The opened line continues this one: its indent, and on a list
+        # item the next item's marker (see vimmotion.continue_line).
         if key == Qt.Key.Key_O and not shift:
+            self._mark_change(pos)
+            line = self._editor.textCursor().block().text()
             self._move(_MoveOp.EndOfBlock)
             c = self._editor.textCursor()
-            c.insertText("\n")
+            c.insertText("\n" + vm.continue_line(line))
             self._editor.setTextCursor(c)
-            self._set_mode(VimMode.INSERT)
+            self._mark_auto_head(vm.continue_line(line))
+            self._begin_insert(count, opens=True)
             return True
         if key == Qt.Key.Key_O and shift:
+            self._mark_change(pos)
+            line = self._editor.textCursor().block().text()
+            head = vm.continue_line(line, above=True)
             self._move(_MoveOp.StartOfBlock)
             c = self._editor.textCursor()
-            c.insertText("\n")
-            c.movePosition(_MoveOp.Up)
+            c.insertText(head + "\n")
+            c.movePosition(_MoveOp.Left)
             self._editor.setTextCursor(c)
-            self._set_mode(VimMode.INSERT)
+            self._mark_auto_head(head)
+            self._begin_insert(count, opens=True)
             return True
 
         return True  # consume unknown keys in normal mode
 
-    def _handle_pending(self, event: QKeyEvent) -> bool:
-        key = event.key()
-        pending = self._pending
-        self._pending = ""
-        count = self._pending_count
-        self._pending_count = 1
+    # ── Applying an operator ──
 
-        if pending == "g":
-            if key == Qt.Key.Key_G:
-                # gg → first line, <count>gg → that line (1-based; no count is
-                # count==1, i.e. the first line either way).
-                self._goto_line(count)
-                return True
-            if key == Qt.Key.Key_O and self._open_file is not None:
-                self._open_file()
-                return True
-            if key == Qt.Key.Key_H and self._open_headings is not None:
-                self._open_headings()
-                return True
-            return True  # unknown g-sequence, consume
+    def _abort_operator(self):
+        self._op = None
+        self._op_count = 1
+        self._pending_object = None
+        self._pending_find = None
 
-        if pending == "d":
-            if key == Qt.Key.Key_D:
-                self._delete_lines(count)
-                return True
-            if key == Qt.Key.Key_W:
-                self._delete_word(count)
-                return True
-            return True  # unknown d-sequence, consume
+    def _move_to(self, motion: Motion, key, count: int):
+        """Move the caret for a bare motion. j/k go through Qt so the desired
+        column survives a short line, the way vim remembers it."""
+        if key == Qt.Key.Key_J and not motion.inclusive:
+            self._move(_MoveOp.Down, count)
+            return
+        if key == Qt.Key.Key_K and not motion.inclusive:
+            self._move(_MoveOp.Up, count)
+            return
+        self._set_position(motion.pos)
 
-        if pending == "y":
-            if key == Qt.Key.Key_Y:
-                self._yank_lines(count)
-                return True
-            if key == Qt.Key.Key_W:
-                self._yank_word(count)
-                return True
-            return True  # unknown y-sequence, consume
+    def _apply(self, op: str, motion: Motion):
+        """Run ``op`` over the span between the caret and where ``motion`` lands.
 
-        return True
+        Exclusive motions get vim's two adjustments, which are what stop `d}`
+        from swallowing the blank line that ended the paragraph: an exclusive
+        motion ending in column 0 backs up to the end of the previous line, and
+        if it also *started* at or before its line's first non-blank, the whole
+        thing becomes line-wise.
+        """
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        start, end = min(pos, motion.pos), max(pos, motion.pos)
+        linewise = motion.linewise
+        if not linewise:
+            if motion.inclusive:
+                end = min(len(text), end + 1)
+            elif end > start and end > 0 and end == vm.line_start(text, end):
+                end -= 1
+                if start <= vm.first_non_blank(text, start):
+                    linewise = True
+        if linewise:
+            first = vm.line_start(text, start)
+            column = pos - vm.line_start(text, pos)
+            if op != "y":
+                self._mark_change(min(first + column, vm.line_end(text, first)))
+            self._operate_span(
+                op, first, vm.line_end(text, end), linewise=True)
+            return
+        self._operate_span(op, start, end, linewise=False)
+
+    def _operate_lines(self, op: str, count: int):
+        """``dd`` / ``cc`` / ``yy`` / ``>>`` / ``gUU`` — the line-wise form of
+        each operator."""
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        start = vm.line_start(text, pos)
+        end = vm.line_end(text, self._line_offset(text, pos, count - 1))
+        if op != "y":
+            self._mark_change(vm.first_non_blank(text, start))
+        self._operate_span(op, start, end, linewise=True)
+
+    def _operate_span(self, op: str, start: int, end: int, *, linewise: bool):
+        text = self._editor.toPlainText()
+        start = max(0, min(start, len(text)))
+        end = max(start, min(end, len(text)))
+        if op in (">", "<"):
+            self._shift_lines(start, end, 1 if op == ">" else -1)
+            return
+        if op in _CASE:
+            # The register is left alone: a case change isn't a yank. The
+            # caret lands on the start of what changed — a line-wise span
+            # starts at column 0.
+            self._replace_span(start, end, _CASE[op](text[start:end]))
+            self._set_position(start)
+            return
+        payload = text[start:end]
+        if linewise:
+            payload += "\n"
+        self._set_register_text(payload, linewise)
+        if op == "y":
+            # Yank leaves the caret at the start of what it took.
+            self._set_position(vm.line_start(text, start) if linewise else start)
+            return
+        if op == "c":
+            # Never _remove_lines: a line-wise change empties the line and
+            # leaves you on it, so the newline itself has to stay — and so
+            # does the first line's indent, as with vim's autoindent.
+            if linewise:
+                start = vm.first_non_blank(text, start)
+            self._remove(start, end)
+            if linewise:
+                self._mark_auto_head(vm.indent_of(
+                    self._editor.textCursor().block().text()))
+            self._set_mode(VimMode.INSERT)
+            return
+        if linewise:
+            self._remove_lines(start, end)
+        else:
+            self._remove(start, end)
+
+    def _shift_lines(self, start: int, end: int, levels: int):
+        """``>`` / ``<`` — shift every line the span touches, whatever the
+        motion: shifting is always line-wise in vim, so ``>w`` shifts the line.
+        The caret lands on the first line's first non-blank, as vim's does."""
+        text = self._editor.toPlainText()
+        first = vm.line_start(text, start)
+        last = vm.line_end(text, max(start, end - 1))
+        lines = text[first:last].split("\n")
+        self._replace_span(first, last, "\n".join(
+            vm.shift_indent(line, levels) for line in lines))
+        self._set_position(
+            vm.first_non_blank(self._editor.toPlainText(), first))
+
+    def _replace_span(self, start: int, end: int, new: str):
+        """Swap ``[start, end)`` for ``new`` as one undo step, leaving the
+        text alone when nothing would change."""
+        if self._editor.toPlainText()[start:end] == new:
+            return
+        c = self._editor.textCursor()
+        c.setPosition(start)
+        c.setPosition(end, _MoveMode.KeepAnchor)
+        c.insertText(new)
+
+    def _remove(self, start: int, end: int):
+        c = self._editor.textCursor()
+        c.setPosition(start)
+        c.setPosition(end, _MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        self._editor.setTextCursor(c)
+
+    def _remove_lines(self, start: int, end: int):
+        """Delete whole lines, taking a newline with them so no blank line is
+        left behind: the one after when there are lines below, otherwise the one
+        before."""
+        text = self._editor.toPlainText()
+        if end < len(text):          # a newline follows — take it
+            end += 1
+        elif start > 0:              # deleting the tail — take the one before
+            start -= 1
+        self._remove(start, end)
+        c = self._editor.textCursor()
+        c.movePosition(_MoveOp.StartOfBlock)
+        self._editor.setTextCursor(c)
 
     # ── Visual mode ──
+    #
+    # vim's selection is inclusive: `v` already covers the character under the
+    # caret, and `vlld` takes three characters. Qt's is exclusive, so the
+    # handler keeps vim's two ends itself — ``_visual_anchor`` and the
+    # ``_visual_caret`` cursor — and only renders them as a Qt selection. The
+    # caret is a QTextCursor rather than an int so `j`/`k` keep their column
+    # across a short line, the way NORMAL's do.
+
+    def _caret(self) -> int:
+        """Where motions start from: the vim caret in VISUAL, else Qt's."""
+        if self._in_visual and self._visual_caret is not None:
+            return self._visual_caret.position()
+        return self._editor.textCursor().position()
+
+    def _enter_visual(self, mode: VimMode, anchor: int | None = None,
+                      caret: int | None = None):
+        pos = self._editor.textCursor().position()
+        self._visual_anchor = pos if anchor is None else anchor
+        self._visual_caret = QTextCursor(self._editor.document())
+        self._visual_caret.setPosition(pos if caret is None else caret)
+        self._set_mode(mode)
+        self._show_visual()
+
+    def _remember_visual(self):
+        """Keep this selection for `gv`. Called as VISUAL is left — before
+        an operator edits, so the kept cursors follow that edit."""
+        anchor = QTextCursor(self._editor.document())
+        anchor.setPosition(
+            min(self._visual_anchor, len(self._editor.toPlainText())))
+        self._last_visual = (
+            anchor, QTextCursor(self._visual_caret), self._mode)
+
+    def _keep_visual_lines(self, rewrite: Callable[[], None]):
+        """Run ``rewrite`` — an edit that swaps whole runs of text but keeps
+        every line (a shift, a case change, ``r``) — and put the `gv` ends
+        back on their lines and columns afterwards. Left to themselves the
+        cursors would collapse with the text they sat in."""
+        text = self._editor.toPlainText()
+        ends = [(vm.line_number(text, c.position()),
+                 c.position() - vm.line_start(text, c.position()))
+                for c in self._last_visual[:2]]
+        rewrite()
+        text = self._editor.toPlainText()
+        for cursor, (line, column) in zip(self._last_visual[:2], ends):
+            start = vm.line_start(text, vm.goto_line(text, line))
+            cursor.setPosition(min(start + column, vm.line_end(text, start)))
+
+    def _reselect_visual(self):
+        """``gv`` — select the last selection again, in its own mode. Inside
+        VISUAL it swaps the current selection with the last one, as vim's
+        does. Ends an edit has pushed past the text are clamped back in."""
+        if self._last_visual is None:
+            return
+        anchor, caret, mode = self._last_visual
+        if self._in_visual:
+            self._remember_visual()
+        n = len(self._editor.toPlainText())
+        self._enter_visual(mode, min(anchor.position(), n),
+                           min(caret.position(), n))
+
+    def _visual_span(self) -> tuple[int, int]:
+        """The selected run as ``[start, end)``: both ends included. VISUAL
+        LINE widens it to the whole lines, line break of the last left out
+        — the same span ``dd`` takes."""
+        text = self._editor.toPlainText()
+        n = len(text)
+        lo = min(self._visual_anchor, self._visual_caret.position(), n)
+        hi = min(max(self._visual_anchor, self._visual_caret.position()), n)
+        if self._mode == VimMode.VISUAL_LINE:
+            return vm.line_start(text, lo), vm.line_end(text, hi)
+        return lo, min(hi + 1, n)
+
+    def _show_visual(self):
+        """Render the span as Qt's selection, its moving end on the caret's
+        side so the view scrolls to follow the caret. VISUAL LINE shows the
+        last line's break too, so a selected blank line is visible."""
+        start, end = self._visual_span()
+        if (self._mode == VimMode.VISUAL_LINE
+                and end < len(self._editor.toPlainText())):
+            end += 1
+        c = self._editor.textCursor()
+        if self._visual_caret.position() >= self._visual_anchor:
+            c.setPosition(start)
+            c.setPosition(end, _MoveMode.KeepAnchor)
+        else:
+            c.setPosition(end)
+            c.setPosition(start, _MoveMode.KeepAnchor)
+        self._editor.setTextCursor(c)
+        self._visual_shown = (c.anchor(), c.position())
+
+    def _sync_visual(self):
+        """Adopt a selection changed behind the handler's back (a mouse drag):
+        its last character becomes the caret, its first the anchor."""
+        c = self._editor.textCursor()
+        if self._visual_caret is None:
+            self._visual_caret = QTextCursor(self._editor.document())
+        elif (c.anchor(), c.position()) == self._visual_shown:
+            return
+        if c.position() > c.anchor():
+            anchor, caret = c.anchor(), c.position() - 1
+        elif c.position() < c.anchor():
+            anchor, caret = c.anchor() - 1, c.position()
+        else:
+            anchor = caret = c.position()
+        self._visual_anchor = anchor
+        self._visual_caret.setPosition(caret)
+        self._show_visual()
 
     def _handle_visual(self, event: QKeyEvent) -> bool:
         key = event.key()
+        txt = event.text()
         mods = event.modifiers()
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         ctrl = bool(mods & _CTRL_MOD)
+        self._sync_visual()
 
-        if self._pending:
-            self._pending = ""
-            if key == Qt.Key.Key_G:          # gg — extend to document start
-                self._move(_MoveOp.Start, keep=True)
+        if self._pending_replace:
+            # `rx` — every selected character becomes x. Anything but a
+            # printable character abandons the r and keeps the selection.
+            self._pending_replace = False
+            if txt and txt.isprintable():
+                self._visual_replace(txt)
+            return True
+        if self._pending_find:
+            cmd, self._pending_find = self._pending_find, None
+            if txt and txt.isprintable():
+                self._last_find = (cmd, txt)
+                motion = self._find_motion(cmd, txt, self._op_count)
+                if motion is not None:
+                    self._extend_to(motion)
+            return True
+        if self._pending_object:
+            kind, self._pending_object = self._pending_object, None
+            self._select_object(kind, txt, self._op_count)
+            return True
+        if self._pending_g:
+            self._pending_g = False
+            if key == Qt.Key.Key_G:
+                self._extend_to(Motion(
+                    vm.goto_line(self._editor.toPlainText(), self._op_count)))
+            elif txt == "v":
+                self._reselect_visual()
+            self._op_count = 1
+            return True
+        if self._pending_z is not None:
+            line, self._pending_z = self._pending_z, None
+            self._complete_z(txt, line)
             return True
 
-        if event.text().isdigit() and (event.text() != "0" or self._count):
-            self._count += event.text()
+        if txt.isdigit() and (txt != "0" or self._count):
+            self._count += txt
             return True
+        has_count = bool(self._count)
         count = self._take_count()
 
-        # Leave VISUAL — Esc or a second v — clearing the selection.
-        if key == Qt.Key.Key_Escape or (
-                key == Qt.Key.Key_V and not shift and not ctrl):
+        # Leave VISUAL — Esc, or the key that entered it (v in VISUAL, V in
+        # VISUAL LINE) — clearing the selection. The other key switches
+        # between char-wise and line-wise, keeping both ends.
+        if key == Qt.Key.Key_Escape:
             self._clear_visual()
             return True
+        if key == Qt.Key.Key_V and not ctrl:
+            mode = VimMode.VISUAL_LINE if shift else VimMode.VISUAL
+            if mode == self._mode:
+                self._clear_visual()
+            else:
+                self._set_mode(mode)
+                self._show_visual()
+            return True
 
-        # ── Motions extend the selection (anchor stays put) ──
-        if key == Qt.Key.Key_H and not shift:
-            self._move(_MoveOp.Left, count, keep=True)
+        # o — swap the ends: the caret jumps to the anchor and motions now
+        # move the other side of the selection.
+        if key == Qt.Key.Key_O and not shift and not ctrl:
+            caret = self._visual_caret.position()
+            self._visual_caret.setPosition(self._visual_anchor)
+            self._visual_anchor = caret
+            self._show_visual()
             return True
-        if key == Qt.Key.Key_L and not shift:
-            self._move(_MoveOp.Right, count, keep=True)
+
+        # Multi-key motions and text objects extend the selection too.
+        if not ctrl and txt in ("f", "F", "t", "T"):
+            self._pending_find = txt
+            self._op_count = count
             return True
-        if key == Qt.Key.Key_J and not shift:
-            self._move(_MoveOp.Down, count, keep=True)
+        if not ctrl and txt in ("i", "a"):
+            self._pending_object = txt
+            self._op_count = count
             return True
-        if key == Qt.Key.Key_K and not shift:
-            self._move(_MoveOp.Up, count, keep=True)
+        if key == Qt.Key.Key_G and not shift and not ctrl:
+            self._pending_g = True
+            self._op_count = count
             return True
-        if key == Qt.Key.Key_W and not shift:
-            self._move(_MoveOp.NextWord, count, keep=True)
+        if txt == "z" and not ctrl:
+            self._pending_z = count if has_count else 0
             return True
-        if key == Qt.Key.Key_B and not shift:
-            self._move(_MoveOp.PreviousWord, count, keep=True)
-            return True
-        if key == Qt.Key.Key_E and not shift:
-            self._move(_MoveOp.EndOfWord, count, keep=True)
-            return True
-        if key == Qt.Key.Key_0:
-            self._move(_MoveOp.StartOfBlock, keep=True)
-            return True
-        if event.text() == "$":
-            self._move(_MoveOp.EndOfBlock, keep=True)
-            return True
-        if key == Qt.Key.Key_G and shift:
-            self._move(_MoveOp.End, keep=True)
-            return True
-        if key == Qt.Key.Key_G and not shift:
-            self._pending = "g"
+        if ctrl and not shift and key in _SCROLLS:
+            self._scroll(key, count, has_count)
             return True
 
         # ── Operators act on the selection, then drop back ──
@@ -372,36 +1319,351 @@ class VimKeyHandler:
         if key == Qt.Key.Key_Y and not shift:
             self._visual_yank()
             return True
+        if key == Qt.Key.Key_P and not ctrl:
+            self._visual_paste()
+            return True
+        if not ctrl and txt in (">", "<"):
+            self._visual_shift(count if txt == ">" else -count)
+            return True
+        # ~ / u / U change the case of the selection. In NORMAL `u` and `U`
+        # are undo and redo; over a selection they are vim's case keys.
+        if txt == "~":
+            self._visual_case(str.swapcase)
+            return True
+        if key == Qt.Key.Key_U and not ctrl:
+            self._visual_case(str.upper if shift else str.lower)
+            return True
+        if key == Qt.Key.Key_J and shift and not ctrl:
+            self._visual_join()
+            return True
+        if key == Qt.Key.Key_R and not shift and not ctrl:
+            self._pending_replace = True
+            return True
+
+        # ── Everything else that resolves is a motion, moving the caret ──
+        motion = self._motion_for(key, txt, shift, ctrl, count, has_count)
+        if motion is not None:
+            if key == Qt.Key.Key_J and not shift:
+                self._visual_caret.movePosition(_MoveOp.Down, n=count)
+                self._show_visual()
+            elif key == Qt.Key.Key_K and not shift:
+                self._visual_caret.movePosition(_MoveOp.Up, n=count)
+                self._show_visual()
+            else:
+                self._extend_to(motion)
+            return True
 
         return True  # consume anything else while selecting
 
-    def _clear_visual(self):
+    def _extend_to(self, motion: Motion):
+        """Move the caret end to where ``motion`` lands. Inclusive or not, the
+        caret sits on that character, which the selection then covers."""
+        n = len(self._editor.toPlainText())
+        self._visual_caret.setPosition(max(0, min(motion.pos, n)))
+        self._show_visual()
+
+    def _select_object(self, kind: str, ch: str, count: int):
+        """``viw`` and friends — the object replaces the selection outright,
+        with the caret on its last character."""
+        text = self._editor.toPlainText()
+        pos = self._caret()
+        inner = kind == "i"
+        span = None
+        if ch in ("w", "W"):
+            span = vm.word_object(text, pos, count, inner=inner, big=ch == "W")
+        elif ch in _BRACKETS:
+            open_, close = _BRACKETS[ch]
+            span = vm.bracket_object(text, pos, open_, close, inner=inner)
+        elif ch in _QUOTES:
+            span = vm.quote_object(text, pos, ch, inner=inner)
+        elif ch == "p":
+            span = vm.paragraph_object(text, pos, inner=inner)
+        if span is None:
+            return
+        self._visual_anchor = span[0]
+        self._visual_caret.setPosition(max(span[0], span[1] - 1))
+        self._show_visual()
+
+    def _visual_paste(self):
+        """``p`` over a selection — the register replaces what was selected.
+
+        A line-wise register (from ``yy``/``dd``) keeps its own lines rather
+        than being spliced into the middle of one, so ``vip`` then ``p`` swaps
+        one paragraph for another cleanly.
+        """
+        start, end = self._visual_span()
+        linewise = self._mode == VimMode.VISUAL_LINE
+        # A selected blank line is empty yet still a line to replace.
+        if (end <= start and not linewise) or not self._register:
+            self._clear_visual()
+            return
+        self._remember_visual()
+        payload = self._register
         c = self._editor.textCursor()
-        c.clearSelection()
+        c.setPosition(start)
+        c.setPosition(end, _MoveMode.KeepAnchor)
+        c.beginEditBlock()
+        c.removeSelectedText()
+        if self._register_linewise:
+            c.insertText(payload.rstrip("\n"))
+        else:
+            c.insertText(payload)
+        # Line-wise, the caret lands on the first pasted line, as after `P`.
+        c.setPosition(start if linewise else max(start, c.position() - 1))
+        c.endEditBlock()
         self._editor.setTextCursor(c)
         self._set_mode(VimMode.NORMAL)
 
+    def _clear_visual(self):
+        """Back to NORMAL with the caret where VISUAL left it — on a character,
+        so a ``v$`` that reached the line break steps back onto the last one."""
+        self._remember_visual()
+        caret = self._visual_caret.position()
+        self._set_mode(VimMode.NORMAL)
+        self._set_position(
+            min(caret, self._last_column(self._editor.toPlainText(), caret)))
+
     def _visual_op(self, *, to_insert: bool):
         """d/x delete the selection (→ NORMAL); c deletes it then enters INSERT.
-        Either way the removed text lands in the register (char-wise)."""
-        c = self._editor.textCursor()
-        if c.hasSelection():
-            self._set_register(c.selectedText().replace(_PARA_SEP, "\n"),
-                               linewise=False)
-            c.removeSelectedText()
-            self._editor.setTextCursor(c)
+        Either way the removed text lands in the register — char-wise, or
+        line-wise from VISUAL LINE, which acts like ``dd`` / ``cc`` over the
+        selected lines."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        if self._mode == VimMode.VISUAL_LINE:
+            self._set_mode(VimMode.NORMAL)
+            self._mark_change(
+                vm.first_non_blank(self._editor.toPlainText(), start))
+            self._operate_span(
+                "c" if to_insert else "d", start, end, linewise=True)
+            return
+        if end > start:
+            self._set_register_text(self._editor.toPlainText()[start:end], False)
+            self._remove(start, end)
         self._set_mode(VimMode.INSERT if to_insert else VimMode.NORMAL)
+        if not to_insert:
+            # Like `x`: a deletion that took the line's tail leaves the caret
+            # on the new last character, not past it.
+            self._set_position(
+                min(start, self._last_column(self._editor.toPlainText(), start)))
 
     def _visual_yank(self):
-        """y copies the selection (char-wise) and drops back to NORMAL with the
-        caret at the selection start, the way vim leaves it."""
-        c = self._editor.textCursor()
-        if c.hasSelection():
-            self._set_register(c.selectedText().replace(_PARA_SEP, "\n"),
-                               linewise=False)
-            c.setPosition(c.selectionStart())
-            self._editor.setTextCursor(c)
+        """y copies the selection (char-wise, or line-wise from VISUAL LINE, so
+        ``Vy`` then ``p`` pastes on a line of its own) and drops back to NORMAL
+        with the caret at the selection start, the way vim leaves it."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        if self._mode == VimMode.VISUAL_LINE:
+            self._set_mode(VimMode.NORMAL)
+            self._operate_span("y", start, end, linewise=True)
+            return
+        if end > start:
+            self._set_register_text(self._editor.toPlainText()[start:end], False)
         self._set_mode(VimMode.NORMAL)
+        self._set_position(start)
+
+    def _visual_lines(self) -> tuple[int, int]:
+        """The first and last line number the selection touches."""
+        text = self._editor.toPlainText()
+        lo = min(self._visual_anchor, self._visual_caret.position())
+        hi = max(self._visual_anchor, self._visual_caret.position())
+        return vm.line_number(text, lo), vm.line_number(text, hi)
+
+    def _visual_shift(self, levels: int):
+        """``>`` / ``<`` — shift every line the selection touches, char-wise
+        or not; a count shifts that many levels (``3>``)."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        self._keep_visual_lines(
+            lambda: self._shift_lines(start, max(start + 1, end), levels))
+
+    def _visual_case(self, change: Callable[[str], str]):
+        """``~`` / ``u`` / ``U`` — swap, lower or upper the selection's case,
+        leaving the caret on its start the way vim does."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        text = self._editor.toPlainText()
+        self._keep_visual_lines(
+            lambda: self._replace_span(start, end, change(text[start:end])))
+        self._set_position(min(start, self._last_column(text, start)))
+
+    def _visual_join(self):
+        """``J`` — join the selected lines; a selection within one line joins
+        it with the next, as ``J`` would."""
+        first, last = self._visual_lines()
+        text = self._editor.toPlainText()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        self._set_position(vm.goto_line(text, first))
+        self._join_lines(max(2, last - first + 1))
+
+    def _visual_replace(self, ch: str):
+        """``r`` — overwrite every selected character with ``ch``. Line
+        breaks stay, so a selection across lines keeps its lines."""
+        start, end = self._visual_span()
+        self._remember_visual()
+        self._set_mode(VimMode.NORMAL)
+        text = self._editor.toPlainText()
+        self._keep_visual_lines(lambda: self._replace_span(start, end, "".join(
+            c if c == "\n" else ch for c in text[start:end])))
+        self._set_position(min(start, self._last_column(text, start)))
+
+    # ── The view: H M L, scrolling, zz zt zb ──
+    #
+    # Each works on the vim caret — Qt's in NORMAL, ``_visual_caret`` while
+    # selecting — so in VISUAL a scroll that moves the caret extends the
+    # selection, as vim's does.
+
+    def _caret_cursor(self) -> QTextCursor:
+        if self._in_visual and self._visual_caret is not None:
+            return self._visual_caret
+        return self._editor.textCursor()
+
+    def _place_caret(self, pos: int):
+        """Put the vim caret on ``pos`` — never past a line's last character
+        in NORMAL; in VISUAL the selection follows."""
+        if self._in_visual:
+            self._visual_caret.setPosition(pos)
+            self._show_visual()
+        else:
+            self._set_position(
+                min(pos, self._last_column(self._editor.toPlainText(), pos)))
+
+    def _screen_lines(self) -> list[tuple[int, float, float]]:
+        """The display lines on screen, top to bottom, as ``(position, top,
+        height)`` in viewport pixels. Only whole lines count, the way vim's
+        window never shows half of one; a line taller than the view is all
+        there is when nothing fits whole."""
+        ed = self._editor
+        bottom = ed.viewport().height()
+        block = ed.firstVisibleBlock()
+        top = ed.blockBoundingGeometry(block).translated(
+            ed.contentOffset()).top()
+        whole, cut = [], []
+        while block.isValid() and top < bottom:
+            # Asking for the block's height lays it out, which Qt otherwise
+            # leaves until it paints — an unpainted block has no lines yet.
+            height = ed.blockBoundingRect(block).height()
+            if block.isVisible():
+                layout = block.layout()
+                for i in range(layout.lineCount()):
+                    line = layout.lineAt(i)
+                    y = top + line.y()
+                    entry = (block.position() + line.textStart(),
+                             y, line.height())
+                    if y >= -0.5 and y + line.height() <= bottom + 0.5:
+                        whole.append(entry)
+                    elif y + line.height() > 0 and y < bottom:
+                        cut.append(entry)
+            top += height
+            block = block.next()
+        return whole or cut
+
+    def _screen_line(self, key, count: int) -> int | None:
+        """Where ``H`` / ``M`` / ``L`` land: the first non-blank of the
+        chosen line, or the start of a wrapped line's continuation row."""
+        lines = self._screen_lines()
+        if not lines:
+            return None
+        if key == Qt.Key.Key_H:
+            row = min(count, len(lines)) - 1
+        elif key == Qt.Key.Key_L:
+            row = max(0, len(lines) - count)
+        else:
+            # M — the middle of what the view shows, which is the middle of
+            # the text when the text is shorter than the view.
+            row = (len(lines) - 1) // 2
+        start = lines[row][0]
+        text = self._editor.toPlainText()
+        if start == vm.line_start(text, start):
+            return vm.first_non_blank(text, start)
+        return start
+
+    def _caret_to_row(self, row: tuple[int, float, float], x: float):
+        """Put the caret on a screen row, as near column ``x`` as it goes.
+        ``x`` is the caret's left edge, a character boundary; aiming a pixel
+        to its right keeps a boundary truncated to whole pixels from
+        rounding back onto the character before."""
+        self._place_caret(self._editor.cursorForPosition(
+            QPoint(int(x) + 1, int(row[1] + row[2] / 2))).position())
+
+    def _scroll(self, key, count: int, has_count: bool):
+        """``⌃d ⌃u`` scroll half a view and take the caret along by as many
+        lines (a count sets how many, kept for the next one, as vim's
+        'scroll' option does). ``⌃f ⌃b`` scroll a view less two lines, ``⌃e
+        ⌃y`` one line; the caret stays put unless it would leave the view,
+        and then sits on the edge row it would have left by. A count scrolls
+        that many pages or lines. When the view can't go further, ``⌃f`` and
+        ``⌃b`` still take the caret to the last or first row, where vim's
+        end up once the last page is up."""
+        bar = self._editor.verticalScrollBar()
+        down = key in (Qt.Key.Key_D, Qt.Key.Key_F, Qt.Key.Key_E)
+        rows = len(self._screen_lines()) or 1
+        if key in (Qt.Key.Key_D, Qt.Key.Key_U):
+            if has_count:
+                self._scroll_lines = count
+            n = self._scroll_lines or max(1, rows // 2)
+            bar.setValue(bar.value() + (n if down else -n))
+            caret = QTextCursor(self._caret_cursor())
+            caret.movePosition(_MoveOp.Down if down else _MoveOp.Up, n=n)
+            self._place_caret(caret.position())
+            return
+        n = max(1, rows - 2) * count if key in (
+            Qt.Key.Key_F, Qt.Key.Key_B) else count
+        before = bar.value()
+        bar.setValue(before + (n if down else -n))
+        lines = self._screen_lines()
+        if not lines:
+            return
+        rect = self._editor.cursorRect(self._caret_cursor())
+        if bar.value() == before and key in (Qt.Key.Key_F, Qt.Key.Key_B):
+            self._caret_to_row(lines[-1 if down else 0], rect.left())
+        elif rect.center().y() < lines[0][1]:
+            self._caret_to_row(lines[0], rect.left())
+        elif rect.center().y() > lines[-1][1] + lines[-1][2]:
+            self._caret_to_row(lines[-1], rect.left())
+
+    def _complete_z(self, txt: str, line: int):
+        """``zt`` / ``zz`` / ``zb`` — scroll so the caret's line sits at the
+        top, middle or bottom of the view; with a count, that line first
+        (on its first non-blank). The caret doesn't move otherwise. The
+        view can't scroll past the text's ends, so near them the line goes
+        as far as the view lets it."""
+        place = _Z_PLACES.get(txt)
+        if place is None:
+            return
+        if line:
+            text = self._editor.toPlainText()
+            self._place_caret(vm.first_non_blank(text, vm.goto_line(text, line)))
+        ed = self._editor
+        cursor = self._caret_cursor()
+        block = cursor.block()
+        ed.blockBoundingRect(block)      # lay it out (see _screen_lines)
+        caret_line = block.layout().lineForTextPosition(cursor.positionInBlock())
+        if not caret_line.isValid():
+            return
+        # How far above the caret line the view's top may sit. Walk up the
+        # display lines from it until one sits further than that; the last
+        # that didn't is the new top. Heights are measured, not assumed, so
+        # a heading's taller rows count for what they are.
+        room = (ed.viewport().height() - caret_line.height()) * place
+        top = block.firstLineNumber() + caret_line.lineNumber()
+        b, base = block, 0.0
+        while b.isValid():
+            layout = b.layout()
+            last = (caret_line.lineNumber() if b == block
+                    else layout.lineCount() - 1)
+            for i in range(last, -1, -1):
+                if caret_line.y() - (base + layout.lineAt(i).y()) > room:
+                    ed.verticalScrollBar().setValue(top)
+                    return
+                top = b.firstLineNumber() + i
+            b = b.previous()
+            if b.isValid():
+                base -= ed.blockBoundingRect(b).height()
+        ed.verticalScrollBar().setValue(top)
 
     # ── Helpers ──
 
@@ -410,9 +1672,14 @@ class VimKeyHandler:
         self._count = ""
         return n
 
-    def _set_register(self, text: str, linewise: bool):
+    def _set_register_text(self, text: str, linewise: bool):
         self._register = text
         self._register_linewise = linewise
+
+    def _set_position(self, pos: int):
+        c = self._editor.textCursor()
+        c.setPosition(max(0, min(pos, len(self._editor.toPlainText()))))
+        self._editor.setTextCursor(c)
 
     def _move(self, op: QTextCursor.MoveOperation, count: int = 1,
               *, keep: bool = False):
@@ -422,87 +1689,75 @@ class VimKeyHandler:
             c.movePosition(op, mode)
         self._editor.setTextCursor(c)
 
-    def _goto_line(self, n: int):
-        """Move to the start of 1-based line ``n`` (clamped to the last line)."""
-        c = self._editor.textCursor()
-        c.movePosition(_MoveOp.Start)
-        for _ in range(max(0, n - 1)):
-            c.movePosition(_MoveOp.Down)
-        c.movePosition(_MoveOp.StartOfBlock)
-        self._editor.setTextCursor(c)
-
     def _delete_chars(self, count: int = 1):
-        c = self._editor.textCursor()
-        for _ in range(count):
-            c.movePosition(_MoveOp.Right, _MoveMode.KeepAnchor)
-        if c.hasSelection():
-            self._set_register(c.selectedText().replace(_PARA_SEP, "\n"),
-                               linewise=False)
-            c.removeSelectedText()
-            self._editor.setTextCursor(c)
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        end = min(vm.line_end(text, pos), pos + count)
+        if end <= pos:
+            return
+        self._set_register_text(text[pos:end], False)
+        self._remove(pos, end)
+        # `x` on the last character leaves the caret on the new last one,
+        # not past the end of the line.
+        text = self._editor.toPlainText()
+        self._set_position(min(pos, self._last_column(text, pos)))
 
-    def _delete_word(self, count: int = 1):
-        c = self._editor.textCursor()
-        for _ in range(count):
-            c.movePosition(_MoveOp.NextWord, _MoveMode.KeepAnchor)
-        if c.hasSelection():
-            self._set_register(c.selectedText().replace(_PARA_SEP, "\n"),
-                               linewise=False)
-            c.removeSelectedText()
-            self._editor.setTextCursor(c)
+    def _delete_chars_back(self, count: int = 1):
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        start = max(vm.line_start(text, pos), pos - count)
+        if start >= pos:
+            return
+        self._set_register_text(text[start:pos], False)
+        self._remove(start, pos)
 
-    def _yank_word(self, count: int = 1):
+    def _replace_chars(self, ch: str, count: int = 1):
+        """``r`` — overwrite ``count`` characters with ``ch``, staying in NORMAL
+        and leaving the caret on the last one."""
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        end = min(vm.line_end(text, pos), pos + count)
+        if end <= pos:
+            return
         c = self._editor.textCursor()
-        start = c.position()
-        for _ in range(count):
-            c.movePosition(_MoveOp.NextWord, _MoveMode.KeepAnchor)
-        if c.hasSelection():
-            self._set_register(c.selectedText().replace(_PARA_SEP, "\n"),
-                               linewise=False)
-        tc = self._editor.textCursor()
-        tc.setPosition(start)
-        self._editor.setTextCursor(tc)
-
-    def _line_span(self, count: int):
-        """The first block and the last block of a ``count``-line run starting
-        at the caret, plus the joined text of those lines (for the register)."""
-        doc = self._editor.document()
-        first = doc.findBlock(self._editor.textCursor().position())
-        last = first
-        lines = [first.text()]
-        while len(lines) < count and last.next().isValid():
-            last = last.next()
-            lines.append(last.text())
-        return first, last, "\n".join(lines) + "\n"
-
-    def _yank_lines(self, count: int = 1):
-        first, _last, text = self._line_span(count)
-        self._set_register(text, linewise=True)
-        c = self._editor.textCursor()
-        c.setPosition(first.position())   # yank leaves the caret on the line
+        c.setPosition(pos)
+        c.setPosition(end, _MoveMode.KeepAnchor)
+        c.insertText(ch * (end - pos))
+        c.setPosition(end - 1)
         self._editor.setTextCursor(c)
 
-    def _delete_lines(self, count: int = 1):
-        first, last, text = self._line_span(count)
-        self._set_register(text, linewise=True)
+    def _toggle_case(self, count: int = 1):
+        text = self._editor.toPlainText()
+        pos = self._editor.textCursor().position()
+        end = min(vm.line_end(text, pos), pos + count)
+        if end <= pos:
+            return
         c = self._editor.textCursor()
-        if last.next().isValid():
-            # Lines follow: take up to the next line's start, so its trailing
-            # newline goes too and the following line rises to column 0.
-            start, end = first.position(), last.next().position()
-        elif first.previous().isValid():
-            # Deleting the tail through the last line: also swallow the newline
-            # before it so no blank line is left behind.
-            prev = first.previous()
-            start = prev.position() + len(prev.text())
-            end = last.position() + len(last.text())
-        else:
-            # Deleting every line — the document collapses to one empty block.
-            start, end = 0, last.position() + len(last.text())
-        c.setPosition(start)
+        c.setPosition(pos)
         c.setPosition(end, _MoveMode.KeepAnchor)
-        c.removeSelectedText()
-        c.movePosition(_MoveOp.StartOfBlock)
+        c.insertText(text[pos:end].swapcase())
+        self._editor.setTextCursor(c)
+
+    def _join_lines(self, count: int = 1):
+        """``J`` — pull the next line onto this one, collapsing the indent to a
+        single space the way vim does. ``3J`` joins three lines."""
+        c = self._editor.textCursor()
+        self._mark_change(c.position())
+        c.beginEditBlock()
+        for _ in range(max(1, count - 1)):
+            text = self._editor.toPlainText()
+            pos = c.position()
+            end = vm.line_end(text, pos)
+            if end >= len(text):
+                break
+            nxt = end + 1
+            while nxt < len(text) and text[nxt] in " \t":
+                nxt += 1
+            c.setPosition(end)
+            c.setPosition(nxt, _MoveMode.KeepAnchor)
+            c.insertText(" ")
+            c.setPosition(end)
+        c.endEditBlock()
         self._editor.setTextCursor(c)
 
     def _paste(self, *, after: bool, count: int = 1):

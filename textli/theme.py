@@ -40,6 +40,8 @@ from dataclasses import dataclass, field, fields, replace
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor
 
+from textli.constants import ZEN_MD_CALLOUT_TINT_ALPHA
+
 
 def _flatten(fg: QColor, bg: QColor) -> QColor:
     """Composite translucent ``fg`` over opaque ``bg`` → an opaque colour."""
@@ -306,6 +308,44 @@ def as_palette(palette: Palette):
         yield
     finally:
         _install(previous)
+
+
+#: Which existing role each callout kind (:mod:`textli.callouts`) borrows its
+#: accent from. Callouts get no colours of their own — the box is a wash of a
+#: role that is already in the palette — so they can never drift out of it on a
+#: theme switch. Roles are named rather than bound here for the same reason
+#: every other module reads ``theme.X`` late.
+#:
+#: The warm palette has no green and no purple, so GitHub's five hues map onto
+#: the five identities it does have: the title/link blue for plain information,
+#: the hint gray for a tip (the quietest voice, because a tip is optional
+#: reading), the two annotation reds for what must not be missed, and the amber
+#: that already means *attention* on the card border and the search hit.
+CALLOUT_ACCENT_ROLES = {
+    "NOTE": "ZEN_TITLE_COLOR",
+    "TIP": "ZEN_HINT_COLOR",
+    "IMPORTANT": "ZEN_MD_COMMENT_INK",
+    "WARNING": "ZEN_CODE_NUMBER",
+    "CAUTION": "ZEN_MD_SUGGEST_ADD",
+}
+
+
+def callout_accent(kind: str) -> QColor:
+    """The accent a callout kind wears — its label ink and its left bar."""
+    return QColor(getattr(_active, CALLOUT_ACCENT_ROLES[kind]))
+
+
+def callout_fill(kind: str) -> QColor:
+    """The box tint: the kind's accent laid over the page at whisper strength.
+
+    Flattened to an opaque colour rather than left translucent, so the box
+    prints as it reads — a block background is one of the few read-view cues
+    that survives ``⌘P``, and a page rendered on the light palette must not
+    depend on what the block happens to sit on.
+    """
+    wash = QColor(callout_accent(kind))
+    wash.setAlpha(ZEN_MD_CALLOUT_TINT_ALPHA)
+    return _flatten(wash, _active.ZEN_MD_BG)
 
 
 def ink_on(fill: QColor) -> QColor:

@@ -106,6 +106,13 @@ Inline code wears a soft chip wash so `identifiers` pop while scanning,
 and blockquotes get hint-gray ink with a thin bar at the left — a
 different voice for somebody else's words.
 
+A blockquote whose first line is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+`[!WARNING]` or `[!CAUTION]` — the GitHub and Obsidian spelling — renders as a
+**callout**: the marker becomes a label, the box takes a wash of that kind's
+colour, and the bar wears it too. The wash is real block formatting, so it
+prints with the page. Any other `[!…]` is left alone and reads as the plain
+blockquote it is.
+
 Tables get the paper palette too: a bold header row in the code-band shade,
 thin warm gridlines, and cell padding for air — real table formatting, so
 it prints with the rest of the page.

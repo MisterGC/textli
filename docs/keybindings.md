@@ -10,6 +10,7 @@ The complete reference — the same content the editor shows on `F1`.
 | `⌘R` | Toggle the source editor ↔ rendered reading view |
 | `Esc` | Step back — leave visual mode, close an overlay, put an expanded image away. **Embedded** in a host app it also saves & closes the editor (`⇧Esc` cancels / discards pending changes); **standalone** it never quits — `⌘Q` (`Ctrl+Q`) does |
 | `⌘↵` | Toggle full-window width |
+| `F11` / `⌘⇧F` | Fullscreen — textli fills the screen, the OS chrome steps out (persists) |
 | `⌘.` | Section focus — dim all but the current paragraph (writing) / section (reading) |
 | `⌘T` | Typewriter scrolling — hold the caret line steady while writing (persists) |
 | `⌘⇧P` | Paper surface — grain & light under the text; off = the flat page (persists) |
@@ -25,15 +26,31 @@ The complete reference — the same content the editor shows on `F1`.
 | Key | Action |
 | --- | --- |
 | `h j k l` | Move left / down / up / right |
-| `w / b / e` | Next word / previous word / word end |
-| `0 / $` · `gg / G` | Line start / end · document start / end |
-| `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above |
-| `Esc` | Back to NORMAL mode |
-| `x` · `dd` · `dw` | Delete char · line · to next word (into the register) |
-| `u` · `⌃r` | Undo · redo the last change |
-| `v` | VISUAL — extend a selection with the motions, then `d` / `y` / `c` |
-| `yy` · `yw` · `p` / `P` | Yank line / word · paste after / before |
-| `2j` · `3dd` | A leading count repeats the next motion or edit |
+| `w b e` · `W B E` | Next word / previous word / word end · the same by WORD (whitespace-delimited) |
+| `0 ^ $` · `gg G` | Line start / first non-blank / last character · document start / end |
+| `{ }` · `%` | Previous / next blank line · jump to the matching bracket |
+| `H M L` | Top / middle / bottom line on screen (`3H` — third from the top); they are motions too, so `dL` deletes to the bottom of the screen and `VH` selects to the top |
+| `⌃d ⌃u` · `⌃f ⌃b` · `⌃e ⌃y` | Scroll half a view · a page (less two lines) · one line, down / up; the caret rides along, and stays put on `⌃e ⌃y` until it would leave the view (`3⌃d` sets the half-page to three lines) |
+| `zz zt zb` | Scroll the caret line to the middle / top / bottom of the view (`30zt` — line 30 to the top) |
+| `fx` · `tx` · `Fx` · `Tx` | Jump to the next `x` / just before it · the same backwards; `;` and `,` repeat the last one |
+| `i a` · `I A` · `o O` | Enter INSERT: before/after · line start/end · new line below/above, keeping the indent and continuing a list (`- `, `2. `, `- [ ] `); a count repeats what you type (`3ihi` `Esc` → `hihihi`, `3o` opens three lines) |
+| `Enter` (INSERT) | New line with this line's indent and, on a list item, the next marker; on an empty item it removes the marker and ends the list |
+| `R` | REPLACE — type over the line until `Esc`; `⌫` puts back what was overwritten; a count repeats it |
+| `Esc` | Back to NORMAL mode, on the last typed character but never onto the line above (also abandons a half-typed operator or count) |
+| `d` `c` `y` + motion | Delete / change / yank over **any** motion — `de`, `d$`, `dG`, `d}`, `dfx`, `c2w` |
+| `>` `<` + motion | Indent / outdent the lines a motion covers by four spaces — `>ip`, `>j`; `>>` `<<` take this line (`3>>` — three lines) |
+| `gU` `gu` `g~` + motion | Uppercase / lowercase / toggle the case of any motion or object — `gUiw`, `guw`, `g~$`; `gUU` `guu` `g~~` take the line |
+| `dd` `cc` `yy` | The line-wise form of each operator (`2dd` — two lines); `cc` and `S` keep the indent |
+| `diw` · `ci"` · `da(` | Operate on a text object: `i`/`a` plus `w` `W` `p`, a quote, or a bracket |
+| `x` `X` · `D` `C` · `s` `S` | Delete char forward / back · to line end (and change) · substitute char / line |
+| `rx` · `~` · `J` | Replace the char with `x` · toggle case · join this line with the next |
+| `.` | Repeat the last vim change — including whatever was typed in INSERT, arrow keys too (unlike vim, an arrow doesn't split the change); comments and `gs` are never repeated |
+| `u` · `U` | Undo · redo the last change, an insert leg included (`cw…` `Esc` is one), caret back where it began (`⌃R` toggles the reading view, so redo is `U`; vim's line-undo isn't kept) |
+| `v` · `o` | VISUAL — covers the character under the caret; extend with the motions, take a text object (`viw`), `o` swaps the ends, then `d` / `y` / `c` / `p` |
+| `V` · `gv` | VISUAL LINE — selects whole lines, so `d` / `y` / `c` / `p` act line-wise (`Vjd` deletes two lines, `Vy` then `p` pastes below); `v` and `V` switch between the two · `gv` reselects the last selection |
+| `>` `<` · `~` `u` `U` · `J` · `rx` | Over a `v` or `V` selection: indent / outdent the lines it touches (`3>` — three levels) · toggle / lower / upper its case · join its lines · replace every character with `x` |
+| `p` / `P` | Paste after / before (line-wise when the register holds whole lines) |
+| `2j` · `3dd` · `2d3w` | A leading count repeats the next motion or edit, and multiplies across both |
 | `↵` | Follow the link under the caret — web/mail in the browser, `#heading` jumps there (NORMAL mode) |
 | `go` | Open another file — history is fuzzy-matched, paths complete per segment |
 | `gh` | Headings overview — an outline of the source (`j`/`k` preview, `Enter` keeps, `Esc` restores) |

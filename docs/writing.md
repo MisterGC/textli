@@ -9,20 +9,81 @@ centered column. The editor opens here, in vim **NORMAL** mode.
 
 ## Vim editing
 
-The essentials work the way your fingers expect:
+Editing follows vim's own grammar — a **count**, an **operator**, and a
+**motion** or **text object** — so the pieces below combine rather than having
+to be learned as separate commands:
 
-- **Motions** — `h j k l`, `w / b / e`, `0 / $`, `gg / G`.
+- **Motions** — `h j k l`, `w b e` (and `W B E` by whitespace-delimited WORD),
+  `0 ^ $`, `{ }` for the blank line before/after, `gg G`, `%` to the matching
+  bracket, and `fx` / `tx` / `Fx` / `Tx` to a character on this line (`;` and
+  `,` repeat the last one). `H M L` go to the top, middle and bottom line on
+  screen, and a count on `H` or `L` counts in from that edge (`3H`).
+- **Scrolling** — `⌃d` / `⌃u` scroll half a view down / up and take the
+  caret along (a count sets how far, and the next one remembers it), `⌃f` /
+  `⌃b` a page less two lines, `⌃e` / `⌃y` a single line, the caret staying
+  put until it would leave the view. `zz`, `zt` and `zb` scroll the caret
+  line to the middle, top or bottom. All of them, and `H M L`, count the rows
+  you see, so a long paragraph that wraps is many lines here, the way `j` and
+  `k` move through it.
+- **Operators** — `d` delete, `c` change, `y` yank, `>` indent and `<`
+  outdent, `gU` uppercase, `gu` lowercase and `g~` toggle case. Each one takes
+  any motion above: `de`, `d$`, `dG`, `d}`, `dfx`, `c2w`, `>j`, `gUw`. Doubling
+  it works on whole lines — `dd`, `cc`, `yy`, `>>`, `<<`, and `gUU`, `guu`,
+  `g~~` for the case operators. `>` and `<` always shift whole lines, four
+  spaces a level (vim's own Markdown style), and leave blank lines alone.
+- **Text objects** — `i` (inner) or `a` (around) plus `w` / `W` for a word,
+  `p` for a paragraph, a quote (`"` `'` `` ` ``), or a bracket (`(` `[` `{`
+  `<`). So `diw` takes the word under the caret, `ci"` rewrites a string,
+  `da(` removes a call's parentheses and all.
+- **Shorthands** — `x` / `X` (char forward/back), `D` / `C` (to line end,
+  delete or change), `s` / `S` (substitute a character / the line), `rx`
+  (replace one character), `~` (toggle case), `J` (join with the next line).
 - **Entering INSERT** — `i a` (before/after the caret), `I A` (line
-  start/end), `o O` (new line below/above). `Esc` returns to NORMAL.
-- **Edits** — `x` (char), `dd` (line), `dw` (to next word).
-- **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
-- **VISUAL** — `v` starts a selection that the motions extend; `d` / `y` / `c`
-  then delete, yank or change it.
-- **Yank & paste** — `yy` / `yw` yank a line / word, `p` / `P` paste after /
-  before. Deletes (`x`, `dd`, `dw`) fill the same register, so a `dd` then `p`
-  moves a line.
+  start/end), `o O` (new line below/above). `Esc` returns to NORMAL on the
+  last character typed, and never steps back onto the line above. A count
+  repeats what you typed when you press `Esc`: `3ihi` `Esc` leaves `hihihi`,
+  and `3o` gives each copy a line of its own.
+- **Lists and indent** — `o`, `O` and `Enter` (in INSERT) start the new line
+  the way the caret's line starts: its indent, and on a list item the next
+  item's marker — `- ` stays `- `, `1. a` opens `2. `, a task `- [x]` opens an
+  unchecked `- [ ] `. `O` opens the same item above, number unchanged.
+  `Enter` on an item with nothing after its marker removes the marker and
+  ends the list. `cc` and `S` keep the line's indent, as vim's `autoindent`
+  does — and like vim, `Esc` with nothing typed takes the indent and marker
+  back off, so `cc` `Esc` or `o` `Esc` leaves an empty line.
+- **REPLACE** — `R` types over the line, one character per key, until `Esc`;
+  past the line's end it appends, and `⌫` steps back putting the overwritten
+  character back. A count repeats it, like INSERT's.
+- **Repeat** — `.` replays the last change, the text you typed in INSERT
+  included: `ciwword` `Esc`, then `.` on the next word rewrites that one too.
+  An arrow key moved mid-insert is repeated with the rest (vim would repeat
+  only what followed it); comments and `gs` are not vim changes and never
+  become the one `.` repeats.
+- **Undo / redo** — `u` undoes the last change, `U` redoes it. A change is
+  what `.` would repeat, so one `u` takes back `cwword` `Esc` whole, typed text
+  included, and the caret lands where the change began. Vim's `⌃r` is taken
+  by the reading-view toggle, and vim's line-undo `U` isn't kept.
+- **VISUAL** — `v` starts a selection that the motions extend. As in vim it
+  includes the character under the caret at both ends, so `vd` deletes one
+  character and `vlld` three; `v$` reaches the line break too. `o` swaps the
+  ends, so the motions move the other side. Text objects work here too
+  (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or replace it with
+  the register. `V` selects whole lines instead, so those act line-wise like
+  `dd` and `yy`: `Vjd` deletes two lines, and `Vy` then `p` pastes the line
+  below. `v` and `V` switch between the two, and `gv` selects the last
+  selection again. Over either kind, `>` / `<` shift the lines it touches,
+  `~` / `u` / `U` toggle, lower or upper its case (in NORMAL `u` and `U`
+  stay undo and redo), `J` joins its lines and `rx` turns every selected
+  character into `x`.
+- **Yank & paste** — `y` with any motion or object fills the register, as does
+  every delete, so `dd` then `p` moves a line. `p` / `P` paste after / before,
+  on their own lines when the register holds whole ones.
 - **Counts** — a leading number repeats the next motion or edit: `3j`, `5w`,
-  `2dd`, `4x`.
+  `2dd`, `4x`. An operator and its motion each take one and they multiply, so
+  `2d3w` deletes six words.
+
+A half-typed operator or count is not a trap: `Esc` abandons `d`, `c` or a
+`3` without touching the text (and without closing the editor).
 
 In NORMAL mode `Esc` saves and closes the editor; `⇧Esc` cancels and
 discards pending changes.

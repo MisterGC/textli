@@ -117,8 +117,19 @@ def test_normal_u_undoes_last_edit():
     assert editor.toPlainText() == "abcdef"
 
 
+def test_normal_shift_u_redoes():
+    """`U` redoes what `u` just undid — textli's redo, since ⌃r toggles views."""
+    editor, handler = _handler("abcdef")
+    handler.handle_key(_key(Qt.Key.Key_X, "x"))                  # → bcdef
+    handler.handle_key(_key(Qt.Key.Key_U, "u"))                  # → abcdef
+    assert handler.handle_key(_key(
+        Qt.Key.Key_U, "U", Qt.KeyboardModifier.ShiftModifier)) is True
+    assert editor.toPlainText() == "bcdef"
+
+
 def test_normal_ctrl_r_redoes():
-    """`Ctrl-r` redoes what `u` just undid (physical Ctrl, Meta on macOS)."""
+    """`Ctrl-r` redoes too where no host claims it (physical Ctrl, Meta on
+    macOS) — the embedded editor; the write view gives it to the toggle."""
     editor, handler = _handler("abcdef")
     handler.handle_key(_key(Qt.Key.Key_X, "x"))                  # → bcdef
     handler.handle_key(_key(Qt.Key.Key_U, "u"))                  # → abcdef
@@ -218,8 +229,7 @@ def test_visual_delete_selection():
     _at(editor, 0)
     _press(handler, "v")
     _press(handler, "l")
-    _press(handler, "l")
-    _press(handler, "l")            # select "hel"
+    _press(handler, "l")            # select "hel" — v covers the caret's char
     _press(handler, "d")
     assert editor.toPlainText() == "lo world"
     assert handler.mode == VimMode.NORMAL
@@ -229,7 +239,6 @@ def test_visual_change_enters_insert():
     editor, handler = _handler("hello")
     _at(editor, 0)
     _press(handler, "v")
-    _press(handler, "l")
     _press(handler, "l")            # select "he"
     _press(handler, "c")
     assert editor.toPlainText() == "llo"
@@ -239,8 +248,7 @@ def test_visual_change_enters_insert():
 def test_visual_yank_then_paste():
     editor, handler = _handler("ab")
     _at(editor, 0)
-    _press(handler, "v")
-    _press(handler, "l")            # select "a"
+    _press(handler, "v")            # select "a"
     _press(handler, "y")            # yank "a", back to NORMAL at start
     assert handler.mode == VimMode.NORMAL
     _press(handler, "$")            # end of line
