@@ -551,17 +551,22 @@ class VimKeyHandler:
             self._set_mode(VimMode.VISUAL)
             return True
 
-        # u / Ctrl-r — undo / redo, riding the editor's native undo stack
+        # u / U — undo / redo, riding the editor's native undo stack
         # (Qt restores the caret to the change site, the way vim leaves you
         # there). So a NORMAL-mode edit is reversible without dropping to
         # INSERT for the platform ⌘Z. Never repeatable: `.` after an undo
         # repeats the change that was undone, not the undo.
+        # Redo is `U`, not vim's Ctrl-r: textli's write view gives Ctrl-r to
+        # the reading-view toggle before vim sees it, and vim's line-undo `U`
+        # isn't kept. Ctrl-r still redoes where no host claims it (the
+        # embedded InlineVimEditor).
         if key == Qt.Key.Key_U and not shift and not ctrl:
             self._repeatable = False
             for _ in range(count):
                 self._editor.undo()
             return True
-        if key == Qt.Key.Key_R and ctrl:
+        if (key == Qt.Key.Key_U and shift and not ctrl) or (
+                key == Qt.Key.Key_R and ctrl):
             self._repeatable = False
             for _ in range(count):
                 self._editor.redo()

@@ -34,7 +34,8 @@ to be learned as separate commands:
   An arrow key moved mid-insert is repeated with the rest (vim would repeat
   only what followed it); comments and `gs` are not vim changes and never
   become the one `.` repeats.
-- **Undo / redo** — `u` undoes the last change, `⌃r` redoes it.
+- **Undo / redo** — `u` undoes the last change, `U` redoes it. Vim's `⌃r`
+  is taken by the reading-view toggle, and vim's line-undo `U` isn't kept.
 - **VISUAL** — `v` starts a selection that the motions extend; text objects
   work here too (`viw`), and `d` / `y` / `c` / `p` delete, yank, change or
   replace it with the register.
