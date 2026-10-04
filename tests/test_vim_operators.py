@@ -248,10 +248,8 @@ def test_dot_does_not_repeat_a_motion_or_an_undo():
     # A motion changes nothing, so `.` still repeats the delete before it.
     assert _doc("abcdef\n", "xll.") == "bcef\n"
     # And `.` after an undo repeats the change, never the undo itself: the
-    # document ends up shorter, not restored twice over. (Where the caret sits
-    # afterwards is Qt's call — its undo returns it to the end of the text it
-    # put back, rather than to the start of the change as vim would.)
-    assert len(_doc("abcdef\n", "xu.")) == len("abcdef\n") - 1
+    # undo puts the caret back where the `x` was, and `.` takes it again.
+    assert _doc("abcdef\n", "xu.") == "bcdef\n"
 
 
 def test_dot_repeats_a_text_object_change():
@@ -264,6 +262,149 @@ def test_dot_repeats_what_the_insert_leg_left_not_every_key_typed():
     # so `.` has to leave "ac" too, not "abc".
     assert _doc("one\ntwo\n", "iab" + _BS + "c" + _ESC + "j0.") == "acone\nactwo\n"
     assert _doc("one\ntwo\n", "ia" + _DEL + _ESC + "j0.") == "ane\nawo\n"
+
+
+# ── `u` / `U` take one command at a time ──
+
+def test_one_u_undoes_a_change_with_its_insert_leg():
+    # `cw` removes, then typing inserts: two steps on Qt's undo stack, one
+    # change to vim.
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "u") == "aaa bbb"
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "uU") == "foo bbb"
+
+
+def test_u_steps_back_one_command_at_a_time():
+    keys = "cwfoo" + _ESC + "wcwbar" + _ESC
+    assert _doc("aaa bbb", keys) == "foo bar"
+    assert _doc("aaa bbb", keys + "u") == "foo bbb"
+    assert _doc("aaa bbb", keys + "uu") == "aaa bbb"
+    assert _doc("aaa bbb", keys + "uuUU") == "foo bar"
+    # A `.` that replays a change undoes as one change too.
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "w.u") == "foo bbb"
+
+
+def test_undo_lands_the_caret_where_the_change_began():
+    assert _type("a b c", "dwu") == ("a b c", 0, VimMode.NORMAL)
+    assert _type("a b c", "dwuU") == ("b c", 0, VimMode.NORMAL)
+    assert _type("aaa bbb", "cwfoo" + _ESC + "u")[1] == 0
+    assert _type("abcdef", "xu", pos=3)[1] == 3
+
+
+def test_undo_lands_the_caret_where_the_change_began_in_repeated_text():
+    # The restored text repeats what follows it, so the first character that
+    # differs comes after the change — the caret still goes back to where the
+    # change began.
+    assert _type("- item one\n- item two\n", "ddu")[1] == 0
+    assert _type("p\n\n\nq\n", "jddu")[1] == 2
+    assert _type("abc\n", "onew" + _ESC + "u") == ("abc\n", 0, VimMode.NORMAL)
+    assert _type("aaa", "xu", pos=1)[1] == 1
+
+
+# Each row was checked against vim 9.2: text, caret, keys, then where vim puts
+# the caret after them.
+_UNDO_CARETS = [
+    # A change reaching left of the caret: back to the start of what it took.
+    ("abcdef", 3, "Xu", 2),
+    ("abc def", 5, "dbu", 4),
+    ("abc def", 6, "d0u", 0),
+    ("one two three", 12, "d2bu", 4),
+    ("abc def", 6, "cbX" + _ESC + "u", 4),
+    ("abcdef", 4, "vhhdu", 2),
+    # An insert that moved first: back to where the typing went in.
+    ("abc def", 1, "Afoo" + _ESC + "u", 6),
+    ("abc def", 2, "Ifoo" + _ESC + "u", 0),
+    ("abc def", 2, "afoo" + _ESC + "u", 3),
+    # `o`, `O` and `J` change away from the caret, which stays.
+    ("abc\nxyz\n", 2, "onew" + _ESC + "u", 2),
+    ("abc\nxyz\n", 5, "Onew" + _ESC + "u", 5),
+    ("ab\ncd\nef\n", 1, "Ju", 1),
+    # Line-wise: `dd` and `cc` to the first non-blank, `dj`/`dk` keep the column.
+    ("  abc\ndef\n", 3, "ddu", 2),
+    ("abc\ndef\n", 5, "kddu", 0),
+    ("  abc\n", 4, "ccx" + _ESC + "u", 2),
+    ("  ab\ncd\n", 3, "dju", 3),
+    ("ab\n  cd\nef\n", 5, "dku", 1),
+    # Redo lands in the same place, kept on the line.
+    ("abc def", 4, "dbu0U", 0),
+    ("abcdef", 3, "XuU", 2),
+    ("abc def", 1, "Afoo" + _ESC + "0uU", 7),
+    ("  abc\ndef\n", 3, "dduU", 2),
+]
+
+
+def test_undo_and_redo_land_the_caret_where_vim_does():
+    for text, pos, keys, caret in _UNDO_CARETS:
+        assert _type(text, keys, pos)[1] == caret, (text, pos, keys)
+
+
+def test_two_inserts_in_a_row_are_two_changes():
+    # Qt would fold `bar` into the `foo` typing step, since it carries on
+    # where `foo` ended; vim takes them back one at a time.
+    keys = "ifoo" + _ESC + "abar" + _ESC
+    assert _type("abc def", keys + "u") == ("fooabc def", 3, VimMode.NORMAL)
+    assert _doc("abc def", keys + "uu") == "abc def"
+    assert _doc("abc def", keys + "uuU") == "fooabc def"
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "abar" + _ESC + "u") == "foo bbb"
+
+
+def test_an_undone_change_overwritten_by_new_edits_is_not_replayed():
+    # After `u`, two new deletes reach the stack depth the undone `cw` once
+    # spanned; one `u` must still take back only the last `x`.
+    assert _doc("aaa bbb", "cwfoo" + _ESC + "uxxu") == "aa bbb"
+
+
+def test_a_change_replacing_an_undone_one_is_undone_and_redone_whole():
+    # The undone `x` ended at the depth the new `cw` starts from; its span must
+    # not stand in for the `cw`'s, or `U` redoes only the removal.
+    assert _doc("aaa bbb", "xu" + "cwfoo" + _ESC + "uU") == "foo bbb"
+    # Nor may it hand its caret to a later change at the same depth.
+    assert _type("aaa bbb ccc", "xwxuu" + "ww" + "xu")[1] == 8
+
+
+def test_undo_takes_back_one_command_built_from_edit_blocks():
+    # `J` is one edit block, which moves Qt's stack position by more than one;
+    # `u` must still stop at the command's start, not count steps past it.
+    assert _doc("a\nb\nc\n", "J.u") == "a b\nc\n"
+    assert _doc("a\nb\nc\n", "J.uu") == "a\nb\nc\n"
+    assert _doc("a\nb\nc\n", "J.uuUU") == "a b c\n"
+
+
+def test_a_reload_forgets_the_undo_history():
+    # textli reloads a file changed on disk with `setPlainText`, which clears
+    # Qt's undo stack; nothing recorded before it may steer `u` or `U` after.
+    _app()
+    editor = QPlainTextEdit("aaa bbb")
+    handler = VimKeyHandler(
+        editor=editor, mode_changed=lambda m: None,
+        close_save=lambda: None, close_cancel=lambda: None)
+
+    def press(ch, mods=Qt.KeyboardModifier.NoModifier):
+        key = (Qt.Key.Key_Escape if ch == _ESC
+               else getattr(Qt.Key, f"Key_{ch.upper()}"))
+        event = QKeyEvent(QEvent.Type.KeyPress, key, mods, ch)
+        if not handler.handle_key(event):
+            QPlainTextEdit.keyPressEvent(editor, event)
+
+    def reload(text, caret):
+        editor.setPlainText(text)
+        cur = editor.textCursor()
+        cur.setPosition(caret)
+        editor.setTextCursor(cur)
+
+    press("x")
+    reload("xxx yyy zzz", 4)
+    press("x")
+    press("u")
+    assert (editor.toPlainText(), editor.textCursor().position()) == (
+        "xxx yyy zzz", 4)
+
+    reload("aaa bbb", 0)
+    for ch in "cwfoo" + _ESC + "u":
+        press(ch)
+    reload("one two three", 8)
+    press("U", Qt.KeyboardModifier.ShiftModifier)
+    assert (editor.toPlainText(), editor.textCursor().position()) == (
+        "one two three", 8)
 
 
 # ── VISUAL mode shares the motions and objects ──

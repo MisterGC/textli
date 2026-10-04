@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redo. NORMAL-mode `U` now redoes what `u` undid; vim's line-undo `U` isn't
   kept. The F1 help and the docs say `U`.
 
+- **One `u` undoes one change** (#79) — Qt keeps a `cw…<Esc>` as two undo
+  steps, the removal and the typing, so it took two `u` to take back and
+  two `U` to redo. `u` and `U` now step over a whole vim change at a time —
+  what `.` would repeat, a `.` itself included — and the caret lands where the
+  change began rather than after the restored text: `dwu` on `a b c` leaves it
+  on the `a`.
+
 - **PySide6 floor raised to 6.8** — Qt 6.8 is where the Markdown reader parks
   frontmatter in the document's metadata instead of rendering it as prose,
   which is what makes the status readable rather than a block of raw text at
