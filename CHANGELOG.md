@@ -77,6 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it, so `$x` deletes that character. `cw` on a word's last character, or on a
   one-letter word, changes just that word instead of reaching into the next.
   `Esc` after a count (`3<Esc>`) drops the count instead of closing the editor.
+- **VISUAL includes the character under the caret** (#77) — the selection
+  stopped one short of vim's, so `vd` deleted nothing and `vlld` on `abcdef`
+  left `cdef`; both ends are now included, so it leaves `def`, and `v$` takes
+  the line break as vim's does. `o` swaps the selection's ends, so the motions
+  move its other side.
 
 ## [0.8.0] - 2026-08-15
 

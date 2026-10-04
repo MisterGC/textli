@@ -229,8 +229,7 @@ def test_visual_delete_selection():
     _at(editor, 0)
     _press(handler, "v")
     _press(handler, "l")
-    _press(handler, "l")
-    _press(handler, "l")            # select "hel"
+    _press(handler, "l")            # select "hel" — v covers the caret's char
     _press(handler, "d")
     assert editor.toPlainText() == "lo world"
     assert handler.mode == VimMode.NORMAL
@@ -240,7 +239,6 @@ def test_visual_change_enters_insert():
     editor, handler = _handler("hello")
     _at(editor, 0)
     _press(handler, "v")
-    _press(handler, "l")
     _press(handler, "l")            # select "he"
     _press(handler, "c")
     assert editor.toPlainText() == "llo"
@@ -250,8 +248,7 @@ def test_visual_change_enters_insert():
 def test_visual_yank_then_paste():
     editor, handler = _handler("ab")
     _at(editor, 0)
-    _press(handler, "v")
-    _press(handler, "l")            # select "a"
+    _press(handler, "v")            # select "a"
     _press(handler, "y")            # yank "a", back to NORMAL at start
     assert handler.mode == VimMode.NORMAL
     _press(handler, "$")            # end of line
